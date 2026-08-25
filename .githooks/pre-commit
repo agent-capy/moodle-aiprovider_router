@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# pre-commit: コミット前に必ず走らせる検査
+#
+#   1. PHP 構文チェック（ステージされた PHP ファイル）
+#   2. Moodle コーディング規約チェック (phpcs --standard=moodle)
+#   3. テストがあれば実行 (PHPUnit)
+#   4. ドキュメント更新のリマインド
+#
+# 有効化: git config core.hooksPath .githooks
+# 緊急時の迂回: git commit --no-verify （常用しないこと）
+# ---------------------------------------------------------------------------
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+rc=0
+
+say()  { printf '%s\n' "$*"; }
+fail() { printf '  ❌ %s\n' "$*"; rc=1; }
+ok()   { printf '  ✅ %s\n' "$*"; }
+skip() { printf '  ⏭  %s\n' "$*"; }
+
+# ステージされた PHP ファイル（削除は除外）
+mapfile -t STAGED_PHP < <(git diff --cached --name-only --diff-filter=ACMR -z \
+  | tr '\0' '\n' | grep -E '\.php$' || true)
+
+say "── 1. PHP 構文チェック ──────────────────────────"
+if [ ${#STAGED_PHP[@]} -eq 0 ]; then
+  skip "対象の PHP ファイルなし"
+else
+  for f in "${STAGED_PHP[@]}"; do
+    [ -f "$REPO_ROOT/$f" ] || continue
+    if ! out=$(php -l "$REPO_ROOT/$f" 2>&1); then
+      fail "$f"; printf '     %s\n' "$out"
+    fi
+  done
+  [ "$rc" = 0 ] && ok "${#STAGED_PHP[@]} ファイル 構文エラーなし"
+fi
+
+say "── 2. Moodle コーディング規約 (phpcs) ───────────"
+PHPCS=""
+for cand in "$REPO_ROOT/../../.tools/vendor/bin/phpcs" \
+            "$REPO_ROOT/vendor/bin/phpcs" \
+            "$(command -v phpcs 2>/dev/null || true)"; do
+  [ -n "$cand" ] && [ -x "$cand" ] && { PHPCS="$cand"; break; }
+done
+
+if [ -z "$PHPCS" ]; then
+  fail "phpcs が見つかりません。dev/.tools で composer require moodlehq/moodle-cs を実行してください"
+  say  "     （規約チェックを飛ばしてコミットしないこと）"
+elif [ ${#STAGED_PHP[@]} -eq 0 ]; then
+  skip "対象の PHP ファイルなし"
+else
+  paths=()
+  for f in "${STAGED_PHP[@]}"; do [ -f "$REPO_ROOT/$f" ] && paths+=("$REPO_ROOT/$f"); done
+  if [ ${#paths[@]} -gt 0 ]; then
+    if "$PHPCS" --standard=moodle --extensions=php "${paths[@]}"; then
+      ok "違反なし"
+    else
+      fail "規約違反あり（phpcbf で自動修正できるものがあります）"
+    fi
+  fi
+fi
+
+say "── 3. テスト ────────────────────────────────────"
+if [ ! -d "$REPO_ROOT/tests" ]; then
+  skip "tests/ がまだ存在しない（WP6 で追加予定）"
+else
+  # Moodle の PHPUnit は Moodle 本体側の phpunit.xml と初期化済み DB を必要とする。
+  # MOODLE_DIRROOT が指定されていればそこで実行し、なければ理由を明示してスキップする。
+  if [ -n "${MOODLE_DIRROOT:-}" ] && [ -x "$MOODLE_DIRROOT/vendor/bin/phpunit" ]; then
+    if (cd "$MOODLE_DIRROOT" && vendor/bin/phpunit --testsuite aiprovider_router_testsuite); then
+      ok "PHPUnit green"
+    else
+      fail "PHPUnit 失敗"
+    fi
+  else
+    fail "tests/ はあるが実行環境が未設定です。MOODLE_DIRROOT に PHPUnit 初期化済みの Moodle を指定してください"
+    say  "     （テストを実行せずにコミットしないこと。どうしても必要なら --no-verify）"
+  fi
+fi
+
+say "── 4. ドキュメント ──────────────────────────────"
+say "  変更内容に応じて更新したか確認してください:"
+say "    - plugins/*/README.md      … 機能・要件・使い方が変わったとき"
+say "    - dev/README.md            … ワークスペース構成・手順が変わったとき"
+say "    - dev/実機検証メモ.md       … 実機で新しい仕様・落とし穴が判明したとき"
+say "    - dev/対応バージョン方針.md … 対応バージョンやゲートの判断が動いたとき"
+say "    - /root/maj_grant_2026/*.md … 設計判断・WBS・予算が動いたとき"
+docs_changed=$(git diff --cached --name-only --diff-filter=ACMR | grep -cE '\.md$' || true)
+if [ "$docs_changed" -gt 0 ]; then
+  ok "このコミットには .md の変更が $docs_changed 件含まれています"
+else
+  say "  ℹ️  このコミットに .md の変更はありません（不要ならそのままで問題ありません）"
+fi
+
+say "─────────────────────────────────────────────────"
+if [ "$rc" != 0 ]; then
+  say "コミットを中止しました。上の ❌ を解消してください。"
+  say "自動修正: cd /root/maj_grant_2026/dev && ./deploy/lint.sh --fix"
+fi
+exit $rc

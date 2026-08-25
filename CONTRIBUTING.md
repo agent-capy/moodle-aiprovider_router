@@ -25,6 +25,17 @@ Moodle coding style is enforced in CI via
 [moodle-plugin-ci](https://github.com/moodlehq/moodle-plugin-ci). Before opening a
 pull request, please make sure `phplint`, `phpcs`, `phpmd` and `phpunit` pass.
 
+Comments and identifiers must be written in **English**. The Moodle standard requires
+comments to start with a capital letter and end in a full stop, which non-Latin scripts
+cannot satisfy.
+
+This repository ships a pre-commit hook that checks syntax, coding style, and tests
+before every commit. Enable it once after cloning:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Pull requests
 
 - Branch from `main` and keep one logical change per pull request
