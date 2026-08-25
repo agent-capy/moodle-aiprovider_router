@@ -1,0 +1,83 @@
+name: Moodle plugin CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 3
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 対応下限の 5.0 を主軸に、上限側の 5.2 も併走させる。
+        # 5.3 は 2026-10 の正式リリース後に追加する（WBS WP6）。
+        include:
+          - moodle-branch: MOODLE_500_STABLE
+            php: '8.3'
+          - moodle-branch: MOODLE_500_STABLE
+            php: '8.4'
+          - moodle-branch: MOODLE_502_STABLE
+            php: '8.3'
+          - moodle-branch: MOODLE_502_STABLE
+            php: '8.4'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pgsql, zip, gd, xmlrpc, soap, intl
+          ini-values: max_input_vars=5000
+          coverage: none
+
+      - name: Initialise moodle-plugin-ci
+        run: |
+          composer create-project -n --no-dev --prefer-dist \
+            moodlehq/moodle-plugin-ci ci ^4
+          echo $(cd ci/bin; pwd) >> $GITHUB_PATH
+          echo $(cd ci/vendor/bin; pwd) >> $GITHUB_PATH
+          sudo locale-gen en_AU.UTF-8
+          echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
+
+      - name: Install Moodle
+        run: moodle-plugin-ci install --plugin ./plugin --db-host=127.0.0.1
+        env:
+          DB: pgsql
+          MOODLE_BRANCH: ${{ matrix.moodle-branch }}
+
+      - run: moodle-plugin-ci phplint
+        if: ${{ always() }}
+      - run: moodle-plugin-ci phpmd
+        if: ${{ always() }}
+      - run: moodle-plugin-ci phpcs --max-warnings 0
+        if: ${{ always() }}
+      - run: moodle-plugin-ci validate
+        if: ${{ always() }}
+      - run: moodle-plugin-ci savepoints
+        if: ${{ always() }}
+      - run: moodle-plugin-ci mustache
+        if: ${{ always() }}
+      - run: moodle-plugin-ci grunt --max-lint-warnings 0
+        if: ${{ always() }}
+      - run: moodle-plugin-ci phpunit --fail-on-warning
+        if: ${{ always() }}
+      - run: moodle-plugin-ci behat --profile chrome
+        if: ${{ always() }}
