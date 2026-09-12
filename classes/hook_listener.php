@@ -44,6 +44,8 @@ class hook_listener {
         // a second router can be refused is the form that creates it.
         $mform->addFormRule([self::class, 'validate_single_instance']);
 
+        self::add_order_notice($mform);
+
         $mform->addElement(
             'select',
             'mode',
@@ -97,6 +99,85 @@ class hook_listener {
         }
 
         return ['name' => get_string('error:onlyoneinstance', 'aiprovider_router')];
+    }
+
+
+    /**
+     * Tell the administrator where this instance sits in the site's provider order.
+     *
+     * The form saves one row of ai_providers, while the order is a setting of core_ai that
+     * applies to the whole site, so nothing here changes it. Being told about the problem
+     * on the screen where the router is configured saves an administrator from having to
+     * suspect the provider order in the first place, and the link leads to the one page
+     * where the change can be made.
+     *
+     * @param \MoodleQuickForm $mform The form being built.
+     */
+    protected static function add_order_notice(\MoodleQuickForm $mform): void {
+        $inspector = new order_inspector();
+        $router = $inspector->get_primary_router();
+        if ($router === null) {
+            // The instance is being created, so there is no position to report yet.
+            return;
+        }
+
+        $link = \html_writer::link(
+            new \moodle_url('/ai/provider/router/order.php'),
+            get_string('order:heading', 'aiprovider_router'),
+        );
+
+        $messages = [];
+        if (count($inspector->get_routers()) > 1) {
+            $messages[] = self::build_duplicate_notice($inspector);
+        }
+        if (!$inspector->is_router_first()) {
+            $key = $router->get_mode() === provider::MODE_COEXIST
+                ? 'order:notice:notfirst:coexist'
+                : 'order:notice:notfirst:full';
+            $messages[] = get_string($key, 'aiprovider_router');
+        }
+
+        if ($messages) {
+            $mform->addElement('html', \html_writer::div(
+                implode('', array_map(fn($m) => \html_writer::tag('p', $m), $messages))
+                    . \html_writer::tag('p', $link),
+                'alert alert-warning',
+            ));
+
+            return;
+        }
+
+        $mform->addElement('static', 'orderlink', get_string('order:heading', 'aiprovider_router'), $link);
+    }
+
+    /**
+     * The notice shown on every router instance when the site has more than one.
+     *
+     * The same list appears on all of them, marking which instance is kept and which are
+     * to be removed, so that an administrator who happens to open the surviving one still
+     * sees that something needs doing. Deleting is left to core's own delete button on the
+     * provider list, which already handles the capability check and the delete hooks.
+     *
+     * @param order_inspector $inspector The inspector to read the site through.
+     * @return string HTML.
+     */
+    protected static function build_duplicate_notice(order_inspector $inspector): string {
+        $primaryid = (int) $inspector->get_primary_router()->id;
+        $rows = [];
+        foreach ($inspector->get_routers() as $id => $instance) {
+            $rows[] = get_string(
+                $id === $primaryid ? 'order:instance:keep' : 'order:instance:remove',
+                'aiprovider_router',
+                ['id' => $id, 'name' => s($instance->name)],
+            );
+        }
+
+        return get_string('warning:duplicateinstances', 'aiprovider_router', count($rows))
+            . \html_writer::alist($rows)
+            . \html_writer::link(
+                new \moodle_url('/admin/settings.php', ['section' => 'aiprovider']),
+                get_string('check:singleinstance:manage', 'aiprovider_router'),
+            );
     }
 
     /**

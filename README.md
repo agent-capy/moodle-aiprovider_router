@@ -36,6 +36,37 @@ A router instance has two settings, on the provider instance form.
 Only one router instance can exist on a site. The form refuses a second one, and if a
 second is created another way it stands down rather than competing with the first.
 
+## Provider order
+
+Moodle tries AI providers in the order configured for the site and returns the first
+answer it gets, so **the router only does anything if it comes first**. Creating a
+provider instance puts it at the end of that order, which means a freshly installed
+router is never reached and appears to do nothing at all.
+
+The plugin reports this on *Site administration → Reports → System status*:
+
+| Check | Reports |
+| --- | --- |
+| Number of AI Router instances | More than one router instance exists. Only the lowest numbered one is used; delete the rest from the AI provider list. |
+| AI Router in the provider order | The router is absent from the order, so it is tried only after every other provider has refused the request. |
+| AI Router position in the provider order | The router is not tried first. An error in *Router only* mode; in *Alongside other providers* mode this may be deliberate, so it is reported for information only. |
+| Providers ahead of the AI Router | A provider that comes earlier handles the same actions and will answer first. |
+| Leftover entries in the provider order | The order still names instances that have been deleted. Moving providers up and down works on positions in that list, so leftovers can make reordering appear to do nothing. |
+
+Each check links to **AI provider order** (`/ai/provider/router/order.php`), which is the
+only page that changes the order. It shows the current order entry by entry, and what the
+order would become, before anything is written. The change is made with your session key
+over POST, requires `moodle/site:config`, and is recorded in the configuration log.
+
+Two details are deliberate there:
+
+- The **empty first entry** in the order is kept. Moodle's enable and disable handling
+  tests the result of searching the list for truthiness, so a provider sitting at the very
+  first position is duplicated when enabled and left behind when disabled. Keeping that
+  entry empty keeps every real provider clear of it.
+- Moving the router to the front **does not reorder anything else**. The other providers
+  keep their order relative to each other.
+
 ## Requirements
 
 - Moodle **5.0 to 5.2**
