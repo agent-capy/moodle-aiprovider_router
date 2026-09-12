@@ -214,6 +214,30 @@ final class process_generate_text_test extends \advanced_testcase {
     }
 
     /**
+     * Test that every failure carries the short error name that Moodle 5.2 requires.
+     */
+    public function test_failures_carry_an_error_name(): void {
+        $this->resetAfterTest();
+
+        // Moodle 5.2 throws a coding_exception when a failed response has no error
+        // name, and 5.0 has no such field at all. Sending it always covers both.
+        $cases = [
+            [[], false, abstract_processor::REASON_NO_TARGET],
+            [[new response_generate_text(success: false, errorcode: 500, errormessage: 'boom')], true,
+                abstract_processor::REASON_ALL_FAILED],
+            [[$this->success('', 'length')], true, abstract_processor::REASON_EMPTY],
+        ];
+        foreach ($cases as [$responses, $hastarget, $expected]) {
+            $result = $this->run_processor($responses, $hastarget);
+
+            $this->assertFalse($result['success']);
+            $this->assertArrayHasKey('error', $result);
+            $this->assertSame($expected, $result['error']);
+            $this->assertNotEquals(0, $result['errorcode']);
+        }
+    }
+
+    /**
      * Test that the error message names nothing about how the site is configured.
      */
     public function test_error_messages_leak_no_configuration(): void {

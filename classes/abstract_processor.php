@@ -150,6 +150,11 @@ abstract class abstract_processor extends \core_ai\process_base {
      * The message reaches the end user through the placement, so it names no provider,
      * no rule and no instance id. The detail lives in the reason code instead.
      *
+     * The 'error' key is a short error name. Moodle 5.2 requires one on any failure and
+     * throws a coding_exception without it; 5.0 has no such field and ignores the key,
+     * so sending it always is what works across the supported range. The reason code is
+     * exactly the short stable name that field wants.
+     *
      * @param int $errorcode An HTTP style status code.
      * @param string $stringid The language string for the user facing message.
      * @param string $reason The reason code recorded for the administrator.
@@ -161,6 +166,7 @@ abstract class abstract_processor extends \core_ai\process_base {
         return [
             'success' => false,
             'errorcode' => $errorcode,
+            'error' => $reason,
             'errormessage' => get_string('error:' . $stringid, 'aiprovider_router'),
         ];
     }
