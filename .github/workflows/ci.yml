@@ -24,8 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 対応下限の 5.0 を主軸に、上限側の 5.2 も併走させる。
-        # 5.3 は 2026-10 の正式リリース後に追加する（WBS WP6）。
+        # 5.0 is the lowest supported release and the development baseline.
+        # 5.2 runs alongside it to catch regressions at the top of the range.
+        # 5.3 will be added once it is released in October 2026.
         include:
           - moodle-branch: MOODLE_500_STABLE
             php: '8.3'
