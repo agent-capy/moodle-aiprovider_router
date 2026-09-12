@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Strings for aiprovider_router.
+ * Japanese strings for aiprovider_router.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
@@ -24,9 +24,9 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$string['error:alltargetsfailed'] = 'The AI service could not be reached. Please try again shortly.';
-$string['error:delegationunavailable'] = 'The AI service is unavailable. Please contact your site administrator.';
-$string['error:emptyresponse'] = 'The AI did not return an answer. Try shortening your input, or try again.';
-$string['error:nodefaulttarget'] = 'The AI request could not be handled. Please contact your site administrator.';
-$string['pluginname'] = 'AI Router';
-$string['privacy:metadata'] = 'The AI Router plugin does not store any personal data. It delegates requests to other configured AI providers.';
+$string['error:alltargetsfailed'] = 'AIサービスに接続できませんでした。しばらく待ってからもう一度お試しください。';
+$string['error:delegationunavailable'] = 'AIサービスを利用できません。サイト管理者に連絡してください。';
+$string['error:emptyresponse'] = 'AIが応答を返しませんでした。入力を短くするか、もう一度お試しください。';
+$string['error:nodefaulttarget'] = 'AI機能を利用できませんでした。サイト管理者に連絡してください。';
+$string['pluginname'] = 'AIルータ';
+$string['privacy:metadata'] = 'AIルータプラグインは個人データを保存しません。リクエストは設定済みの他のAIプロバイダに委譲されます。';

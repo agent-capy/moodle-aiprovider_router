@@ -23,7 +23,8 @@ namespace aiprovider_router;
  * Moodle 5.0 through 5.2, matching the "full router mode" design in which the router
  * declares every action and delegates the actual work to another provider.
  *
- * The delegation engine and rule evaluation are implemented in WP2 and WP3.
+ * Rule evaluation arrives in WP3. Until then the router delegates to the configured
+ * default target.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
@@ -40,10 +41,38 @@ class provider extends \core_ai\provider {
         ];
     }
 
+    /** @var string Delegate everything, and expect to be first in the provider order. */
+    public const MODE_FULL = 'full';
+
+    /** @var string Sit alongside other providers and decline what no rule matches. */
+    public const MODE_COEXIST = 'coexist';
+
+    /**
+     * The operating mode of this router instance.
+     *
+     * @return string One of the MODE_ constants.
+     */
+    public function get_mode(): string {
+        $mode = $this->config['mode'] ?? self::MODE_FULL;
+
+        return $mode === self::MODE_COEXIST ? self::MODE_COEXIST : self::MODE_FULL;
+    }
+
+    /**
+     * The instance the router falls back to when no rule picks a target.
+     *
+     * @return int|null The provider instance id, or null when none is set.
+     */
+    public function get_default_target_id(): ?int {
+        $targetid = (int) ($this->config['defaulttarget'] ?? 0);
+
+        return $targetid > 0 ? $targetid : null;
+    }
+
     #[\Override]
     public function is_provider_configured(): bool {
-        // Routing rules are not implemented yet, so the provider is never considered
-        // configured. WP2 replaces this with a check for at least one delegation target.
-        return false;
+        // A router with nothing to delegate to would take every request and fail it,
+        // so it reports itself unconfigured and core skips it.
+        return $this->get_default_target_id() !== null;
     }
 }

@@ -67,15 +67,33 @@ if [ ! -d "$REPO_ROOT/tests" ]; then
   skip "tests/ がまだ存在しない（WP6 で追加予定）"
 else
   # Moodle の PHPUnit は Moodle 本体側の phpunit.xml と初期化済み DB を必要とする。
-  # MOODLE_DIRROOT が指定されていればそこで実行し、なければ理由を明示してスキップする。
+  # 実行先は2つ: ①MOODLE_DIRROOT が指定されていればローカル
+  #             ②なければ .13 上の podman コンテナ（dev/テスト環境_podman.md）
+  COMPONENT="$(basename "$REPO_ROOT" | sed 's/^moodle-//')"
+  TESTHOST="${MAJ_TESTHOST:-root@192.168.11.13}"
   if [ -n "${MOODLE_DIRROOT:-}" ] && [ -x "$MOODLE_DIRROOT/vendor/bin/phpunit" ]; then
-    if (cd "$MOODLE_DIRROOT" && vendor/bin/phpunit --testsuite aiprovider_router_testsuite); then
-      ok "PHPUnit green"
+    if (cd "$MOODLE_DIRROOT" && vendor/bin/phpunit --testsuite "${COMPONENT}_testsuite"); then
+      ok "PHPUnit green (ローカル)"
+    else
+      fail "PHPUnit 失敗"
+    fi
+  elif ssh -o ConnectTimeout=5 -o BatchMode=yes "$TESTHOST" true 2>/dev/null; then
+    # 作業ツリーをコンテナへ同期してから実行する。コミット対象と実行対象を一致させるため。
+    say "     $TESTHOST の podman で実行します（作業ツリーを同期）"
+    rsync -az --delete --exclude '.git' --exclude '.moodlepath' \
+      "$REPO_ROOT/" "$TESTHOST:/opt/maj-test/plugins/${COMPONENT#aiprovider_}/" >/dev/null || \
+      fail "同期に失敗しました"
+    if ssh "$TESTHOST" "podman pod start majtest >/dev/null 2>&1;
+        rm -rf /opt/maj-test/moodle50/ai/provider/${COMPONENT#aiprovider_} &&
+        cp -r /opt/maj-test/plugins/${COMPONENT#aiprovider_} /opt/maj-test/moodle50/ai/provider/${COMPONENT#aiprovider_} &&
+        podman exec -w /var/www/html majtest-php vendor/bin/phpunit --testsuite ${COMPONENT}_testsuite" ; then
+      ok "PHPUnit green (${TESTHOST} / podman)"
     else
       fail "PHPUnit 失敗"
     fi
   else
-    fail "tests/ はあるが実行環境が未設定です。MOODLE_DIRROOT に PHPUnit 初期化済みの Moodle を指定してください"
+    fail "tests/ はあるが実行環境に到達できません"
+    say  "     MOODLE_DIRROOT を指定するか、$TESTHOST（podman majtest）へ到達できる状態にしてください"
     say  "     （テストを実行せずにコミットしないこと。どうしても必要なら --no-verify）"
   fi
 fi

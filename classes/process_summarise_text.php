@@ -14,19 +14,18 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+namespace aiprovider_router;
+
 /**
- * Strings for aiprovider_router.
+ * Delegates the summarise_text action to another provider.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
-defined('MOODLE_INTERNAL') || die();
-
-$string['error:alltargetsfailed'] = 'The AI service could not be reached. Please try again shortly.';
-$string['error:delegationunavailable'] = 'The AI service is unavailable. Please contact your site administrator.';
-$string['error:emptyresponse'] = 'The AI did not return an answer. Try shortening your input, or try again.';
-$string['error:nodefaulttarget'] = 'The AI request could not be handled. Please contact your site administrator.';
-$string['pluginname'] = 'AI Router';
-$string['privacy:metadata'] = 'The AI Router plugin does not store any personal data. It delegates requests to other configured AI providers.';
+class process_summarise_text extends abstract_processor {
+    #[\Override]
+    protected function get_content_key(): ?string {
+        return 'generatedcontent';
+    }
+}

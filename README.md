@@ -4,8 +4,10 @@ An AI **provider** plugin for the Moodle AI subsystem that acts as a *router*: i
 talking to a model itself, it decides — per request — which configured AI provider should
 handle the call, and delegates to it.
 
-> **Status: early development (alpha).** The plugin installs and registers with the AI
-> subsystem, but routing is not implemented yet. Development starts 2026-09.
+> **Status: early development (alpha).** Delegation works: the router runs an action
+> against a configured target provider and passes the result back, with a fallback
+> chain, loop prevention and error mapping. There is no rule engine and no settings
+> UI yet, so a target can only be set programmatically. Do not use this on a live site.
 
 Developed as part of a 2026 domestic research and development project funded by the
 [Moodle Association of Japan](https://moodlejapan.org/) (MAJ).
@@ -13,7 +15,7 @@ Developed as part of a 2026 domestic research and development project funded by 
 ## Planned features
 
 - **Dynamic routing** — choose a delegation target based on placement, course/category,
-  user role, action type, and prompt length
+  user role, action type, and prompt length *(delegation engine done; rules pending)*
 - **Fallback chains** — if a target fails, times out, or returns an invalid response,
   fall through to the next one
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
