@@ -4,10 +4,11 @@ An AI **provider** plugin for the Moodle AI subsystem that acts as a *router*: i
 talking to a model itself, it decides — per request — which configured AI provider should
 handle the call, and delegates to it.
 
-> **Status: early development (alpha).** Delegation works: the router runs an action
-> against a configured target provider and passes the result back, with a fallback
-> chain, loop prevention and error mapping. There is no rule engine and no settings
-> UI yet, so a target can only be set programmatically. Do not use this on a live site.
+> **Status: early development (alpha).** Delegation works end to end: pick a target in
+> the router's settings and every AI request the router receives is run against that
+> target, with a fallback chain, loop prevention and error mapping. There is no rule
+> engine yet, so the target is the same for every request regardless of context.
+> Do not use this on a live site.
 
 Developed as part of a 2026 domestic research and development project funded by the
 [Moodle Association of Japan](https://moodlejapan.org/) (MAJ).
@@ -22,6 +23,18 @@ Developed as part of a 2026 domestic research and development project funded by 
   `\core\encryption`, with a condition framework controlling who may register a key
 - **Usage monitoring** — log delegation target, model, tokens and estimated cost, with
   dashboards for site administrators and teachers
+
+## Settings
+
+A router instance has two settings, on the provider instance form.
+
+| Setting | Description |
+| --- | --- |
+| Operating mode | *Router only* expects every AI request to come through the router, which needs to be first in the provider order. *Alongside other providers* leaves requests the router declines to whichever provider comes next. |
+| Default delegation target | The provider instance that handles a request when no rule picks one. Without it the router reports itself as not configured, so core skips it rather than handing it requests it cannot serve. |
+
+Only one router instance can exist on a site. The form refuses a second one, and if a
+second is created another way it stands down rather than competing with the first.
 
 ## Requirements
 

@@ -69,10 +69,63 @@ class provider extends \core_ai\provider {
         return $targetid > 0 ? $targetid : null;
     }
 
+    /**
+     * Ids of every router instance on the site, lowest first.
+     *
+     * Memoised because core asks whether a provider is configured on every request
+     * that reaches the AI subsystem.
+     *
+     * @param bool $reset Discard the memoised value. For tests.
+     * @return int[] The instance ids.
+     */
+    public static function get_instance_ids(bool $reset = false): array {
+        static $ids = null;
+        if ($reset) {
+            $ids = null;
+
+            return [];
+        }
+        if ($ids === null) {
+            $ids = [];
+            $manager = \core\di::get(\core_ai\manager::class);
+            foreach ($manager->get_provider_instances(['provider' => ltrim(self::class, '\\')]) as $instance) {
+                $ids[] = (int) $instance->id;
+            }
+            sort($ids);
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Whether this is the instance the site should actually be routing through.
+     *
+     * The form refuses a second instance, but nothing stops one being created from CLI
+     * or by an upgrade script, so the rest of the plugin does not assume there is only
+     * one. The lowest id wins because it does not move, unlike a position in
+     * provider_order.
+     *
+     * @return bool True if this instance is the canonical one.
+     */
+    public function is_primary_instance(): bool {
+        $ids = self::get_instance_ids();
+        if (!$ids || empty($this->id)) {
+            return true;
+        }
+
+        return (int) $this->id === $ids[0];
+    }
+
     #[\Override]
     public function is_provider_configured(): bool {
         // A router with nothing to delegate to would take every request and fail it,
         // so it reports itself unconfigured and core skips it.
-        return $this->get_default_target_id() !== null;
+        if ($this->get_default_target_id() === null) {
+            return false;
+        }
+
+        // Second and later instances take themselves out of the running rather than
+        // competing with the canonical one.
+        return $this->is_primary_instance();
     }
 }

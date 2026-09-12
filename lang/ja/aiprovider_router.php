@@ -24,9 +24,17 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+$string['defaulttarget'] = '既定の委譲先';
+$string['defaulttarget:none'] = '委譲できるAIプロバイダインスタンスがまだありません。先に追加してから、ここで選択してください。';
+$string['defaulttarget_help'] = 'どのルールにも当てはまらないリクエストを処理するプロバイダインスタンスです。設定しない場合、ルータは委譲先を持たないため「未設定」として扱われます。';
 $string['error:alltargetsfailed'] = 'AIサービスに接続できませんでした。しばらく待ってからもう一度お試しください。';
 $string['error:delegationunavailable'] = 'AIサービスを利用できません。サイト管理者に連絡してください。';
 $string['error:emptyresponse'] = 'AIが応答を返しませんでした。入力を短くするか、もう一度お試しください。';
 $string['error:nodefaulttarget'] = 'AI機能を利用できませんでした。サイト管理者に連絡してください。';
+$string['error:onlyoneinstance'] = 'AIルータのインスタンスはサイトに1つだけです。既存のインスタンスを編集してください。';
+$string['mode'] = '運用モード';
+$string['mode:coexist'] = '他のプロバイダと併用';
+$string['mode:full'] = 'ルータのみ';
+$string['mode_help'] = '「ルータのみ」は、すべてのAIリクエストがルータを経由する前提のモードです。プロバイダの優先順位でルータが先頭にある必要があります。「他のプロバイダと併用」では、ルータが処理しなかったリクエストは次のプロバイダに渡されます。';
 $string['pluginname'] = 'AIルータ';
 $string['privacy:metadata'] = 'AIルータプラグインは個人データを保存しません。リクエストは設定済みの他のAIプロバイダに委譲されます。';
