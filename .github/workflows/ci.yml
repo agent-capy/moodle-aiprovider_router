@@ -26,7 +26,8 @@ jobs:
       matrix:
         # 5.0 is the lowest supported release and the development baseline.
         # 5.2 runs alongside it to catch regressions at the top of the range.
-        # 5.3 will be added once it is released in October 2026.
+        # 5.3 is due in October 2026. It joins this matrix from November 2026
+        # as a non-blocking job, and is promoted once it has been verified.
         include:
           - moodle-branch: MOODLE_500_STABLE
             php: '8.3'

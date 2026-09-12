@@ -23,11 +23,15 @@ Developed as part of a 2026 domestic research and development project funded by 
 
 ## Requirements
 
-- Moodle **5.0** or later
+- Moodle **5.0 to 5.2**
 - PHP 8.3 or later (as required by your Moodle release)
 
 Development targets Moodle 5.0 — the lowest supported release — so that APIs introduced
-in 5.1/5.2 are not used by accident. CI runs against both 5.0 and 5.2.
+in 5.1 and 5.2 are not used by accident. CI runs every push against 5.0 and 5.2 on both
+PHP 8.3 and 8.4.
+
+Moodle 5.3 is due in October 2026. It will be added to CI from November 2026 and the
+supported range extended once it has been verified.
 
 ## Installation
 
