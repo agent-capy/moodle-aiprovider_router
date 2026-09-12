@@ -69,7 +69,7 @@ jobs:
         if: ${{ always() }}
       - run: moodle-plugin-ci phpmd
         if: ${{ always() }}
-      - run: moodle-plugin-ci phpcs --max-warnings 0
+      - run: ./plugin/.github/run-step.sh phpcs moodle-plugin-ci phpcs --max-warnings 0
         if: ${{ always() }}
       - run: moodle-plugin-ci validate
         if: ${{ always() }}
@@ -79,7 +79,7 @@ jobs:
         if: ${{ always() }}
       - run: moodle-plugin-ci grunt --max-lint-warnings 0
         if: ${{ always() }}
-      - run: moodle-plugin-ci phpunit --fail-on-warning
+      - run: ./plugin/.github/run-step.sh phpunit moodle-plugin-ci phpunit --fail-on-warning
         if: ${{ always() }}
-      - run: moodle-plugin-ci behat --profile chrome
+      - run: ./plugin/.github/run-step.sh behat moodle-plugin-ci behat --profile chrome
         if: ${{ always() }}

@@ -98,6 +98,24 @@ final class process_generate_text_test extends \advanced_testcase {
     }
 
     /**
+     * Build a failed delegated response.
+     *
+     * Not constructed directly: Moodle 5.2 added an error name argument ahead of the
+     * message and refuses to build a failed response without one, so the constructor
+     * signature differs across the supported range. A stub is version independent.
+     *
+     * @param int $errorcode The status code the target reported.
+     * @return response_generate_text The response.
+     */
+    protected function failure(int $errorcode): response_generate_text {
+        $response = $this->createStub(response_generate_text::class);
+        $response->method('get_success')->willReturn(false);
+        $response->method('get_errorcode')->willReturn($errorcode);
+
+        return $response;
+    }
+
+    /**
      * Build a successful delegated response.
      *
      * @param string $content The generated content.
@@ -153,7 +171,7 @@ final class process_generate_text_test extends \advanced_testcase {
     public function test_first_usable_target_wins(): void {
         $this->resetAfterTest();
         $result = $this->run_processor([
-            new response_generate_text(success: false, errorcode: 500, errormessage: 'boom'),
+            $this->failure(500),
             $this->success('second', 'stop'),
         ]);
 
@@ -167,8 +185,8 @@ final class process_generate_text_test extends \advanced_testcase {
     public function test_last_failure_status_is_passed_through(): void {
         $this->resetAfterTest();
         $result = $this->run_processor([
-            new response_generate_text(success: false, errorcode: 500, errormessage: 'boom'),
-            new response_generate_text(success: false, errorcode: 429, errormessage: 'slow down'),
+            $this->failure(500),
+            $this->failure(429),
         ]);
 
         $this->assertFalse($result['success']);
@@ -223,7 +241,7 @@ final class process_generate_text_test extends \advanced_testcase {
         // name, and 5.0 has no such field at all. Sending it always covers both.
         $cases = [
             [[], false, abstract_processor::REASON_NO_TARGET],
-            [[new response_generate_text(success: false, errorcode: 500, errormessage: 'boom')], true,
+            [[$this->failure(500)], true,
                 abstract_processor::REASON_ALL_FAILED],
             [[$this->success('', 'length')], true, abstract_processor::REASON_EMPTY],
         ];
@@ -243,7 +261,7 @@ final class process_generate_text_test extends \advanced_testcase {
     public function test_error_messages_leak_no_configuration(): void {
         $this->resetAfterTest();
         $result = $this->run_processor([
-            new response_generate_text(success: false, errorcode: 401, errormessage: 'Bad API key for acme-llm'),
+            $this->failure(401),
         ]);
 
         $this->assertFalse($result['success']);
