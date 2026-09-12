@@ -44,6 +44,9 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var string Reason recorded when core no longer exposes the delegation point. */
     public const REASON_UNAVAILABLE = 'delegation_unavailable';
 
+    /** @var string Reason recorded when a target threw instead of returning a response. */
+    public const REASON_TARGET_THREW = 'target_threw';
+
     /** @var string[] Finish reasons that mean the token budget ran out. */
     protected const TRUNCATED = ['length', 'max_tokens', 'model_length'];
 
@@ -84,8 +87,22 @@ abstract class abstract_processor extends \core_ai\process_base {
 
         $delegator = $this->get_delegator();
         $last = null;
+        $threw = false;
         foreach ($candidates as $target) {
-            $response = $delegator->delegate($target, $this->action);
+            try {
+                $response = $delegator->delegate($target, $this->action);
+            } catch (\Throwable $e) {
+                // A target that throws would otherwise end the whole request, taking the
+                // remaining candidates with it. Core does not catch here, and the core
+                // providers do not catch everything either: their own handling catches
+                // Guzzle's RequestException, while an unreachable endpoint raises a
+                // ConnectException, which extends TransferException instead. Containing
+                // it is what makes the fallback chain mean anything.
+                $threw = true;
+                $this->report_target_failure($target, $e);
+                continue;
+            }
+
             if (!$response->get_success()) {
                 $last = $response;
                 continue;
@@ -108,8 +125,27 @@ abstract class abstract_processor extends \core_ai\process_base {
 
         // Pass the target's status code through so that a 429 stays a 429.
         $code = $last === null ? 502 : ($last->get_errorcode() ?: 502);
+        $reason = ($last === null && $threw) ? self::REASON_TARGET_THREW : self::REASON_ALL_FAILED;
 
-        return $this->fail($code, 'alltargetsfailed', self::REASON_ALL_FAILED);
+        return $this->fail($code, 'alltargetsfailed', $reason);
+    }
+
+    /**
+     * Record that a target threw, without letting anything about it reach the user.
+     *
+     * The message can name a host, a key or an endpoint, so it goes to the developer log
+     * only. WP4 gives the administrator a readable history of this; until then this is
+     * what a site owner has to work with when a target misbehaves.
+     *
+     * @param \core_ai\provider $target The target that threw.
+     * @param \Throwable $e What it threw.
+     */
+    protected function report_target_failure(\core_ai\provider $target, \Throwable $e): void {
+        debugging(
+            'aiprovider_router: delegation target ' . (int) $target->id . ' threw '
+                . get_class($e) . ': ' . $e->getMessage(),
+            DEBUG_NORMAL,
+        );
     }
 
     /**

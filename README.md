@@ -67,6 +67,21 @@ Two details are deliberate there:
 - Moving the router to the front **does not reorder anything else**. The other providers
   keep their order relative to each other.
 
+## Behaviour when a target fails
+
+The router tries its candidates in order and returns the first usable answer.
+
+| What the target does | What the router does |
+| --- | --- |
+| Answers | Passes the answer through unchanged, including the model, finish reason and token counts |
+| Reports an error | Tries the next candidate. If none is left, reports the last status code, so a 429 stays a 429 |
+| Throws | Tries the next candidate. Moodle does not catch exceptions on the way to a provider, and the providers that ship with Moodle catch Guzzle's `RequestException` but not `ConnectException`, so an unreachable endpoint would otherwise end the whole request |
+| Answers with nothing | Tries the next candidate, because an empty answer shown as though it had worked is worse than a failure |
+| Answers with nothing after running out of tokens | Reports it rather than retrying. Another target would spend its budget the same way, and shortening the input is something the user can act on |
+
+Messages shown to users never name a provider, a rule or an instance. Details that would
+identify a target — including what an exception said — go to the developer log instead.
+
 ## Requirements
 
 - Moodle **5.0 to 5.2**
