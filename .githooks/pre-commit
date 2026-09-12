@@ -86,7 +86,10 @@ say "    - plugins/*/README.md      … 機能・要件・使い方が変わっ�
 say "    - dev/README.md            … ワークスペース構成・手順が変わったとき"
 say "    - dev/実機検証メモ.md       … 実機で新しい仕様・落とし穴が判明したとき"
 say "    - dev/対応バージョン方針.md … 対応バージョンやゲートの判断が動いたとき"
-say "    - /root/maj_grant_2026/*.md … 設計判断・WBS・予算が動いたとき"
+say "    - docs/*.md                … 設計判断・WBS・予算が動いたとき"
+say "    - docs/経緯ログ.md          … 毎回（検討したこと・行ったことを追記。追記専用）"
+say "    - docs/README.md           … docs/ にファイルを作成・改名・削除したとき"
+say "    - STATE.md                 … 現在の状態・次の作業・注意点が動いたとき"
 docs_changed=$(git diff --cached --name-only --diff-filter=ACMR | grep -cE '\.md$' || true)
 if [ "$docs_changed" -gt 0 ]; then
   ok "このコミットには .md の変更が $docs_changed 件含まれています"
