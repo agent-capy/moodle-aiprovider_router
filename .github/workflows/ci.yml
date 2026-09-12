@@ -24,14 +24,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 5.0 is the lowest supported release and the development baseline.
-        # 5.2 runs alongside it to catch regressions at the top of the range.
+        # Every release the plugin claims to support is built, because version.php
+        # says 5.0 to 5.2 and a claim nothing tests is not a claim.
+        #
+        # 5.1 is not redundant. The AI subsystem changed in 5.1 and not again in
+        # 5.2 (response constructors gained an $error argument, failed responses
+        # must carry an error name), while core's check API changed in 5.2 and not
+        # in 5.1. So 5.1 is the only release that pairs the new AI subsystem with
+        # the old check API, and testing 5.0 and 5.2 alone would only cover that
+        # combination by accident.
+        #
         # 5.3 is due in October 2026. It joins this matrix from November 2026
         # as a non-blocking job, and is promoted once it has been verified.
         include:
           - moodle-branch: MOODLE_500_STABLE
             php: '8.3'
           - moodle-branch: MOODLE_500_STABLE
+            php: '8.4'
+          - moodle-branch: MOODLE_501_STABLE
+            php: '8.3'
+          - moodle-branch: MOODLE_501_STABLE
             php: '8.4'
           - moodle-branch: MOODLE_502_STABLE
             php: '8.3'

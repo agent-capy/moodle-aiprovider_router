@@ -25,10 +25,10 @@ use core_ai\provider as ai_provider;
 
 defined('MOODLE_INTERNAL') || die();
 
-require_once(__DIR__ . '/fixtures/fixture_action.php');
-require_once(__DIR__ . '/fixtures/fixture_text_provider.php');
-require_once(__DIR__ . '/fixtures/fixture_other_provider.php');
-require_once(__DIR__ . '/fixtures/fixture_unconfigured_provider.php');
+require_once(__DIR__ . '/../fixtures/fixture_action.php');
+require_once(__DIR__ . '/../fixtures/fixture_text_provider.php');
+require_once(__DIR__ . '/../fixtures/fixture_other_provider.php');
+require_once(__DIR__ . '/../fixtures/fixture_unconfigured_provider.php');
 
 /**
  * Tests for the status checks the router reports on the site status report.

@@ -51,13 +51,27 @@ if [ -z "$PHPCS" ]; then
 elif [ ${#STAGED_PHP[@]} -eq 0 ]; then
   skip "対象の PHP ファイルなし"
 else
-  paths=()
-  for f in "${STAGED_PHP[@]}"; do [ -f "$REPO_ROOT/$f" ] && paths+=("$REPO_ROOT/$f"); done
-  if [ ${#paths[@]} -gt 0 ]; then
-    if "$PHPCS" --standard=moodle --extensions=php "${paths[@]}"; then
-      ok "違反なし"
+  # ⚠ ステージされたファイルに直接 phpcs をかけると、コンポーネント名を
+  #   解決できる状態でないと発火しない sniff（moodle.PHPUnit.TestCaseNames など）を
+  #   取りこぼす。実際に 2026-09-12 の CI がこれで落ちた。
+  #   deploy/lint.sh は 5.0 のソースツリーへ複製してから回すので、そちらを優先する。
+  LINT="$REPO_ROOT/../../deploy/lint.sh"
+  if [ -x "$LINT" ]; then
+    if "$LINT" "$(basename "$REPO_ROOT")"; then
+      ok "違反なし（deploy/lint.sh 経由・CI と同条件）"
     else
       fail "規約違反あり（phpcbf で自動修正できるものがあります）"
+    fi
+  else
+    # 予備。lint.sh が無いときだけ、ステージされたファイルを直接見る。
+    paths=()
+    for f in "${STAGED_PHP[@]}"; do [ -f "$REPO_ROOT/$f" ] && paths+=("$REPO_ROOT/$f"); done
+    if [ ${#paths[@]} -gt 0 ]; then
+      if "$PHPCS" --standard=moodle --extensions=php "${paths[@]}"; then
+        ok "違反なし（ただし一部の sniff は発火しません）"
+      else
+        fail "規約違反あり（phpcbf で自動修正できるものがあります）"
+      fi
     fi
   fi
 fi
