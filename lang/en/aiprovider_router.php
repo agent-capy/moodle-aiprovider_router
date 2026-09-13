@@ -86,4 +86,7 @@ $string['order:promote'] = 'Move the AI Router to the front';
 $string['order:promote_help'] = 'Moodle tries providers in this order and returns the first answer, so the router has to come first to see requests at all. The other providers keep their order relative to each other.';
 $string['pluginname'] = 'AI Router';
 $string['privacy:metadata'] = 'The AI Router plugin does not store any personal data. It delegates requests to other configured AI providers.';
+$string['rule:error:endbeforestart'] = 'The end of the active period has to come after its start.';
+$string['rule:error:noname'] = 'Give the rule a name, so that it can be told apart from the others.';
+$string['rule:error:notarget'] = 'Choose the provider instance this rule delegates to.';
 $string['warning:duplicateinstances'] = 'This site has {$a} AI Router instances, and only one of them is used. Delete the others from the AI provider list.';

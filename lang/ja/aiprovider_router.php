@@ -86,4 +86,7 @@ $string['order:promote'] = 'AIルータを先頭に移動する';
 $string['order:promote_help'] = 'Moodleはこの順序でプロバイダを試し、最初に得られた応答を返します。そのためルータが要求を受け取るには先頭にある必要があります。他のプロバイダどうしの順序は維持されます。';
 $string['pluginname'] = 'AIルータ';
 $string['privacy:metadata'] = 'AIルータプラグインは個人データを保存しません。リクエストは設定済みの他のAIプロバイダに委譲されます。';
+$string['rule:error:endbeforestart'] = '有効期間の終了は開始より後にしてください。';
+$string['rule:error:noname'] = '他のルールと区別できるよう、ルールに名前を付けてください。';
+$string['rule:error:notarget'] = 'このルールの委譲先となるプロバイダインスタンスを選んでください。';
 $string['warning:duplicateinstances'] = 'このサイトには AIルータのインスタンスが {$a} 件ありますが、実際に使われるのは1件だけです。残りは AIプロバイダの一覧から削除してください。';
