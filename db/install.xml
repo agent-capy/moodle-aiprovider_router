@@ -78,7 +78,7 @@
       <FIELDS>
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="provider" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Provider component. Rates belong to a provider and a model, not to an instance, since two instances of the same provider are charged alike."/>
-        <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Empty means this rate covers any model of that provider which has no rate of its own."/>
+        <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Empty means this rate covers any model of that provider which has no rate of its own. Declared without a default, because XMLDB refuses an empty string as one."/>
         <FIELD NAME="promptrate" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Per million prompt tokens, in the site currency."/>
         <FIELD NAME="completionrate" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Per million completion tokens."/>
         <FIELD NAME="imagerate" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Per image, since image actions carry no token counts."/>

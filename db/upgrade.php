@@ -103,7 +103,7 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         $table = new xmldb_table('aiprovider_router_price');
         $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
         $table->add_field('provider', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, null);
-        $table->add_field('model', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, '');
+        $table->add_field('model', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, null);
         $table->add_field('promptrate', XMLDB_TYPE_NUMBER, '12, 6', null, null, null, null);
         $table->add_field('completionrate', XMLDB_TYPE_NUMBER, '12, 6', null, null, null, null);
         $table->add_field('imagerate', XMLDB_TYPE_NUMBER, '12, 6', null, null, null, null);
