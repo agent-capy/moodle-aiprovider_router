@@ -17,6 +17,8 @@
 namespace aiprovider_router\check;
 
 use aiprovider_router\fixture_text_provider;
+use aiprovider_router\key;
+use aiprovider_router\key_repository;
 use aiprovider_router\order_inspector;
 use aiprovider_router\provider;
 use core\check\result;
@@ -43,6 +45,7 @@ require_once(__DIR__ . '/../fixtures/fixture_unconfigured_provider.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(staleentries::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(actionconflict::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(singleinstance::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(byokkeys::class)]
 final class check_test extends \advanced_testcase {
     #[\Override]
     public function setUp(): void {
@@ -177,10 +180,41 @@ final class check_test extends \advanced_testcase {
         $this->assertStringContainsString('Router 4', $result->get_details());
     }
 
+    public function test_keys_nobody_has_brought_are_nothing_to_report_on(): void {
+        $check = new byokkeys($this->inspector([5 => $this->router(5)], ',5'));
+
+        $this->assertSame(result::NA, $check->get_result()->get_status());
+    }
+
+    public function test_keys_that_can_be_read_are_reported_as_such(): void {
+        global $DB;
+        (new key_repository($DB))->save(key::SCOPE_USER, 7, 3, 'sk-a-key-abcd');
+
+        $result = (new byokkeys($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::OK, $result->get_status());
+    }
+
+    public function test_keys_that_cannot_be_read_are_an_error_rather_than_a_warning(): void {
+        global $DB;
+        $repository = new key_repository($DB);
+        $repository->save(key::SCOPE_USER, 7, 3, 'sk-a-key-abcd');
+        $broken = $repository->save(key::SCOPE_USER, 8, 3, 'sk-another-efgh');
+        // A site restored from a database backup without its encryption key file.
+        $DB->set_field(key::TABLE, 'secret', 'nonsense', ['id' => $broken->get('id')]);
+
+        $result = (new byokkeys($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        // Every request those keys were meant to pay for is failing, so this is not a
+        // thing to mention in passing.
+        $this->assertSame(result::ERROR, $result->get_status());
+        $this->assertStringContainsString('1', $result->get_summary());
+    }
+
     public function test_every_check_offers_somewhere_to_go_and_has_a_name(): void {
         $inspector = $this->inspector([5 => $this->router(5)], ',5');
 
-        foreach (self::all_checks() as $class) {
+        foreach ([...self::all_checks(), byokkeys::class] as $class) {
             $check = new $class($inspector);
             $this->assertNotEmpty($check->get_name(), $class);
             $this->assertNotNull($check->get_action_link(), $class);

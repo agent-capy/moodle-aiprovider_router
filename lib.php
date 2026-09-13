@@ -41,6 +41,7 @@ function aiprovider_router_status_checks(): array {
         new \aiprovider_router\check\actionconflict($inspector),
         new \aiprovider_router\check\staleentries($inspector),
         new \aiprovider_router\check\ruletargets($inspector),
+        new \aiprovider_router\check\byokkeys($inspector),
     ];
 }
 

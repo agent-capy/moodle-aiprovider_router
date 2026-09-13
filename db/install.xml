@@ -122,5 +122,44 @@
         <INDEX NAME="provider-model-timefrom" UNIQUE="true" FIELDS="provider, model, timefrom"/>
       </INDEXES>
     </TABLE>
+    <TABLE NAME="aiprovider_router_target" COMMENT="Per delegation target settings for bring your own key. The name of the field a key goes in differs from provider to provider, so it is guessed and then confirmed by an administrator rather than assumed.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance. Not a foreign key, so that deleting a provider instance in core cannot fail."/>
+        <FIELD NAME="keyfield" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Which of the instance config keys holds the key. Empty means the administrator has confirmed this provider takes no key at all, which is different from not having been asked yet. Declared without a default, because XMLDB refuses an empty string as one."/>
+        <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="targetid" UNIQUE="true" FIELDS="targetid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="aiprovider_router_key" COMMENT="Keys brought by a user or registered for a course, encrypted with the site key. One key per subject and delegation target.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="scope" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="Whose key it is: user or course."/>
+        <FIELD NAME="scopeid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The user id or the course id, according to the scope."/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance this key is for. Keys belong to an instance rather than to a provider plugin, because two instances of one plugin can point at different endpoints."/>
+        <FIELD NAME="secret" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="The key, encrypted with core\encryption. Never logged, never exported and never shown again."/>
+        <FIELD NAME="hint" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="The last few characters, so that the owner can recognise which key this is without anything being decrypted. Deliberately the end of the key: the beginning is often a fixed prefix. Declared without a default, because XMLDB refuses an empty string as one."/>
+        <FIELD NAME="timeverified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the key was last tested against the provider. Zero means never."/>
+        <FIELD NAME="verifystatus" TYPE="char" LENGTH="20" NOTNULL="false" SEQUENCE="false" COMMENT="What that test said."/>
+        <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Who registered it. For a course key this is the only personal data in the row, and it is what a deletion request clears."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="scope-scopeid-targetid" UNIQUE="true" FIELDS="scope, scopeid, targetid"/>
+      </INDEXES>
+    </TABLE>
   </TABLES>
 </XMLDB>

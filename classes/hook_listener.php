@@ -107,6 +107,16 @@ class hook_listener {
             ),
         );
 
+        $mform->addElement(
+            'static',
+            'byoklink',
+            get_string('byok:heading', 'aiprovider_router'),
+            \html_writer::link(
+                new \moodle_url('/ai/provider/router/byok.php'),
+                get_string('byok:manage', 'aiprovider_router'),
+            ),
+        );
+
         $targets = self::get_target_options();
         if (!$targets) {
             $mform->addElement(
