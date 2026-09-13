@@ -97,7 +97,7 @@ final class rule_evaluator_test extends \advanced_testcase {
     public function test_every_condition_has_to_be_met(): void {
         $this->add('both', 7, [
             'action' => ['actions' => [generate_text::class]],
-            'promptlength' => ['operator' => 'gte', 'tokens' => 1000],
+            'promptlength' => ['operator' => 'gte', 'characters' => 1000],
         ]);
 
         // The action matches and the length does not, so the rule does not.
@@ -164,7 +164,7 @@ final class rule_evaluator_test extends \advanced_testcase {
 
     public function test_the_trace_says_why_each_rule_did_not_match(): void {
         $this->add('wrong action', 7, ['action' => ['actions' => [summarise_text::class]]]);
-        $this->add('too short', 8, ['promptlength' => ['operator' => 'gte', 'tokens' => 1000]]);
+        $this->add('too short', 8, ['promptlength' => ['operator' => 'gte', 'characters' => 1000]]);
         $this->add('matches', 9);
 
         $trace = array_values($this->evaluator->trace($this->request(), time()));

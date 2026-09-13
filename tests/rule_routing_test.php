@@ -277,7 +277,7 @@ final class rule_routing_test extends \advanced_testcase {
 
     public function test_a_condition_decides_which_target_answers(): void {
         $course = $this->getDataGenerator()->create_course();
-        $this->add('long prompts only', 8, ['promptlength' => ['operator' => 'gte', 'tokens' => 1000]]);
+        $this->add('long prompts only', 8, ['promptlength' => ['operator' => 'gte', 'characters' => 1000]]);
         $this->add('that course only', 9, ['course' => ['courseids' => [(int) $course->id]]]);
 
         $response = $this->route([

@@ -19,17 +19,13 @@ namespace aiprovider_router;
 /**
  * Estimates how many tokens a prompt is worth.
  *
- * Rules compare against an estimate rather than a measured count, because nothing has
- * been sent anywhere at the point a rule is evaluated. Administrators asked for the
- * condition to be expressed in tokens, since tokens are the unit they think in when
- * weighing cost and context windows, and asking them to convert from characters in
- * their head would only move the estimate rather than remove it.
- *
- * What that costs is accuracy: the same rule fires at a different real threshold
- * depending on the language and on the target's tokeniser. The plugin answers that by
- * making the estimate adjustable and by showing it as an estimate wherever it appears,
- * and the monitor in WP4 reports the token counts targets actually charged, which is
- * what an administrator can calibrate these ratios against.
+ * Nothing routes on this. Rules compare character counts, so that a rule means the same
+ * thing whatever language a prompt happens to be in; but tokens are the unit an
+ * administrator thinks in when weighing cost and context windows, so the estimate is
+ * shown beside the character count wherever a threshold is being chosen. Being wrong
+ * here costs a misleading figure on a screen, never a request sent to the wrong
+ * provider, and the monitor in WP4 reports what targets actually charged, which is what
+ * these ratios can be calibrated against.
  *
  * The split is by character, not by document. A prompt is rarely all one language, and
  * counting each run against its own ratio is both closer to the truth and simpler than

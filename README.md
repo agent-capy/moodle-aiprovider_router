@@ -16,7 +16,7 @@ Developed as part of a 2026 domestic research and development project funded by 
 ## Features
 
 - **Dynamic routing** — choose a delegation target by placement, course, category, user
-  role, action type and estimated prompt length
+  role, action type and prompt length
 - **Fallback chains** — if a target fails, times out, or returns an invalid response, fall
   through to the next one
 
@@ -100,19 +100,23 @@ skipped, which conditions were not satisfied, or not reached because something a
 matched first. Nothing is sent to any provider and nothing is recorded; the rules are
 evaluated by exactly the code a real request uses.
 
-It also shows the estimated token count for the prompt, alongside the character counts and
-ratios it was worked out from.
+It reports the prompt's length in characters, which is what prompt length conditions
+compare against, and an estimated token count beneath it. Tokens are the unit cost and
+context windows are thought about in, so the estimate is there to help you settle on a
+character threshold — but no rule depends on it.
 
-The ratios ship as one character per token for CJK text and four for everything else.
-This version has no screen for changing them; they are read from the plugin configuration
-settings `tokenratiocjk` and `tokenratioother`, which for now means the command line:
+The estimate uses one character per token for CJK text and four for everything else. This
+version has no screen for changing those ratios; they are read from the plugin
+configuration settings `tokenratiocjk` and `tokenratioother`, which for now means the
+command line:
 
 ```
 php admin/cli/cfg.php --component=aiprovider_router --name=tokenratiocjk --set=1.2
 ```
 
-A screen for them is to come with the usage monitoring, so that the ratios can be adjusted
-next to the token counts providers actually charged.
+Getting them wrong costs a misleading figure on that screen and nothing else. A screen for
+them is to come with the usage monitoring, where they can be adjusted next to the token
+counts providers actually charged.
 
 ### Import and export
 
@@ -139,10 +143,13 @@ Conditions that depend on something the request does not carry — a course, whe
 request came from outside any course; a placement, when it cannot be identified — are not
 met, so the request falls out of narrow rules rather than into them.
 
-Prompt length is compared against an **estimate**, worked out from the number of
-characters and the ratios configured for the site. Nothing has been sent anywhere at the
-point a rule is evaluated, so there is no measured count to compare against. Every screen
-showing the number says that it is an estimate and shows the character counts behind it.
+Prompt length is measured in **characters**, not tokens. A token count could only be an
+estimate at that point — nothing has been sent anywhere yet — and the same estimate stands
+for very different amounts of text depending on the language and on the target's
+tokeniser. A rule reading "at least 2000 tokens" would fire at roughly 2000 characters of
+Japanese and roughly 8000 of English, and nobody could say what it meant. A character
+count means one thing. The rule tester shows both figures for a prompt you have in mind,
+which is where a threshold is worked out.
 
 ## Behaviour when a target fails
 

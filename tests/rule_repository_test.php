@@ -80,14 +80,14 @@ final class rule_repository_test extends \advanced_testcase {
     public function test_conditions_survive_a_round_trip(): void {
         $rule = $this->add('with conditions', 7, [
             'role' => ['roleids' => [3, 4]],
-            'promptlength' => ['operator' => 'gte', 'tokens' => 2000],
+            'promptlength' => ['operator' => 'gte', 'characters' => 2000],
         ]);
 
         $conditions = $this->repository->get_conditions((int) $rule->get('id'));
 
         $this->assertSame(['promptlength', 'role'], array_keys($conditions));
         $this->assertSame([3, 4], $conditions['role']['roleids']);
-        $this->assertSame(2000, $conditions['promptlength']['tokens']);
+        $this->assertSame(2000, $conditions['promptlength']['characters']);
     }
 
     public function test_saving_replaces_the_whole_condition_set(): void {

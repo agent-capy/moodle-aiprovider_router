@@ -41,7 +41,7 @@ final class rule_form_test extends \advanced_testcase {
             'action' => ['core_ai\\aiactions\\generate_text'],
             'placement' => [],
             'category' => [],
-            'promptlengthtokens' => 0,
+            'promptlengthcharacters' => 0,
             'promptlengthoperator' => 'gte',
         ];
 
@@ -56,21 +56,21 @@ final class rule_form_test extends \advanced_testcase {
     }
 
     public function test_a_prompt_length_of_zero_is_not_a_condition(): void {
-        $data = (object) ['promptlengthoperator' => 'lte', 'promptlengthtokens' => ''];
+        $data = (object) ['promptlengthoperator' => 'lte', 'promptlengthcharacters' => ''];
 
         $this->assertSame([], rule_form::read_conditions($data));
     }
 
     public function test_a_prompt_length_condition_keeps_its_operator(): void {
-        $data = (object) ['promptlengthoperator' => 'lte', 'promptlengthtokens' => 500];
+        $data = (object) ['promptlengthoperator' => 'lte', 'promptlengthcharacters' => 500];
 
         $conditions = rule_form::read_conditions($data);
 
-        $this->assertSame(['operator' => 'lte', 'tokens' => 500], $conditions['promptlength']);
+        $this->assertSame(['operator' => 'lte', 'characters' => 500], $conditions['promptlength']);
     }
 
     public function test_an_unknown_operator_is_not_stored_as_given(): void {
-        $data = (object) ['promptlengthoperator' => 'roughly', 'promptlengthtokens' => 500];
+        $data = (object) ['promptlengthoperator' => 'roughly', 'promptlengthcharacters' => 500];
 
         $conditions = rule_form::read_conditions($data);
 
@@ -101,12 +101,12 @@ final class rule_form_test extends \advanced_testcase {
     public function test_stored_conditions_come_back_as_form_values(): void {
         $data = rule_form::conditions_to_form_data([
             'course' => ['courseids' => [11, 12]],
-            'promptlength' => ['operator' => 'lte', 'tokens' => 500],
+            'promptlength' => ['operator' => 'lte', 'characters' => 500],
         ]);
 
         $this->assertSame([11, 12], $data['course']);
         $this->assertSame('lte', $data['promptlengthoperator']);
-        $this->assertSame(500, $data['promptlengthtokens']);
+        $this->assertSame(500, $data['promptlengthcharacters']);
     }
 
     public function test_a_condition_this_version_cannot_show_is_left_out_of_the_form(): void {
@@ -119,7 +119,7 @@ final class rule_form_test extends \advanced_testcase {
         $original = [
             'course' => ['courseids' => [11]],
             'role' => ['roleids' => [3, 4]],
-            'promptlength' => ['operator' => 'gte', 'tokens' => 2000],
+            'promptlength' => ['operator' => 'gte', 'characters' => 2000],
         ];
 
         $conditions = rule_form::read_conditions((object) rule_form::conditions_to_form_data($original));

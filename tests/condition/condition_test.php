@@ -146,18 +146,38 @@ final class condition_test extends \advanced_testcase {
         $this->assertFalse($condition->is_met($this->context(\context_system::instance())));
     }
 
-    public function test_a_prompt_length_condition_compares_against_the_estimate(): void {
-        $long = new promptlength(['operator' => promptlength::OPERATOR_GTE, 'tokens' => 4]);
-        $short = new promptlength(['operator' => promptlength::OPERATOR_LTE, 'tokens' => 3]);
+    public function test_a_prompt_length_condition_compares_characters(): void {
+        $long = new promptlength(['operator' => promptlength::OPERATOR_GTE, 'characters' => 16]);
+        $short = new promptlength(['operator' => promptlength::OPERATOR_LTE, 'characters' => 15]);
         $context = $this->context(\context_system::instance(), prompt: 'abcdefghijklmnop');
 
-        // Sixteen characters at four per token is four tokens.
         $this->assertTrue($long->is_met($context));
         $this->assertFalse($short->is_met($context));
     }
 
+    public function test_a_prompt_length_condition_counts_characters_not_bytes(): void {
+        // Nine characters, but twenty seven bytes. strlen() would put this over any
+        // threshold an administrator meant to set.
+        $condition = new promptlength(['operator' => promptlength::OPERATOR_LTE, 'characters' => 10]);
+
+        $this->assertTrue($condition->is_met(
+            $this->context(\context_system::instance(), prompt: '日本語のプロンプト'),
+        ));
+    }
+
+    public function test_a_prompt_length_condition_does_not_depend_on_the_token_ratios(): void {
+        // This is the whole reason the condition counts characters. The same rule has to
+        // mean the same thing whatever the site has the estimation ratios set to.
+        set_config('tokenratiocjk', 0.25, 'aiprovider_router');
+        $condition = new promptlength(['operator' => promptlength::OPERATOR_GTE, 'characters' => 10]);
+
+        $this->assertFalse($condition->is_met(
+            $this->context(\context_system::instance(), prompt: '日本語のプロンプト'),
+        ));
+    }
+
     public function test_a_prompt_length_condition_includes_its_threshold(): void {
-        $condition = new promptlength(['operator' => promptlength::OPERATOR_GTE, 'tokens' => 4]);
+        $condition = new promptlength(['operator' => promptlength::OPERATOR_GTE, 'characters' => 16]);
 
         $this->assertTrue($condition->is_met(
             $this->context(\context_system::instance(), prompt: 'abcdefghijklmnop'),
@@ -181,8 +201,13 @@ final class condition_test extends \advanced_testcase {
             'action with nothing chosen' => [new action([])],
             'placement with nothing chosen' => [new placement([])],
             'prompt length with no threshold' => [new promptlength(['operator' => 'gte'])],
-            'prompt length with no operator' => [new promptlength(['tokens' => 10])],
-            'prompt length with an unknown operator' => [new promptlength(['operator' => 'near', 'tokens' => 10])],
+            'prompt length with no operator' => [new promptlength(['characters' => 10])],
+            'prompt length with an unknown operator' => [
+                new promptlength(['operator' => 'near', 'characters' => 10]),
+            ],
+            'prompt length still measured in tokens' => [
+                new promptlength(['operator' => 'gte', 'tokens' => 10]),
+            ],
         ];
     }
 

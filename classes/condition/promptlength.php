@@ -19,37 +19,42 @@ namespace aiprovider_router\condition;
 use aiprovider_router\evaluation_context;
 
 /**
- * Restricts a rule by how large the prompt is.
+ * Restricts a rule by how long the prompt is, in characters.
  *
- * The size is an estimate. Nothing has been sent anywhere when a rule is evaluated, so
- * there is no measured token count to compare against, and the estimate depends on the
- * ratios configured for the site and on the tokeniser the eventual target happens to
- * use. Everything showing this number says that it is an estimate, and the monitor
- * reports what targets actually charged so that the ratios can be calibrated.
+ * Characters rather than tokens, even though tokens are the unit an administrator thinks
+ * in when weighing cost and context windows. A token count could only be an estimate at
+ * this point, since nothing has been sent anywhere yet, and an estimate depends on the
+ * language of the prompt and on the tokeniser the eventual target happens to use. A rule
+ * reading "at least 2000 tokens" would then fire at around 2000 characters of Japanese
+ * and around 8000 of English, and nobody could say what the rule meant.
+ *
+ * A character count is the same number however it is arrived at, so the rule means one
+ * thing. The estimate is still shown next to the count wherever an administrator is
+ * choosing a threshold, which is where the two units need to be related.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class promptlength extends base {
-    /** @var string At least this many tokens. */
+    /** @var string At least this many characters. */
     public const OPERATOR_GTE = 'gte';
 
-    /** @var string At most this many tokens. */
+    /** @var string At most this many characters. */
     public const OPERATOR_LTE = 'lte';
 
     #[\Override]
     public function is_met(evaluation_context $context): bool {
-        $tokens = (int) ($this->config['tokens'] ?? 0);
-        if ($tokens <= 0) {
+        $characters = $this->get_characters();
+        if ($characters <= 0) {
             // An unfinished condition narrows the rule rather than widening it.
             return false;
         }
-        $estimate = $context->get_estimated_tokens();
+        $length = $context->get_prompt_length();
 
         return match ($this->get_operator()) {
-            self::OPERATOR_LTE => $estimate <= $tokens,
-            self::OPERATOR_GTE => $estimate >= $tokens,
+            self::OPERATOR_LTE => $length <= $characters,
+            self::OPERATOR_GTE => $length >= $characters,
             default => false,
         };
     }
@@ -69,11 +74,12 @@ class promptlength extends base {
     /**
      * The threshold being compared against.
      *
-     * @return int The number of tokens.
+     * @return int The number of characters.
      */
-    public function get_tokens(): int {
-        return (int) ($this->config['tokens'] ?? 0);
+    public function get_characters(): int {
+        return (int) ($this->config['characters'] ?? 0);
     }
+
     #[\Override]
     public static function add_to_form(\MoodleQuickForm $mform): void {
         $group = [
@@ -81,25 +87,29 @@ class promptlength extends base {
                 self::OPERATOR_GTE => get_string('condition:promptlength:gte', 'aiprovider_router'),
                 self::OPERATOR_LTE => get_string('condition:promptlength:lte', 'aiprovider_router'),
             ]),
-            $mform->createElement('text', 'promptlengthtokens', '', ['size' => 8]),
+            $mform->createElement('text', 'promptlengthcharacters', '', ['size' => 8]),
+            $mform->createElement('static', 'promptlengthunit', '', get_string(
+                'condition:promptlength:unit',
+                'aiprovider_router',
+            )),
         ];
         $mform->addGroup($group, 'promptlengthgroup', self::get_label(), ' ', false);
-        $mform->setType('promptlengthtokens', PARAM_INT);
+        $mform->setType('promptlengthcharacters', PARAM_INT);
         $mform->setDefault('promptlengthoperator', self::OPERATOR_GTE);
         $mform->addHelpButton('promptlengthgroup', 'condition:promptlength', 'aiprovider_router');
     }
 
     #[\Override]
     public static function read_from_form(\stdClass $data): ?array {
-        $tokens = (int) ($data->promptlengthtokens ?? 0);
-        if ($tokens <= 0) {
+        $characters = (int) ($data->promptlengthcharacters ?? 0);
+        if ($characters <= 0) {
             return null;
         }
         $operator = (string) ($data->promptlengthoperator ?? self::OPERATOR_GTE);
 
         return [
             'operator' => $operator === self::OPERATOR_LTE ? self::OPERATOR_LTE : self::OPERATOR_GTE,
-            'tokens' => $tokens,
+            'characters' => $characters,
         ];
     }
 
@@ -107,18 +117,18 @@ class promptlength extends base {
     public static function to_form_data(array $config): array {
         return [
             'promptlengthoperator' => $config['operator'] ?? self::OPERATOR_GTE,
-            'promptlengthtokens' => $config['tokens'] ?? '',
+            'promptlengthcharacters' => $config['characters'] ?? '',
         ];
     }
 
     #[\Override]
     public function get_description(): string {
-        // The wording says estimated every time it is shown. The number is a guess, and
-        // presenting it as anything else would be the one thing this condition must not do.
+        // The wording says characters every time it is shown, so that a threshold is
+        // never mistaken for a token count.
         return get_string(
             'condition:describe:promptlength:' . ($this->get_operator() ?: self::OPERATOR_GTE),
             'aiprovider_router',
-            $this->get_tokens(),
+            $this->get_characters(),
         );
     }
 }

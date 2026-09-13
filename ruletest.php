@@ -90,12 +90,16 @@ if ($data) {
         [get_string('ruletest:placement', 'aiprovider_router'),
             $placement === null ? get_string('ruletest:placement:none', 'aiprovider_router')
                 : get_string('pluginname', $placement)],
-        // Shown together on purpose. The token figure is an estimate, and the character
-        // counts it was worked out from are what an administrator needs to judge it.
+        // The character count is what prompt length conditions compare against, so it
+        // comes first and on its own. The token figure sits under it as a guide for
+        // choosing a threshold, since tokens are the unit cost is thought about in.
+        [get_string('ruletest:length', 'aiprovider_router'),
+            get_string('ruletest:length:value', 'aiprovider_router', [
+                'characters' => $evaluationcontext->get_prompt_length(),
+            ])],
         [get_string('ruletest:tokens', 'aiprovider_router'),
             get_string('ruletest:tokens:value', 'aiprovider_router', [
                 'tokens' => $evaluationcontext->get_estimated_tokens(),
-                'characters' => $counts['characters'],
                 'cjk' => $counts['cjk'],
                 'other' => $counts['other'],
                 'cjkratio' => format_float($estimator->get_cjk_ratio(), 1),

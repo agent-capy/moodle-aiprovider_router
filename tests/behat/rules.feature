@@ -27,11 +27,11 @@ Feature: Routing requests by rule
     And I set the following fields to these values:
       | Rule name     | Long prompts |
       | Delegate to   | Test OpenAI  |
-    And I set the field "promptlengthtokens" to "2000"
+    And I set the field "promptlengthcharacters" to "2000"
     And I click on "Save changes" "button"
     Then I should see "Rule \"Long prompts\" has been saved."
     And I should see "Long prompts"
-    And I should see "at least 2000 tokens"
+    And I should see "at least 2000 characters"
     And I should see "Test OpenAI"
 
   Scenario: A rule with no conditions is marked as taking everything

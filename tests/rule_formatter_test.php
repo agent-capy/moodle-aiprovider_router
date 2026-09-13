@@ -86,12 +86,13 @@ final class rule_formatter_test extends \advanced_testcase {
         $this->assertStringContainsString('budget', $output);
     }
 
-    public function test_a_prompt_length_condition_says_that_it_is_an_estimate(): void {
+    public function test_a_prompt_length_condition_is_described_in_characters(): void {
         $output = rule_formatter::conditions([
-            'promptlength' => ['operator' => 'gte', 'tokens' => 2000],
+            'promptlength' => ['operator' => 'gte', 'characters' => 2000],
         ]);
 
         $this->assertStringContainsString('2000', $output);
+        // Never as a token count, which would be a different amount of text.
         $this->assertStringContainsString(
             get_string('condition:describe:promptlength:gte', 'aiprovider_router', 2000),
             $output,

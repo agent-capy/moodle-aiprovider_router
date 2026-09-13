@@ -53,7 +53,10 @@ class evaluation_context {
     /** @var int[]|null The roles the user holds here. */
     protected ?array $roleids = null;
 
-    /** @var int|null The estimated size of the prompt. */
+    /** @var int|null The length of the prompt in characters. */
+    protected ?int $promptlength = null;
+
+    /** @var int|null The estimated size of the prompt, for display only. */
     protected ?int $tokens = null;
 
     /** @var string|null The placement, once detected. */
@@ -200,7 +203,28 @@ class evaluation_context {
     }
 
     /**
-     * The estimated size of the prompt.
+     * How long the prompt is.
+     *
+     * This is what prompt length conditions compare against: a count, not an estimate,
+     * so that a rule written here means the same thing whatever language the prompt is
+     * in and whichever target eventually handles it.
+     *
+     * @return int The number of characters.
+     */
+    public function get_prompt_length(): int {
+        if ($this->promptlength === null) {
+            $this->promptlength = \core_text::strlen($this->get_prompt());
+        }
+
+        return $this->promptlength;
+    }
+
+    /**
+     * The estimated size of the prompt, for showing beside the character count.
+     *
+     * Nothing routes on this. Tokens are the unit an administrator thinks in, so the
+     * estimate is worth showing where a threshold is being chosen, but it depends on the
+     * ratios configured for the site and on the target's tokeniser, and a rule must not.
      *
      * @return int The estimate in tokens.
      */
