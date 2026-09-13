@@ -140,4 +140,32 @@ final class rule_form_test extends \advanced_testcase {
 
         $this->assertNotEmpty($form->render());
     }
+    public function test_a_rule_the_persistent_accepts_passes_the_form(): void {
+        $form = new rule_form(null, ['targets' => [7 => 'Somewhere']]);
+
+        $errors = $form->validation(['name' => 'Fine', 'targetid' => 7], []);
+
+        $this->assertSame([], $errors);
+    }
+
+    public function test_the_form_reports_what_the_persistent_refuses(): void {
+        $form = new rule_form(null, ['targets' => [7 => 'Somewhere']]);
+
+        $errors = $form->validation(['name' => ' ', 'targetid' => 0], []);
+
+        // Beside the field, not on the next page after a failed save.
+        $this->assertArrayHasKey('name', $errors);
+        $this->assertArrayHasKey('targetid', $errors);
+    }
+
+    public function test_the_form_refuses_a_window_that_ends_before_it_starts(): void {
+        $form = new rule_form(null, ['targets' => [7 => 'Somewhere']]);
+
+        $errors = $form->validation(
+            ['name' => 'Backwards', 'targetid' => 7, 'timestart' => 2000, 'timeend' => 1000],
+            [],
+        );
+
+        $this->assertArrayHasKey('timeend', $errors);
+    }
 }
