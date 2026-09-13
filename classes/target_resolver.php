@@ -22,15 +22,28 @@ use core_ai\provider as ai_provider;
 /**
  * Decides which provider instances an action may be delegated to, in order.
  *
- * WP2 resolves the configured default target only. WP3 puts the rule engine in front
- * of this class; the candidate list it returns keeps the same shape, so the fallback
- * chain in the processors does not change when rules arrive.
+ * Rules are asked first, in priority order, and the first rule whose target can
+ * actually be used decides where the request goes. A rule that matched but names a
+ * target that has been deleted or switched off is passed over rather than obeyed,
+ * because there is nothing to obey it with.
+ *
+ * When nothing matches, what happens is the administrator's choice, defaulting to
+ * whichever answer suits the operating mode: delegating to the default target in router
+ * only mode, where there is nobody behind the router to take the request, and declining
+ * alongside other providers, where declining simply means the next provider is asked.
+ * Declining is also a legitimate way to keep AI spending to the cases rules describe.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class target_resolver {
+    /** @var rule|null The rule that decided the last resolution. */
+    protected ?rule $matchedrule = null;
+
+    /** @var bool Whether the last resolution was a deliberate refusal. */
+    protected bool $declined = false;
+
     /**
      * Constructor.
      *
@@ -49,19 +62,128 @@ class target_resolver {
      * @return ai_provider[] Usable targets. Empty when nothing can handle the action.
      */
     public function get_candidates(action_base $action): array {
-        $targetid = $this->router->get_default_target_id();
-        if ($targetid === null) {
+        $this->matchedrule = null;
+        $this->declined = false;
+        $instances = $this->get_instances_by_id();
+
+        foreach ($this->get_evaluator()->matches($this->get_evaluation_context($action)) as $rule) {
+            $target = $instances[(int) $rule->get('targetid')] ?? null;
+            if ($target === null || !$this->is_usable($target, $action)) {
+                continue;
+            }
+            $this->matchedrule = $rule;
+
+            return $this->with_fallback($target, $instances, $action);
+        }
+
+        return $this->get_unmatched_candidates($instances, $action);
+    }
+
+    /**
+     * The rule that decided where the last request went.
+     *
+     * Recorded for the monitor in WP4, which refers to rules by id. Null means no rule
+     * decided: either none matched, or the ones that did could not be honoured.
+     *
+     * @return rule|null The rule, or null.
+     */
+    public function get_matched_rule(): ?rule {
+        return $this->matchedrule;
+    }
+
+    /**
+     * Whether the router turned the last request down on purpose.
+     *
+     * A refusal and a misconfiguration both leave no candidates, and they mean opposite
+     * things: one is the site working as configured, the other is an administrator who
+     * needs to be told. They are reported as different failures for that reason.
+     *
+     * @return bool True when no rule matched and the router is set to decline.
+     */
+    public function was_declined(): bool {
+        return $this->declined;
+    }
+
+    /**
+     * Where a request goes when no rule claimed it.
+     *
+     * @param ai_provider[] $instances Every provider instance, keyed by id.
+     * @param action_base $action The action to be delegated.
+     * @return ai_provider[] The candidates, which may be none.
+     */
+    protected function get_unmatched_candidates(array $instances, action_base $action): array {
+        if ($this->router->get_nomatch_behaviour() === provider::NOMATCH_DECLINE) {
+            $this->declined = true;
+
             return [];
         }
 
-        $candidates = [];
-        foreach ($this->get_instances() as $instance) {
-            if ((int) $instance->id === $targetid && $this->is_usable($instance, $action)) {
-                $candidates[] = $instance;
-            }
+        $target = $this->get_default_target($instances, $action);
+
+        return $target === null ? [] : [$target];
+    }
+
+    /**
+     * A matched target, followed by the default target when it may serve as a backstop.
+     *
+     * The default target stands behind a rule only where the administrator has said
+     * unclaimed requests may go to it. Where they have chosen to decline those, sending
+     * a failed request there anyway would spend money at a provider they deliberately
+     * kept out of the picture.
+     *
+     * @param ai_provider $target The instance the matching rule named.
+     * @param ai_provider[] $instances Every provider instance, keyed by id.
+     * @param action_base $action The action to be delegated.
+     * @return ai_provider[] The candidates, in the order they should be tried.
+     */
+    protected function with_fallback(ai_provider $target, array $instances, action_base $action): array {
+        if ($this->router->get_nomatch_behaviour() === provider::NOMATCH_DECLINE) {
+            return [$target];
+        }
+        $fallback = $this->get_default_target($instances, $action);
+        if ($fallback === null || (int) $fallback->id === (int) $target->id) {
+            return [$target];
         }
 
-        return $candidates;
+        return [$target, $fallback];
+    }
+
+    /**
+     * The configured default target, if it can be used for this action.
+     *
+     * @param ai_provider[] $instances Every provider instance, keyed by id.
+     * @param action_base $action The action to be delegated.
+     * @return ai_provider|null The instance, or null when there is none to use.
+     */
+    protected function get_default_target(array $instances, action_base $action): ?ai_provider {
+        $targetid = $this->router->get_default_target_id();
+        if ($targetid === null) {
+            return null;
+        }
+        $target = $instances[$targetid] ?? null;
+
+        return $target !== null && $this->is_usable($target, $action) ? $target : null;
+    }
+
+    /**
+     * The evaluator that reads the rules.
+     *
+     * @return rule_evaluator The evaluator.
+     */
+    protected function get_evaluator(): rule_evaluator {
+        global $DB;
+
+        return new rule_evaluator(new rule_repository($DB));
+    }
+
+    /**
+     * What the rules are allowed to know about this request.
+     *
+     * @param action_base $action The action to be delegated.
+     * @return evaluation_context The context.
+     */
+    protected function get_evaluation_context(action_base $action): evaluation_context {
+        return new evaluation_context($action);
     }
 
     /**
@@ -97,5 +219,19 @@ class target_resolver {
      */
     protected function get_instances(): array {
         return \core\di::get(\core_ai\manager::class)->get_provider_instances();
+    }
+
+    /**
+     * All provider instances known to the site, keyed by id.
+     *
+     * @return ai_provider[] The instances.
+     */
+    protected function get_instances_by_id(): array {
+        $instances = [];
+        foreach ($this->get_instances() as $instance) {
+            $instances[(int) $instance->id] = $instance;
+        }
+
+        return $instances;
     }
 }

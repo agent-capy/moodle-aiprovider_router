@@ -151,6 +151,7 @@ class rule_repository {
 
         $this->replace_conditions((int) $rule->get('id'), $conditions);
         $this->renumber();
+        $this->record_rule_count();
         $transaction->allow_commit();
 
         return $this->get((int) $rule->get('id'));
@@ -168,6 +169,7 @@ class rule_repository {
         $this->db->delete_records(self::CONDITION_TABLE, ['ruleid' => $id]);
         $this->db->delete_records(rule::TABLE, ['id' => $id]);
         $this->renumber();
+        $this->record_rule_count();
         $transaction->allow_commit();
     }
 
@@ -282,6 +284,19 @@ class rule_repository {
         foreach (array_values($ordered) as $position => $ruleid) {
             $this->db->set_field(rule::TABLE, 'sortorder', $position, ['id' => $ruleid]);
         }
+    }
+
+    /**
+     * Keep a note of how many rules exist.
+     *
+     * The provider is asked whether it is configured on every request that reaches the
+     * AI subsystem, and a site that routes entirely by rule has no default target for
+     * that question to look at. Counting the rules there would mean a query per request,
+     * so the count is written here, where rules change, and read from the plugin
+     * configuration, which Moodle already has in memory.
+     */
+    protected function record_rule_count(): void {
+        set_config('rulecount', $this->db->count_records(rule::TABLE), 'aiprovider_router');
     }
 
     /**

@@ -47,6 +47,9 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var string Reason recorded when a target threw instead of returning a response. */
     public const REASON_TARGET_THREW = 'target_threw';
 
+    /** @var string Reason recorded when the router turned the request down on purpose. */
+    public const REASON_DECLINED = 'no_rule_matched';
+
     /** @var string[] Finish reasons that mean the token budget ran out. */
     protected const TRUNCATED = ['length', 'max_tokens', 'model_length'];
 
@@ -80,9 +83,15 @@ abstract class abstract_processor extends \core_ai\process_base {
             return $this->fail(503, 'delegationunavailable', self::REASON_UNAVAILABLE);
         }
 
-        $candidates = $this->get_resolver()->get_candidates($this->action);
+        $resolver = $this->get_resolver();
+        $candidates = $resolver->get_candidates($this->action);
         if (!$candidates) {
-            return $this->fail(503, 'nodefaulttarget', self::REASON_NO_TARGET);
+            // Declining and being misconfigured both leave nothing to delegate to, and
+            // an administrator reading the monitor needs to tell them apart: one is the
+            // site doing what it was told, the other is waiting to be fixed.
+            return $resolver->was_declined()
+                ? $this->fail(503, 'norulematched', self::REASON_DECLINED)
+                : $this->fail(503, 'nodefaulttarget', self::REASON_NO_TARGET);
         }
 
         $delegator = $this->get_delegator();

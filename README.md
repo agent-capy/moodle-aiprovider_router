@@ -16,7 +16,8 @@ Developed as part of a 2026 domestic research and development project funded by 
 ## Planned features
 
 - **Dynamic routing** — choose a delegation target based on placement, course/category,
-  user role, action type, and prompt length *(delegation engine done; rules pending)*
+  user role, action type, and prompt length *(delegation engine and rule evaluation done;
+  the screens for managing rules are still being built)*
 - **Fallback chains** — if a target fails, times out, or returns an invalid response,
   fall through to the next one
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
@@ -26,12 +27,13 @@ Developed as part of a 2026 domestic research and development project funded by 
 
 ## Settings
 
-A router instance has two settings, on the provider instance form.
+A router instance has three settings, on the provider instance form.
 
 | Setting | Description |
 | --- | --- |
 | Operating mode | *Router only* expects every AI request to come through the router, which needs to be first in the provider order. *Alongside other providers* leaves requests the router declines to whichever provider comes next. |
-| Default delegation target | The provider instance that handles a request when no rule picks one. Without it the router reports itself as not configured, so core skips it rather than handing it requests it cannot serve. |
+| When no rule matches | *Send it to the default delegation target*, or *decline the request*. Declining hands the request back to Moodle, which tries the next AI provider in the site order: alongside other providers the site carries on as before, while in router only mode there is no next provider and the request stops. Declining is also how a site keeps AI spending to the cases its rules describe. The default follows the operating mode. |
+| Default delegation target | The provider instance that handles a request when no rule picks one, and the one a request falls back to if the target a rule chose fails. Not needed on a site that routes entirely by rule and declines the rest; otherwise the router reports itself as not configured, so core skips it rather than handing it requests it cannot serve. |
 
 Only one router instance can exist on a site. The form refuses a second one, and if a
 second is created another way it stands down rather than competing with the first.
@@ -66,6 +68,29 @@ Two details are deliberate there:
   entry empty keeps every real provider clear of it.
 - Moving the router to the front **does not reorder anything else**. The other providers
   keep their order relative to each other.
+
+## How a target is chosen
+
+Rules are considered in priority order, and the first rule that matches decides where the
+request goes. A rule matches when **every** condition on it is satisfied, and a condition
+listing several values is satisfied by **any** of them — so "teacher or manager" is one
+condition, while "teacher, in this course" is two.
+
+| Situation | What the router does |
+| --- | --- |
+| A rule matches and its target can be used | Delegates there, with the default delegation target behind it as a fallback |
+| A rule matches but its target has been deleted, switched off, or cannot perform the action | Moves on to the next rule. There is nothing to carry the rule out with, and stopping there would strand the request |
+| No rule matches | Follows the *When no rule matches* setting |
+| *When no rule matches* is set to decline | The default delegation target is not used as a fallback either. An administrator who keeps unclaimed requests away from a provider does not expect a failure to send one there |
+
+Conditions that depend on something the request does not carry — a course, when the
+request came from outside any course; a placement, when it cannot be identified — are not
+met, so the request falls out of narrow rules rather than into them.
+
+Prompt length is compared against an **estimate**, worked out from the number of
+characters and the ratios configured for the site. Nothing has been sent anywhere at the
+point a rule is evaluated, so there is no measured count to compare against. Every screen
+showing the number says that it is an estimate and shows the character counts behind it.
 
 ## Behaviour when a target fails
 

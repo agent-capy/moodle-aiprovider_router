@@ -58,6 +58,22 @@ class hook_listener {
         $mform->setDefault('mode', provider::MODE_FULL);
         $mform->addHelpButton('mode', 'mode', 'aiprovider_router');
 
+        // What happens to a request no rule claimed is the path most sites travel most
+        // of the time, so it is a stated choice rather than something to be inferred
+        // from the mode. The default still follows the mode, which is why the two
+        // options name the mode they suit.
+        $mform->addElement(
+            'select',
+            'nomatch',
+            get_string('nomatch', 'aiprovider_router'),
+            [
+                provider::NOMATCH_DELEGATE => get_string('nomatch:delegate', 'aiprovider_router'),
+                provider::NOMATCH_DECLINE => get_string('nomatch:decline', 'aiprovider_router'),
+            ],
+        );
+        $mform->setDefault('nomatch', provider::NOMATCH_DELEGATE);
+        $mform->addHelpButton('nomatch', 'nomatch', 'aiprovider_router');
+
         $targets = self::get_target_options();
         if (!$targets) {
             $mform->addElement(
