@@ -103,6 +103,17 @@ evaluated by exactly the code a real request uses.
 It also shows the estimated token count for the prompt, alongside the character counts and
 ratios it was worked out from.
 
+The ratios ship as one character per token for CJK text and four for everything else.
+This version has no screen for changing them; they are read from the plugin configuration
+settings `tokenratiocjk` and `tokenratioother`, which for now means the command line:
+
+```
+php admin/cli/cfg.php --component=aiprovider_router --name=tokenratiocjk --set=1.2
+```
+
+A screen for them is to come with the usage monitoring, so that the ratios can be adjusted
+next to the token counts providers actually charged.
+
 ### Import and export
 
 Not available in this version. Rules name their target by provider instance id, and those
