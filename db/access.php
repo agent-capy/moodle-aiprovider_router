@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Version details for aiprovider_router.
+ * Capabilities for aiprovider_router.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
@@ -24,9 +24,16 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->component = 'aiprovider_router';
-$plugin->version = 2026091303;
-$plugin->requires = 2025041400;
-$plugin->supported = [500, 502];
-$plugin->maturity = MATURITY_ALPHA;
-$plugin->release = '0.0.1-dev';
+$capabilities = [
+    // Seeing how much AI a course used, and which provider answered. The figures are
+    // about the course rather than about the people in it: no prompt and no user is
+    // shown, which is why teaching a course is enough to be allowed it.
+    'aiprovider/router:viewusage' => [
+        'captype' => 'read',
+        'contextlevel' => CONTEXT_COURSE,
+        'archetypes' => [
+            'editingteacher' => CAP_ALLOW,
+            'manager' => CAP_ALLOW,
+        ],
+    ],
+];

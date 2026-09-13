@@ -43,3 +43,40 @@ function aiprovider_router_status_checks(): array {
         new \aiprovider_router\check\ruletargets($inspector),
     ];
 }
+
+/**
+ * Put the course usage page where a teacher will find it.
+ *
+ * Only for courses that have actually used AI through the router: a link to an empty
+ * report in every course on the site is noise, and the question only arises once there
+ * is something to ask it about.
+ *
+ * @param navigation_node $navigation The course navigation node.
+ * @param stdClass $course The course.
+ * @param context_course $context Its context.
+ */
+function aiprovider_router_extend_navigation_course(
+    navigation_node $navigation,
+    stdClass $course,
+    context_course $context,
+): void {
+    global $DB;
+
+    if (!has_capability('aiprovider/router:viewusage', $context)) {
+        return;
+    }
+    $used = $DB->record_exists(\aiprovider_router\usage_logger::TABLE, ['courseid' => $course->id])
+        || $DB->record_exists(\aiprovider_router\usage_aggregator::TABLE, ['courseid' => $course->id]);
+    if (!$used) {
+        return;
+    }
+
+    $navigation->add(
+        get_string('courseusage:heading', 'aiprovider_router'),
+        new moodle_url('/ai/provider/router/courseusage.php', ['id' => $course->id]),
+        navigation_node::TYPE_SETTING,
+        null,
+        'aiprovider_router_usage',
+        new pix_icon('i/report', ''),
+    );
+}

@@ -19,14 +19,14 @@ Developed as part of a 2026 domestic research and development project funded by 
   role, action type and prompt length
 - **Fallback chains** — if a target fails, times out, or returns an invalid response, fall
   through to the next one
-
 - **Usage history** — every request is recorded with the target it went to, the model
   that answered, the tokens it used and an estimated cost
+- **Dashboards** — what the site used, day by day and by target, action and model, for
+  administrators, and a smaller per-course view for teachers
+- **Daily summaries** that outlive the detail rows, which are kept for a set period
 
 Still to come, and not in this version:
 
-- **Usage dashboards** for site administrators and teachers, over the history described
-  below, together with daily totals and a retention period for the detail
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
   `\core\encryption`, with a condition framework controlling who may register a key
 - **Budget conditions**, which depend on the dashboards above
@@ -184,6 +184,39 @@ means something quite different.
 
 Failing to write this history never fails the request. A monitor is a tool for running a
 site, not an obstacle on the path of every AI request.
+
+### The dashboard
+
+**AI Router usage** (`/ai/provider/router/usage.php`) shows a period — the last 7, 30, 90
+or 365 days — in a fixed shape: one time series, two breakdowns and one table.
+
+| | |
+| --- | --- |
+| Day by day | Requests and estimated cost, cost on its own axis |
+| By which provider answered | Share of the requests each target took |
+| By what was asked for | Share of the requests each action took |
+| By model | Requests, prompt tokens, generated tokens and cost |
+
+Two figures sit beside them. **Requests that reached the router** compares this plugin's
+history with Moodle's own register: if only part of the site's AI went through the router,
+the rest reached another provider first, which is a matter of the provider order rather
+than of any rule here. **Why requests failed** counts the failures by reason — refused,
+every target failed, a target threw — and is drawn from the detail rows alone, so it
+covers the period the detail still reaches back to and says so.
+
+The shape is fixed on purpose. Answering each new question with another chart is how a
+report grows without limit, and the questions a site owner has are how much is being used,
+where it goes, what it costs and what is failing.
+
+### What teachers see
+
+A course with AI use through the router gets an **AI usage in this course** entry, which
+shows the request count and which provider answered, for that course alone. It is
+deliberately smaller than the site page: what a course used is a teacher's business, what
+it cost the site is not, and who asked what is nobody's business on either page.
+
+It is granted by `aiprovider/router:viewusage`, which editing teachers and managers have
+by default.
 
 ### Rates
 

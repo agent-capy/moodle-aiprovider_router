@@ -97,6 +97,16 @@ class hook_listener {
             ),
         );
 
+        $mform->addElement(
+            'static',
+            'usagelink',
+            get_string('usage:heading', 'aiprovider_router'),
+            \html_writer::link(
+                new \moodle_url('/ai/provider/router/usage.php'),
+                get_string('usage:manage', 'aiprovider_router'),
+            ),
+        );
+
         $targets = self::get_target_options();
         if (!$targets) {
             $mform->addElement(
