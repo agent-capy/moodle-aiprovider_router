@@ -126,4 +126,18 @@ final class rule_form_test extends \advanced_testcase {
 
         $this->assertSame($original, $conditions);
     }
+    public function test_the_editing_form_can_be_built(): void {
+        // Every condition contributes its own controls, and one of them reaching for
+        // something that is not there would take the whole page down rather than the
+        // condition. The rule list would still look fine, so this is worth asserting.
+        $form = new rule_form(null, ['targets' => [7 => 'Somewhere']]);
+
+        $this->assertNotEmpty($form->render());
+    }
+
+    public function test_the_rule_tester_form_can_be_built(): void {
+        $form = new rule_test_form();
+
+        $this->assertNotEmpty($form->render());
+    }
 }
