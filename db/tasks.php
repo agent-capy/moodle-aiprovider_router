@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Version details for aiprovider_router.
+ * Scheduled tasks for aiprovider_router.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
@@ -24,9 +24,16 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->component = 'aiprovider_router';
-$plugin->version = 2026091302;
-$plugin->requires = 2025041400;
-$plugin->supported = [500, 502];
-$plugin->maturity = MATURITY_ALPHA;
-$plugin->release = '0.0.1-dev';
+$tasks = [
+    [
+        // Runs once a day, after midnight, because it summarises whole finished days.
+        // The minute is randomised so that sites do not all read their logs at once.
+        'classname' => 'aiprovider_router\task\summarise_usage',
+        'blocking' => 0,
+        'minute' => 'R',
+        'hour' => '3',
+        'day' => '*',
+        'dayofweek' => '*',
+        'month' => '*',
+    ],
+];

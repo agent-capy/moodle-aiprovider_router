@@ -121,5 +121,34 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026091301, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026091302) {
+        // A day of the log, summarised, so that reports outlive the detail rows.
+        $table = new xmldb_table('aiprovider_router_daily');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('daystart', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('courseid', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('actionname', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('targetid', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('targetname', XMLDB_TYPE_CHAR, '255', null, null, null, null);
+        $table->add_field('targetprovider', XMLDB_TYPE_CHAR, '100', null, null, null, null);
+        $table->add_field('model', XMLDB_TYPE_CHAR, '100', null, null, null, null);
+        $table->add_field('currency', XMLDB_TYPE_CHAR, '10', null, null, null, null);
+        $table->add_field('requests', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('failures', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('prompttokens', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('completiontokens', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('cost', XMLDB_TYPE_NUMBER, '16, 6', null, null, null, null);
+        $table->add_field('costedrequests', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('daystart', XMLDB_INDEX_NOTUNIQUE, ['daystart']);
+        $table->add_index('courseid-daystart', XMLDB_INDEX_NOTUNIQUE, ['courseid', 'daystart']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026091302, 'aiprovider', 'router');
+    }
+
     return true;
 }

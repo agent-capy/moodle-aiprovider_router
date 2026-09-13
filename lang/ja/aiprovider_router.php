@@ -233,4 +233,6 @@ $string['ruletest:user'] = 'ユーザー';
 $string['ruletest:user:none'] = 'なし';
 $string['ruletest:user_help'] = 'ユーザ名またはメールアドレスを入力します。指定したコースでそのユーザーが持つロール（上位から継承したものを含む）が、ロール条件の判定対象になります。空欄にすると、ユーザーのない要求として試せます。';
 $string['ruletest:wouldgo'] = 'ルール「{$a->rule}」がこの要求を受け持ち、{$a->target} に送られます。';
+$string['task:summariseusage'] = 'AIルータの利用状況を集計する';
+$string['task:summariseusage:done'] = '{$a->days}日分を{$a->rows}行に集計し、明細{$a->purged}行を削除しました。';
 $string['warning:duplicateinstances'] = 'このサイトには AIルータのインスタンスが {$a} 件ありますが、実際に使われるのは1件だけです。残りは AIプロバイダの一覧から削除してください。';

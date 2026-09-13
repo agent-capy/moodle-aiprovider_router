@@ -206,12 +206,35 @@ already an estimate. To work in yen, set the currency to JPY and enter the rates
 The token estimation ratios are on the same page, since they are also rates an
 administrator maintains. Neither they nor the prices can change where a request goes.
 
+### How long the history is kept
+
+A scheduled task, **Summarise AI Router usage**, runs once a day. It summarises each
+finished day into counts by course, action, target, model and currency, and then removes
+detail rows older than the retention period, which is 90 days unless the site changes it.
+Setting the retention to zero keeps everything.
+
+The two halves are deliberately unequal. A detail row is close to personal information:
+it says that a particular person asked for something, somewhere, at a time. The summary
+is not — it names nobody — so it is kept indefinitely and is what a report covering last
+year is drawn from.
+
+Nothing is ever removed that has not been summarised first, whatever the retention period
+says. A site whose cron has been stopped for a month catches up on the days it missed
+before anything is deleted.
+
+Days are the site's days, in the server timezone, and are counted through the calendar, so
+the boundaries stay in place when a timezone changes offset.
+
 ### Privacy
 
 The history names the user who made each request, so it is reported, exported and deleted
 through Moodle's privacy API. **The prompt itself is never stored** — its length is used
 to route the request and then forgotten, and what the AI answered is Moodle's record to
 keep, not this plugin's.
+
+The daily summaries hold no user ids at all. That is what lets them be kept: a summary
+that named people would have to be rebuilt every time somebody exercised their right to
+be forgotten, and a history rebuilt on demand is not a history.
 
 ## Behaviour when a target fails
 

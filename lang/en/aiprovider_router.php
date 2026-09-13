@@ -233,4 +233,6 @@ $string['ruletest:user'] = 'User';
 $string['ruletest:user:none'] = 'None';
 $string['ruletest:user_help'] = 'A username or an email address. Their roles in the chosen course, including any inherited from above it, are what role conditions are tested against. Leave empty to test a request with no user attached.';
 $string['ruletest:wouldgo'] = 'The rule "{$a->rule}" would claim this request, and it would go to {$a->target}.';
+$string['task:summariseusage'] = 'Summarise AI Router usage';
+$string['task:summariseusage:done'] = 'Summarised {$a->days} day(s) into {$a->rows} row(s) and removed {$a->purged} detail row(s).';
 $string['warning:duplicateinstances'] = 'This site has {$a} AI Router instances, and only one of them is used. Delete the others from the AI provider list.';

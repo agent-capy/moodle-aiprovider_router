@@ -74,6 +74,33 @@
         <INDEX NAME="courseid-timecreated" UNIQUE="false" FIELDS="courseid, timecreated"/>
       </INDEXES>
     </TABLE>
+    <TABLE NAME="aiprovider_router_daily" COMMENT="A day of the log, summarised, so that reports outlive the detail rows the purge removes. Deliberately holds no userid: a summary that named people would have to be rebuilt every time somebody exercised their right to be forgotten.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="daystart" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Midnight of the day summarised, in the server timezone. Not named day, because core already uses that name for a day of the month."/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Null for requests made outside any course, exactly as in the log."/>
+        <FIELD NAME="actionname" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Null for requests that reached no target at all, which is how refusals and total failures are counted."/>
+        <FIELD NAME="targetname" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Carried over from the log for the same reason it is kept there: once the detail rows are purged this is the only readable name left."/>
+        <FIELD NAME="targetprovider" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Grouped on, so that changing the site currency splits the summary instead of adding unlike figures together."/>
+        <FIELD NAME="requests" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="failures" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="prompttokens" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="completiontokens" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="cost" TYPE="number" LENGTH="16" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="The costs recorded at the time added up, never recalculated. Null when no request that day had a rate."/>
+        <FIELD NAME="costedrequests" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="How many of the requests had a cost. Without it a total cannot be told apart from a total of the few requests a rate happened to cover."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the summary was written, which is not the day it describes."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="daystart" UNIQUE="false" FIELDS="daystart"/>
+        <INDEX NAME="courseid-daystart" UNIQUE="false" FIELDS="courseid, daystart"/>
+      </INDEXES>
+    </TABLE>
     <TABLE NAME="aiprovider_router_price" COMMENT="What a provider charges, as the administrator has entered it, with the date each rate took effect.">
       <FIELDS>
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
