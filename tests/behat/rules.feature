@@ -72,7 +72,8 @@ Feature: Routing requests by rule
     And I set the field "Prompt" to "Please summarise this"
     And I click on "Test" "button"
     Then I should see "The rule \"Everything\" would claim this request, and it would go to Test OpenAI."
-    And I should see "This is an estimate"
+    And I should see "21 characters. This is what prompt length conditions compare against."
+    And I should see "An estimate, shown as a guide when choosing a threshold"
 
   Scenario: The rule tester says when nothing would claim a request
     Given I visit "/ai/provider/router/ruletest.php"
