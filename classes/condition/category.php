@@ -31,12 +31,18 @@ use aiprovider_router\evaluation_context;
  */
 class category extends set_base {
     #[\Override]
-    protected function get_config_key(): string {
+    protected static function get_config_key(): string {
         return 'categoryids';
     }
 
     #[\Override]
     protected function get_actual(evaluation_context $context): array {
         return $context->get_categoryids();
+    }
+    #[\Override]
+    protected static function get_options(): array {
+        // Categories are few enough to list, and seeing the tree is how an administrator
+        // judges how wide a rule will be.
+        return \core_course_category::make_categories_list();
     }
 }

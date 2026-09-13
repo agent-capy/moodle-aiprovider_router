@@ -74,4 +74,51 @@ class promptlength extends base {
     public function get_tokens(): int {
         return (int) ($this->config['tokens'] ?? 0);
     }
+    #[\Override]
+    public static function add_to_form(\MoodleQuickForm $mform): void {
+        $group = [
+            $mform->createElement('select', 'promptlengthoperator', '', [
+                self::OPERATOR_GTE => get_string('condition:promptlength:gte', 'aiprovider_router'),
+                self::OPERATOR_LTE => get_string('condition:promptlength:lte', 'aiprovider_router'),
+            ]),
+            $mform->createElement('text', 'promptlengthtokens', '', ['size' => 8]),
+        ];
+        $mform->addGroup($group, 'promptlengthgroup', self::get_label(), ' ', false);
+        $mform->setType('promptlengthtokens', PARAM_INT);
+        $mform->setDefault('promptlengthoperator', self::OPERATOR_GTE);
+        $mform->addHelpButton('promptlengthgroup', 'condition:promptlength', 'aiprovider_router');
+    }
+
+    #[\Override]
+    public static function read_from_form(\stdClass $data): ?array {
+        $tokens = (int) ($data->promptlengthtokens ?? 0);
+        if ($tokens <= 0) {
+            return null;
+        }
+        $operator = (string) ($data->promptlengthoperator ?? self::OPERATOR_GTE);
+
+        return [
+            'operator' => $operator === self::OPERATOR_LTE ? self::OPERATOR_LTE : self::OPERATOR_GTE,
+            'tokens' => $tokens,
+        ];
+    }
+
+    #[\Override]
+    public static function to_form_data(array $config): array {
+        return [
+            'promptlengthoperator' => $config['operator'] ?? self::OPERATOR_GTE,
+            'promptlengthtokens' => $config['tokens'] ?? '',
+        ];
+    }
+
+    #[\Override]
+    public function get_description(): string {
+        // The wording says estimated every time it is shown. The number is a guess, and
+        // presenting it as anything else would be the one thing this condition must not do.
+        return get_string(
+            'condition:describe:promptlength:' . ($this->get_operator() ?: self::OPERATOR_GTE),
+            'aiprovider_router',
+            $this->get_tokens(),
+        );
+    }
 }

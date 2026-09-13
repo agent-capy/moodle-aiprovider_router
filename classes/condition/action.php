@@ -27,7 +27,7 @@ use aiprovider_router\evaluation_context;
  */
 class action extends set_base {
     #[\Override]
-    protected function get_config_key(): string {
+    protected static function get_config_key(): string {
         return 'actions';
     }
 
@@ -41,5 +41,14 @@ class action extends set_base {
         // Class names are stored without a leading separator, the way core stores the
         // provider class in ai_providers, so that both spellings compare equal.
         return ltrim((string) $value, '\\');
+    }
+    #[\Override]
+    protected static function get_options(): array {
+        $options = [];
+        foreach (\aiprovider_router\provider::get_action_list() as $class) {
+            $options[ltrim($class, '\\')] = $class::get_name();
+        }
+
+        return $options;
     }
 }

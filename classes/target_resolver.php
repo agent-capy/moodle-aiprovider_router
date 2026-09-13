@@ -187,6 +187,27 @@ class target_resolver {
     }
 
     /**
+     * The provider instances a rule or a default target may name, as form options.
+     *
+     * Whether one of them can serve a particular request is decided at the time, since
+     * an instance can be switched off or lose an action after a rule names it. What this
+     * excludes for good is routers: a router delegating to a router is how a loop starts.
+     *
+     * @return string[] Instance names keyed by id.
+     */
+    public static function get_delegation_targets(): array {
+        $options = [];
+        foreach (\core\di::get(\core_ai\manager::class)->get_provider_instances() as $instance) {
+            if ($instance instanceof provider) {
+                continue;
+            }
+            $options[(int) $instance->id] = $instance->name;
+        }
+
+        return $options;
+    }
+
+    /**
      * Whether an instance can be delegated to for this action.
      *
      * @param ai_provider $instance The candidate instance.

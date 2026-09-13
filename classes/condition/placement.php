@@ -31,7 +31,7 @@ use aiprovider_router\evaluation_context;
  */
 class placement extends set_base {
     #[\Override]
-    protected function get_config_key(): string {
+    protected static function get_config_key(): string {
         return 'placements';
     }
 
@@ -45,5 +45,15 @@ class placement extends set_base {
     #[\Override]
     protected static function cast(mixed $value): int|string {
         return (string) $value;
+    }
+    #[\Override]
+    protected static function get_options(): array {
+        $options = [];
+        foreach (\core_component::get_plugin_list('aiplacement') as $name => $unused) {
+            $component = 'aiplacement_' . $name;
+            $options[$component] = get_string('pluginname', $component);
+        }
+
+        return $options;
     }
 }

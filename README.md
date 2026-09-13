@@ -13,17 +13,20 @@ handle the call, and delegates to it.
 Developed as part of a 2026 domestic research and development project funded by the
 [Moodle Association of Japan](https://moodlejapan.org/) (MAJ).
 
-## Planned features
+## Features
 
-- **Dynamic routing** — choose a delegation target based on placement, course/category,
-  user role, action type, and prompt length *(delegation engine and rule evaluation done;
-  the screens for managing rules are still being built)*
-- **Fallback chains** — if a target fails, times out, or returns an invalid response,
-  fall through to the next one
+- **Dynamic routing** — choose a delegation target by placement, course, category, user
+  role, action type and estimated prompt length
+- **Fallback chains** — if a target fails, times out, or returns an invalid response, fall
+  through to the next one
+
+Still to come, and not in this version:
+
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
   `\core\encryption`, with a condition framework controlling who may register a key
 - **Usage monitoring** — log delegation target, model, tokens and estimated cost, with
   dashboards for site administrators and teachers
+- **Budget conditions**, which depend on the usage monitoring above
 
 ## Settings
 
@@ -54,6 +57,7 @@ The plugin reports this on *Site administration → Reports → System status*:
 | AI Router position in the provider order | The router is not tried first. An error in *Router only* mode; in *Alongside other providers* mode this may be deliberate, so it is reported for information only. |
 | Providers ahead of the AI Router | A provider that comes earlier handles the same actions and will answer first. |
 | Leftover entries in the provider order | The order still names instances that have been deleted. Moving providers up and down works on positions in that list, so leftovers can make reordering appear to do nothing. |
+| Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
 
 Each check links to **AI provider order** (`/ai/provider/router/order.php`), which is the
 only page that changes the order. It shows the current order entry by entry, and what the
@@ -68,6 +72,43 @@ Two details are deliberate there:
   entry empty keeps every real provider clear of it.
 - Moving the router to the front **does not reorder anything else**. The other providers
   keep their order relative to each other.
+
+## Rules
+
+Rules are managed at **Routing rules** (`/ai/provider/router/rules.php`), linked from the
+router's own settings form and from the site status report. Like the provider order page,
+it is not in the admin tree: Moodle never reads an `aiprovider` plugin's `settings.php`,
+so there is no admin tree entry to hang it on.
+
+The list shows the rules in the order they are considered, with what each one requires,
+where it delegates, and buttons to reorder, copy, switch off or delete. Two things are
+called out there, because both are easy to create and hard to spot afterwards:
+
+- a rule with **no conditions**, which takes every request that reaches it;
+- any rule **below** such a rule, which nothing can reach.
+
+A rule naming a provider instance that has since been deleted is flagged in the list and
+reported by the **Rule delegation targets** status check. Requests matching it fall
+through to the next rule rather than failing, so nothing breaks — but the rule is not
+doing what it says.
+
+### Testing a rule set
+
+**Test the rules** (`/ai/provider/router/ruletest.php`) asks for a course, a user, an
+action, a placement and a prompt, and shows what each rule did with that request: matched,
+skipped, which conditions were not satisfied, or not reached because something above it
+matched first. Nothing is sent to any provider and nothing is recorded; the rules are
+evaluated by exactly the code a real request uses.
+
+It also shows the estimated token count for the prompt, alongside the character counts and
+ratios it was worked out from.
+
+### Import and export
+
+Not available in this version. Rules name their target by provider instance id, and those
+ids do not mean the same thing on another site, so a file moved between sites would
+produce rules pointing at the wrong providers. Copy an existing rule instead when you want
+a variation on it.
 
 ## How a target is chosen
 

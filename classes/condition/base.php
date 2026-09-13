@@ -73,4 +73,48 @@ abstract class base {
     public function get_config(): array {
         return $this->config;
     }
+
+    /**
+     * Add this condition's controls to the rule editing form.
+     *
+     * Each condition owns one row of a fixed form. There is no expression builder, on
+     * purpose: a rule an administrator can read at a glance is worth more than one that
+     * can express anything.
+     *
+     * @param \MoodleQuickForm $mform The form being built.
+     */
+    abstract public static function add_to_form(\MoodleQuickForm $mform): void;
+
+    /**
+     * Read this condition out of a submitted form.
+     *
+     * @param \stdClass $data The submitted data.
+     * @return array|null The configuration to store, or null when the administrator did
+     *                    not use this condition.
+     */
+    abstract public static function read_from_form(\stdClass $data): ?array;
+
+    /**
+     * Turn stored configuration back into form values.
+     *
+     * @param array $config The stored configuration.
+     * @return array Values keyed by form element name.
+     */
+    abstract public static function to_form_data(array $config): array;
+
+    /**
+     * What this condition requires, in a sentence an administrator can read.
+     *
+     * @return string The description.
+     */
+    abstract public function get_description(): string;
+
+    /**
+     * The name this condition is shown under.
+     *
+     * @return string The label.
+     */
+    public static function get_label(): string {
+        return get_string('condition:' . static::get_type(), 'aiprovider_router');
+    }
 }

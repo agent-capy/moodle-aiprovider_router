@@ -74,6 +74,19 @@ class hook_listener {
         $mform->setDefault('nomatch', provider::NOMATCH_DELEGATE);
         $mform->addHelpButton('nomatch', 'nomatch', 'aiprovider_router');
 
+        // The rules are a separate page because core never reads an aiprovider plugin's
+        // settings.php, so there is no admin tree entry to reach them from. This form is
+        // where an administrator configuring the router already is.
+        $mform->addElement(
+            'static',
+            'ruleslink',
+            get_string('rules:heading', 'aiprovider_router'),
+            \html_writer::link(
+                new \moodle_url('/ai/provider/router/rules.php'),
+                get_string('rules:manage', 'aiprovider_router'),
+            ),
+        );
+
         $targets = self::get_target_options();
         if (!$targets) {
             $mform->addElement(
@@ -202,15 +215,6 @@ class hook_listener {
      * @return array Instance id to display name.
      */
     protected static function get_target_options(): array {
-        $options = [];
-        foreach (\core\di::get(\core_ai\manager::class)->get_provider_instances() as $instance) {
-            // A router delegating to a router would loop.
-            if ($instance instanceof provider) {
-                continue;
-            }
-            $options[(int) $instance->id] = $instance->name;
-        }
-
-        return $options;
+        return target_resolver::get_delegation_targets();
     }
 }

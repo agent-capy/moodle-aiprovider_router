@@ -36,7 +36,7 @@ abstract class set_base extends base {
      *
      * @return string The key.
      */
-    abstract protected function get_config_key(): string;
+    abstract protected static function get_config_key(): string;
 
     /**
      * The values this request actually has.
@@ -52,7 +52,7 @@ abstract class set_base extends base {
      * @return array The configured values.
      */
     public function get_values(): array {
-        $values = $this->config[$this->get_config_key()] ?? [];
+        $values = $this->config[static::get_config_key()] ?? [];
         if (!is_array($values)) {
             return [];
         }
@@ -71,6 +71,72 @@ abstract class set_base extends base {
         }
 
         return array_intersect($wanted, $this->get_actual($context)) !== [];
+    }
+
+    #[\Override]
+    public static function add_to_form(\MoodleQuickForm $mform): void {
+        $mform->addElement(
+            'autocomplete',
+            static::get_type(),
+            static::get_label(),
+            static::get_options(),
+            ['multiple' => true],
+        );
+        $mform->addHelpButton(static::get_type(), 'condition:' . static::get_type(), 'aiprovider_router');
+    }
+
+    #[\Override]
+    public static function read_from_form(\stdClass $data): ?array {
+        $values = (array) ($data->{static::get_type()} ?? []);
+        $values = array_values(array_filter($values, static fn($value): bool => $value !== '' && $value !== null));
+
+        return $values ? [static::get_config_key() => $values] : null;
+    }
+
+    #[\Override]
+    public static function to_form_data(array $config): array {
+        return [static::get_type() => $config[static::get_config_key()] ?? []];
+    }
+
+    #[\Override]
+    public function get_description(): string {
+        $labels = static::get_labels($this->get_values());
+        $named = [];
+        foreach ($this->get_values() as $value) {
+            // A value whose name cannot be found is one that has been deleted since the
+            // rule was written. Saying so is more use than leaving a blank, because that
+            // condition can no longer be met and the rule may never fire again.
+            $named[] = $labels[$value]
+                ?? get_string('condition:describe:missing', 'aiprovider_router', $value);
+        }
+
+        return get_string(
+            'condition:describe:' . static::get_type(),
+            'aiprovider_router',
+            implode(', ', $named),
+        );
+    }
+
+    /**
+     * The choices offered for this condition.
+     *
+     * @return array Labels keyed by the value they stand for.
+     */
+    protected static function get_options(): array {
+        return [];
+    }
+
+    /**
+     * Names for the values a rule has chosen.
+     *
+     * Separate from the options so that a condition whose choices are too numerous to
+     * list, such as courses, can look up only the ones it needs.
+     *
+     * @param array $values The chosen values.
+     * @return array Names keyed by value. A value with no name is left out.
+     */
+    protected static function get_labels(array $values): array {
+        return array_intersect_key(static::get_options(), array_flip($values));
     }
 
     /**

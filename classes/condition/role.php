@@ -30,12 +30,21 @@ use aiprovider_router\evaluation_context;
  */
 class role extends set_base {
     #[\Override]
-    protected function get_config_key(): string {
+    protected static function get_config_key(): string {
         return 'roleids';
     }
 
     #[\Override]
     protected function get_actual(evaluation_context $context): array {
         return $context->get_roleids();
+    }
+    #[\Override]
+    protected static function get_options(): array {
+        $options = [];
+        foreach (role_fix_names(get_all_roles(), \context_system::instance(), ROLENAME_ORIGINAL) as $role) {
+            $options[(int) $role->id] = $role->localname;
+        }
+
+        return $options;
     }
 }
