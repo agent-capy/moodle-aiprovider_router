@@ -53,8 +53,11 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var string[] Finish reasons that mean the token budget ran out. */
     protected const TRUNCATED = ['length', 'max_tokens', 'model_length'];
 
-    /** @var string|null Reason code for the last failure, for the monitor log in WP4. */
+    /** @var string|null Reason code for the last failure, for the monitor. */
     protected ?string $reason = null;
+
+    /** @var int|null Status code of the last failure, for the monitor. */
+    protected ?int $failurecode = null;
 
     /**
      * The response field carrying the generated content, if the action has one.
@@ -89,15 +92,20 @@ abstract class abstract_processor extends \core_ai\process_base {
             // Declining and being misconfigured both leave nothing to delegate to, and
             // an administrator reading the monitor needs to tell them apart: one is the
             // site doing what it was told, the other is waiting to be fixed.
-            return $resolver->was_declined()
+            $outcome = $resolver->was_declined()
                 ? $this->fail(503, 'norulematched', self::REASON_DECLINED)
                 : $this->fail(503, 'nodefaulttarget', self::REASON_NO_TARGET);
+            $this->record_usage($resolver, null, null, 0);
+
+            return $outcome;
         }
 
         $delegator = $this->get_delegator();
         $last = null;
         $threw = false;
+        $attempts = 0;
         foreach ($candidates as $target) {
+            $attempts++;
             try {
                 $response = $delegator->delegate($target, $this->action);
             } catch (\Throwable $e) {
@@ -119,6 +127,8 @@ abstract class abstract_processor extends \core_ai\process_base {
 
             $data = $response->get_response_data();
             if ($this->has_content($data)) {
+                $this->record_usage($resolver, $target, $data, $attempts, true);
+
                 return ['success' => true] + $data;
             }
 
@@ -127,7 +137,12 @@ abstract class abstract_processor extends \core_ai\process_base {
             if ($this->is_truncated($data)) {
                 // Deliberately not a fallback. Another target would burn its budget the
                 // same way, and shortening the input is something the user can act on.
-                return $this->fail(502, 'emptyresponse', self::REASON_EMPTY);
+                $outcome = $this->fail(502, 'emptyresponse', self::REASON_EMPTY);
+                // The target still charged for the thinking it did, so the tokens are
+                // recorded even though the user got nothing readable.
+                $this->record_usage($resolver, $target, $data, $attempts);
+
+                return $outcome;
             }
             $last = $response;
         }
@@ -135,8 +150,99 @@ abstract class abstract_processor extends \core_ai\process_base {
         // Pass the target's status code through so that a 429 stays a 429.
         $code = $last === null ? 502 : ($last->get_errorcode() ?: 502);
         $reason = ($last === null && $threw) ? self::REASON_TARGET_THREW : self::REASON_ALL_FAILED;
+        $outcome = $this->fail($code, 'alltargetsfailed', $reason);
+        $this->record_usage($resolver, null, null, $attempts);
 
-        return $this->fail($code, 'alltargetsfailed', $reason);
+        return $outcome;
+    }
+
+    /**
+     * Hand what happened to the monitor.
+     *
+     * Failures and refusals are recorded as well as successes. How often the router
+     * turns requests down is a number a site owner needs, and it has to be countable
+     * apart from targets breaking, which means something quite different.
+     *
+     * @param target_resolver $resolver The resolver that chose, holding the matched rule.
+     * @param \core_ai\provider|null $target The target that answered, if one did.
+     * @param array|null $data The response data from that target.
+     * @param int $attempts How many targets were tried.
+     * @param bool $success Whether the user got an answer.
+     */
+    protected function record_usage(
+        target_resolver $resolver,
+        ?\core_ai\provider $target,
+        ?array $data,
+        int $attempts,
+        bool $success = false,
+    ): void {
+        $context = $resolver->get_evaluated_context($this->action);
+        $rule = $resolver->get_matched_rule();
+
+        $entry = (object) [
+            'timecreated' => time(),
+            'userid' => $context->get_userid(),
+            'contextid' => $context->get_contextid(),
+            'courseid' => $context->get_courseid(),
+            'actionname' => $context->get_action_name(),
+            'placement' => $context->get_placement(),
+            'ruleid' => $rule === null ? null : (int) $rule->get('id'),
+            'rulename' => $rule === null ? null : $rule->get('name'),
+            'targetid' => $target === null ? null : (int) $target->id,
+            'targetname' => $target === null ? null : $target->name,
+            'targetprovider' => $target === null ? null : self::component_of($target),
+            'model' => $data['model'] ?? null,
+            'success' => (int) $success,
+            'errorcode' => $success ? null : $this->failurecode,
+            'reason' => $success ? null : $this->reason,
+            'attempts' => $attempts,
+            'prompttokens' => isset($data['prompttokens']) ? (int) $data['prompttokens'] : null,
+            'completiontokens' => isset($data['completiontokens']) ? (int) $data['completiontokens'] : null,
+        ];
+
+        $this->get_logger()->record($entry, $this->get_image_count($success));
+    }
+
+    /**
+     * Which plugin an instance belongs to, which is what rates are looked up by.
+     *
+     * Core's own get_name() resolves the component from the class and returns null when
+     * it cannot, which happens for a provider class that is not an installed plugin. The
+     * first segment of the namespace is the component for every AI provider, because
+     * that is how core itself decides which plugin a provider class belongs to.
+     *
+     * @param \core_ai\provider $target The instance.
+     * @return string The component name.
+     */
+    protected static function component_of(\core_ai\provider $target): string {
+        return \core\component::get_component_from_classname($target::class)
+            ?? strtok($target::class, '\\');
+    }
+
+    /**
+     * How many images this request produced, for actions that are costed per image.
+     *
+     * Image responses carry no token counts at all, so there is nothing else to cost
+     * them by. Actions that deal in text return zero and are costed on their tokens.
+     *
+     * @param bool $success Whether the request succeeded.
+     * @return int The number of images.
+     */
+    protected function get_image_count(bool $success): int {
+        unset($success);
+
+        return 0;
+    }
+
+    /**
+     * The monitor this processor reports to.
+     *
+     * @return usage_logger The logger.
+     */
+    protected function get_logger(): usage_logger {
+        global $DB;
+
+        return new usage_logger($DB);
     }
 
     /**
@@ -207,6 +313,7 @@ abstract class abstract_processor extends \core_ai\process_base {
      */
     protected function fail(int $errorcode, string $stringid, string $reason): array {
         $this->reason = $reason;
+        $this->failurecode = $errorcode;
 
         return [
             'success' => false,

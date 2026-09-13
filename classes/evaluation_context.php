@@ -97,6 +97,19 @@ class evaluation_context {
     }
 
     /**
+     * The short name of the action, as core records it.
+     *
+     * The monitor stores the same value core does, so that the two logs can be lined
+     * up against each other to work out how much of a site's AI traffic reaches the
+     * router at all.
+     *
+     * @return string The action basename.
+     */
+    public function get_action_name(): string {
+        return $this->action::get_basename();
+    }
+
+    /**
      * The user the request is being made for.
      *
      * @return int The user id, or zero when the action does not carry one.

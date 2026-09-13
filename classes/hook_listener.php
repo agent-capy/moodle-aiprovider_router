@@ -87,6 +87,16 @@ class hook_listener {
             ),
         );
 
+        $mform->addElement(
+            'static',
+            'rateslink',
+            get_string('rates:heading', 'aiprovider_router'),
+            \html_writer::link(
+                new \moodle_url('/ai/provider/router/rates.php'),
+                get_string('rates:manage', 'aiprovider_router'),
+            ),
+        );
+
         $targets = self::get_target_options();
         if (!$targets) {
             $mform->addElement(

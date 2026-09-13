@@ -20,13 +20,16 @@ Developed as part of a 2026 domestic research and development project funded by 
 - **Fallback chains** — if a target fails, times out, or returns an invalid response, fall
   through to the next one
 
+- **Usage history** — every request is recorded with the target it went to, the model
+  that answered, the tokens it used and an estimated cost
+
 Still to come, and not in this version:
 
+- **Usage dashboards** for site administrators and teachers, over the history described
+  below, together with daily totals and a retention period for the detail
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
   `\core\encryption`, with a condition framework controlling who may register a key
-- **Usage monitoring** — log delegation target, model, tokens and estimated cost, with
-  dashboards for site administrators and teachers
-- **Budget conditions**, which depend on the usage monitoring above
+- **Budget conditions**, which depend on the dashboards above
 
 ## Settings
 
@@ -150,6 +153,65 @@ tokeniser. A rule reading "at least 2000 tokens" would fire at roughly 2000 char
 Japanese and roughly 8000 of English, and nobody could say what it meant. A character
 count means one thing. The rule tester shows both figures for a prompt you have in mind,
 which is where a threshold is worked out.
+
+## Usage history
+
+Moodle keeps its own record of every AI request, and on a site using the router that
+record says `aiprovider_router` for all of them: `ai_action_register.provider` holds the
+component of the provider the manager called, which is always this one. Moodle 5.3's
+usage report shows the provider, the action, the tokens and whether it worked, and does
+not show the model at all. So Moodle can tell you how much AI your site used, and not
+where any of it went. That is what this history is for.
+
+Each request is recorded with:
+
+| | |
+| --- | --- |
+| Where it went | The provider instance, by id and by name, and which plugin it belongs to |
+| What answered | The model the target reported |
+| Why it went there | The rule that chose it, by id and by name |
+| What it used | Prompt and generated tokens, as the target reported them |
+| What it cost | Estimated from the rates below, worked out once and kept |
+| What went wrong | Whether it was refused, whether every target failed, whether one threw, and how many were tried |
+
+Names are stored next to ids on purpose. Rules get renamed and deleted and instances get
+deleted, and a history reading "rule 14 sent this to instance 7" some months later is not
+one anybody can use.
+
+Requests the router **refused** are recorded too. How often a site turns requests down is
+a number worth having, and it needs to be countable apart from targets breaking, which
+means something quite different.
+
+Failing to write this history never fails the request. A monitor is a tool for running a
+site, not an obstacle on the path of every AI request.
+
+### Rates
+
+**AI Router rates** (`/ai/provider/router/rates.php`) is where the cost estimate comes
+from. Rates belong to a provider plugin and a model rather than to an instance, since two
+instances of the same provider are charged alike, and they are entered per million tokens
+the way providers publish them. A rate with no model set covers anything from that
+provider that has no rate of its own. Image responses carry no token counts, so images are
+costed per image.
+
+Each rate records the date it took effect. A request is costed with the rate in force when
+it was made and keeps that figure, so adding a rate today leaves last month's numbers as
+they were. A request no rate covers is recorded **without a cost** rather than with a cost
+of zero, which would say it was free.
+
+One currency applies site-wide and nothing is converted: choosing an exchange rate source,
+a moment and a rounding rule would lay a second layer of error over a figure that is
+already an estimate. To work in yen, set the currency to JPY and enter the rates in yen.
+
+The token estimation ratios are on the same page, since they are also rates an
+administrator maintains. Neither they nor the prices can change where a request goes.
+
+### Privacy
+
+The history names the user who made each request, so it is reported, exported and deleted
+through Moodle's privacy API. **The prompt itself is never stored** — its length is used
+to route the request and then forgotten, and what the AI answered is Moodle's record to
+keep, not this plugin's.
 
 ## Behaviour when a target fails
 

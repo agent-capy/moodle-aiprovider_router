@@ -44,6 +44,9 @@ class target_resolver {
     /** @var bool Whether the last resolution was a deliberate refusal. */
     protected bool $declined = false;
 
+    /** @var evaluation_context|null What the rules were told about the last request. */
+    protected ?evaluation_context $evaluated = null;
+
     /**
      * Constructor.
      *
@@ -66,7 +69,8 @@ class target_resolver {
         $this->declined = false;
         $instances = $this->get_instances_by_id();
 
-        foreach ($this->get_evaluator()->matches($this->get_evaluation_context($action)) as $rule) {
+        $this->evaluated = $this->get_evaluation_context($action);
+        foreach ($this->get_evaluator()->matches($this->evaluated) as $rule) {
             $target = $instances[(int) $rule->get('targetid')] ?? null;
             if ($target === null || !$this->is_usable($target, $action)) {
                 continue;
@@ -89,6 +93,20 @@ class target_resolver {
      */
     public function get_matched_rule(): ?rule {
         return $this->matchedrule;
+    }
+
+    /**
+     * What the rules were told about the last request.
+     *
+     * Handed on to the monitor so that the course, the placement and the rest are
+     * worked out once for the request rather than again for the history of it.
+     *
+     * @param action_base $action The action being delegated, for a request that has not
+     *                            been resolved yet.
+     * @return evaluation_context The context.
+     */
+    public function get_evaluated_context(action_base $action): evaluation_context {
+        return $this->evaluated ??= $this->get_evaluation_context($action);
     }
 
     /**

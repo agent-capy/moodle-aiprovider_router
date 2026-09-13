@@ -27,4 +27,17 @@ namespace aiprovider_router;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class process_generate_image extends abstract_processor {
+    #[\Override]
+    protected function get_image_count(bool $success): int {
+        if (!$success) {
+            return 0;
+        }
+        // Image responses carry no token counts, so the monitor costs them per image,
+        // and the only place the number asked for appears is the action itself.
+        if (!property_exists($this->action, 'numimages')) {
+            return 1;
+        }
+
+        return max(1, (int) $this->action->get_configuration('numimages'));
+    }
 }
