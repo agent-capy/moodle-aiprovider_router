@@ -32,11 +32,13 @@ require_once(__DIR__ . '/lib.php');
 
 use aiprovider_router\form\usage_settings_form;
 use aiprovider_router\price_book;
+use aiprovider_router\rule;
 use aiprovider_router\usage_aggregator;
 use aiprovider_router\usage_formatter;
 use aiprovider_router\usage_report;
 
 $days = optional_param('days', 30, PARAM_INT);
+$keysource = optional_param('keysource', rule::KEYSOURCE_SITE, PARAM_ALPHA);
 
 require_login();
 $context = context_system::instance();
@@ -54,6 +56,14 @@ $PAGE->navbar->add(get_string('usage:heading', 'aiprovider_router'), $url);
 $periods = [7, 30, 90, 365];
 if (!in_array($days, $periods, true)) {
     $days = 30;
+}
+
+// What the site spent is the question this screen exists to answer, so it is the one
+// asked first. Money somebody paid out of their own pocket is real and is recorded, but
+// adding it in would produce a figure that is nobody's expenditure.
+$keysources = array_merge(rule::get_keysources(), [usage_report::KEYSOURCE_ALL]);
+if (!in_array($keysource, $keysources, true)) {
+    $keysource = rule::KEYSOURCE_SITE;
 }
 
 $form = new usage_settings_form($url);
@@ -75,12 +85,15 @@ $currency = price_book::get_currency();
 $now = time();
 $from = $aggregator->add_days($aggregator->day_of($now), -($days - 1));
 
-$series = $report->get_series($from, $now);
+$series = $report->get_series($from, $now, null, $keysource);
 $totals = usage_report::total($series);
-$bytarget = $report->get_breakdown(usage_report::BY_TARGET, $from, $now);
-$byaction = $report->get_breakdown(usage_report::BY_ACTION, $from, $now);
-$bymodel = $report->get_breakdown(usage_report::BY_MODEL, $from, $now);
-$reasons = $report->get_failure_reasons($from, $now);
+$bytarget = $report->get_breakdown(usage_report::BY_TARGET, $from, $now, null, $keysource);
+$byaction = $report->get_breakdown(usage_report::BY_ACTION, $from, $now, null, $keysource);
+$bymodel = $report->get_breakdown(usage_report::BY_MODEL, $from, $now, null, $keysource);
+$reasons = $report->get_failure_reasons($from, $now, null, $keysource);
+// What the chosen payer leaves out, so that a filtered screen is never mistaken for the
+// whole of what the site did.
+$bykeysource = $report->get_breakdown(usage_report::BY_KEYSOURCE, $from, $now);
 
 echo $OUTPUT->header();
 echo $OUTPUT->box(get_string('usage:intro', 'aiprovider_router'));
@@ -89,14 +102,36 @@ $options = [];
 foreach ($periods as $period) {
     $options[$period] = get_string('usage:period:days', 'aiprovider_router', $period);
 }
-echo $OUTPUT->single_select($url, 'days', $options, $days, null, null, [
-    'label' => get_string('usage:period', 'aiprovider_router'),
-]);
+echo $OUTPUT->single_select(
+    new moodle_url($url, ['keysource' => $keysource]),
+    'days',
+    $options,
+    $days,
+    null,
+    null,
+    ['label' => get_string('usage:period', 'aiprovider_router')],
+);
+
+$payers = [];
+foreach ($keysources as $payer) {
+    $payers[$payer] = get_string('keysource:' . $payer, 'aiprovider_router');
+}
+echo $OUTPUT->single_select(
+    new moodle_url($url, ['days' => $days]),
+    'keysource',
+    $payers,
+    $keysource,
+    null,
+    null,
+    ['label' => get_string('usage:keysource', 'aiprovider_router')],
+);
 
 if ((int) $totals->requests === 0) {
     echo $OUTPUT->notification(get_string('usage:none', 'aiprovider_router'), 'info');
+    echo usage_formatter::elsewhere($bykeysource, $keysource);
 } else {
     echo usage_formatter::totals($totals, $currency);
+    echo usage_formatter::elsewhere($bykeysource, $keysource);
 
     echo $OUTPUT->heading(get_string('usage:chart:daily', 'aiprovider_router'), 3);
     echo $OUTPUT->render_chart(usage_formatter::daily_chart($series, $currency));

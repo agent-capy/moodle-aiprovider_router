@@ -243,6 +243,7 @@ class rule_repository {
         // straight away would change routing before anyone has looked at it.
         $copy->set('enabled', false);
         $copy->set('targetid', $original->get('targetid'));
+        $copy->set('keysource', $original->get('keysource'));
         $copy->set('timestart', $original->get('timestart'));
         $copy->set('timeend', $original->get('timeend'));
 

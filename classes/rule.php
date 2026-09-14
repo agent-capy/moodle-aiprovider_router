@@ -31,6 +31,15 @@ class rule extends \core\persistent {
     /** @var string The table holding rules. */
     public const TABLE = 'aiprovider_router_rule';
 
+    /** @var string Requests this rule claims are paid for with the site's own key. */
+    public const KEYSOURCE_SITE = 'site';
+
+    /** @var string They are paid for with a key the person who asked has brought. */
+    public const KEYSOURCE_USER = 'user';
+
+    /** @var string They are paid for with the key registered for the course. */
+    public const KEYSOURCE_COURSE = 'course';
+
     #[\Override]
     protected static function define_properties(): array {
         return [
@@ -50,6 +59,14 @@ class rule extends \core\persistent {
             // pointing at nothing falls through to the next rule instead.
             'targetid' => [
                 'type' => PARAM_INT,
+            ],
+            // Who pays, rather than something asked about the request, which is why it
+            // is a column and not a condition. Holding a key is still a requirement for
+            // the rule to apply, and target_resolver is where that is decided: the
+            // evaluator is left knowing only about the request itself.
+            'keysource' => [
+                'type' => PARAM_ALPHA,
+                'default' => self::KEYSOURCE_SITE,
             ],
             'timestart' => [
                 'type' => PARAM_INT,
@@ -92,6 +109,42 @@ class rule extends \core\persistent {
         }
 
         return true;
+    }
+
+    /**
+     * A rule has to say whose key pays for what it claims.
+     *
+     * @param mixed $value The submitted key source.
+     * @return true|\core\lang_string True when valid, otherwise the error to show.
+     */
+    protected function validate_keysource($value): true|\core\lang_string {
+        if (!in_array((string) $value, self::get_keysources(), true)) {
+            return new \core\lang_string('rule:error:keysource', 'aiprovider_router');
+        }
+
+        return true;
+    }
+
+    /**
+     * Every key source a rule can name.
+     *
+     * The two brought-key values are deliberately the key scopes themselves, so that the
+     * rule, the key it finds and the history row it writes all use one vocabulary and
+     * nothing has to be translated between them.
+     *
+     * @return string[] The key sources.
+     */
+    public static function get_keysources(): array {
+        return [self::KEYSOURCE_SITE, self::KEYSOURCE_USER, self::KEYSOURCE_COURSE];
+    }
+
+    /**
+     * Whether this rule asks somebody to pay for what it claims.
+     *
+     * @return bool True when the rule names a brought key rather than the site's.
+     */
+    public function is_byok(): bool {
+        return (string) $this->get('keysource') !== self::KEYSOURCE_SITE;
     }
 
     /**

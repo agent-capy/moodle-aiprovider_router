@@ -25,6 +25,10 @@ namespace aiprovider_router;
  * year or lose this morning, so every figure here is assembled from the summaries up to
  * the point they reach, and from the detail beyond it.
  *
+ * Every figure can also be narrowed to one payer. Requests paid for with keys people
+ * brought cost the site nothing, so a cost adding them in would be nobody's expenditure:
+ * not the site's, and not any one person's either.
+ *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -39,11 +43,18 @@ class usage_report {
     /** @var string Break the figures down by the model that answered. */
     public const BY_MODEL = 'model';
 
+    /** @var string Break the figures down by whose key paid. */
+    public const BY_KEYSOURCE = 'keysource';
+
+    /** @var string Asked for in place of a key source, to leave the figures unfiltered. */
+    public const KEYSOURCE_ALL = 'all';
+
     /** @var array Which columns each breakdown groups on. */
     protected const GROUPS = [
         self::BY_TARGET => ['targetid', 'targetname'],
         self::BY_ACTION => ['actionname'],
         self::BY_MODEL => ['model'],
+        self::BY_KEYSOURCE => ['keysource'],
     ];
 
     /** @var string[] The figures every row of every report carries. */
@@ -102,9 +113,10 @@ class usage_report {
      * @param int $from The start of the period.
      * @param int $to The end of the period.
      * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to requests one payer covered, or null for all.
      * @return \stdClass[] Rows keyed by the midnight of their day, oldest first.
      */
-    public function get_series(int $from, int $to, ?int $courseid = null): array {
+    public function get_series(int $from, int $to, ?int $courseid = null, ?string $keysource = null): array {
         $series = [];
         $lastday = $this->aggregator->day_of($to);
         for ($day = $this->aggregator->day_of($from); $day <= $lastday; $day = $this->aggregator->add_days($day, 1)) {
@@ -115,7 +127,7 @@ class usage_report {
         if ($from < $boundary) {
             $where = 'daystart >= :from AND daystart < :to';
             $params = ['from' => $from, 'to' => min($to, $boundary)];
-            foreach ($this->summarised(['daystart'], $where, $params, $courseid) as $row) {
+            foreach ($this->summarised(['daystart'], $where, $params, $courseid, $keysource) as $row) {
                 $day = (int) $row->daystart;
                 if (isset($series[$day])) {
                     $series[$day] = $this->normalise($row);
@@ -133,7 +145,7 @@ class usage_report {
             $rows = $this->detailed([], 'timecreated >= :from AND timecreated < :to', [
                 'from' => max($day, $from),
                 'to' => $end,
-            ], $courseid);
+            ], $courseid, $keysource);
             // An aggregate over no rows still comes back, as one row of nothing, so what
             // arrives is normalised rather than trusted.
             if ($rows) {
@@ -151,9 +163,16 @@ class usage_report {
      * @param int $from The start of the period.
      * @param int $to The end of the period.
      * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to requests one payer covered, or null for all.
      * @return \stdClass[] Rows, busiest first.
      */
-    public function get_breakdown(string $by, int $from, int $to, ?int $courseid = null): array {
+    public function get_breakdown(
+        string $by,
+        int $from,
+        int $to,
+        ?int $courseid = null,
+        ?string $keysource = null,
+    ): array {
         if (!isset(self::GROUPS[$by])) {
             throw new \coding_exception('Unknown breakdown: ' . $by);
         }
@@ -167,6 +186,7 @@ class usage_report {
                 'daystart >= :from AND daystart < :to',
                 ['from' => $from, 'to' => min($to, $boundary)],
                 $courseid,
+                $keysource,
             ));
         }
         if ($to > $boundary) {
@@ -175,6 +195,7 @@ class usage_report {
                 'timecreated >= :from AND timecreated < :to',
                 ['from' => max($from, $boundary), 'to' => $to],
                 $courseid,
+                $keysource,
             ));
         }
 
@@ -213,15 +234,19 @@ class usage_report {
      * @param int $from The start of the period.
      * @param int $to The end of the period.
      * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to requests one payer covered, or null for all.
      * @return \stdClass[] Rows of reason and count, commonest first.
      */
-    public function get_failure_reasons(int $from, int $to, ?int $courseid = null): array {
+    public function get_failure_reasons(
+        int $from,
+        int $to,
+        ?int $courseid = null,
+        ?string $keysource = null,
+    ): array {
         $where = 'success = 0 AND timecreated >= :from AND timecreated < :to';
         $params = ['from' => $from, 'to' => $to];
-        if ($courseid !== null) {
-            $where .= ' AND courseid = :courseid';
-            $params['courseid'] = $courseid;
-        }
+        [$where, $params] = $this->for_course($where, $params, $courseid);
+        [$where, $params] = $this->for_keysource($where, $params, $keysource);
 
         return array_values($this->db->get_records_sql(
             'SELECT reason, COUNT(*) AS requests
@@ -295,10 +320,18 @@ class usage_report {
      * @param string $where The period clause.
      * @param array $params Its parameters.
      * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to requests one payer covered, or null for all.
      * @return \stdClass[] The rows.
      */
-    protected function summarised(array $fields, string $where, array $params, ?int $courseid): array {
+    protected function summarised(
+        array $fields,
+        string $where,
+        array $params,
+        ?int $courseid,
+        ?string $keysource = null,
+    ): array {
         [$where, $params] = $this->for_course($where, $params, $courseid);
+        [$where, $params] = $this->for_keysource($where, $params, $keysource);
         $select = $fields ? implode(', ', $fields) . ',' : '';
         $group = $fields ? ' GROUP BY ' . implode(', ', $fields) : '';
 
@@ -323,10 +356,18 @@ class usage_report {
      * @param string $where The period clause.
      * @param array $params Its parameters.
      * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to requests one payer covered, or null for all.
      * @return \stdClass[] The rows.
      */
-    protected function detailed(array $fields, string $where, array $params, ?int $courseid): array {
+    protected function detailed(
+        array $fields,
+        string $where,
+        array $params,
+        ?int $courseid,
+        ?string $keysource = null,
+    ): array {
         [$where, $params] = $this->for_course($where, $params, $courseid);
+        [$where, $params] = $this->for_keysource($where, $params, $keysource);
         $select = $fields ? implode(', ', $fields) . ',' : '';
         $group = $fields ? ' GROUP BY ' . implode(', ', $fields) : '';
 
@@ -356,6 +397,26 @@ class usage_report {
         if ($courseid !== null) {
             $where .= ' AND courseid = :courseid';
             $params['courseid'] = $courseid;
+        }
+
+        return [$where, $params];
+    }
+
+    /**
+     * Narrow a query to the requests one payer covered.
+     *
+     * Both tables carry the column, so the same clause works on either side of the point
+     * where the summaries hand over to the detail.
+     *
+     * @param string $where The clause so far.
+     * @param array $params Its parameters.
+     * @param string|null $keysource The payer, or null for all of them.
+     * @return array The clause and parameters.
+     */
+    protected function for_keysource(string $where, array $params, ?string $keysource): array {
+        if ($keysource !== null && $keysource !== self::KEYSOURCE_ALL) {
+            $where .= ' AND keysource = :keysource';
+            $params['keysource'] = $keysource;
         }
 
         return [$where, $params];

@@ -258,6 +258,40 @@ final class rule_repository_test extends \advanced_testcase {
         );
     }
 
+    public function test_a_rule_is_paid_for_by_the_site_unless_it_says_otherwise(): void {
+        $rule = $this->add('unsaid');
+
+        // Rules written before brought keys existed carry no answer, and the site paying
+        // is what they have always meant.
+        $this->assertSame(rule::KEYSOURCE_SITE, (string) $rule->get('keysource'));
+        $this->assertFalse($rule->is_byok());
+    }
+
+    public function test_a_copy_is_paid_for_the_same_way_as_the_original(): void {
+        $original = $this->add('original', 9);
+        $original->set('keysource', rule::KEYSOURCE_COURSE);
+        $this->repository->save($original);
+
+        $copy = $this->repository->duplicate((int) $original->get('id'), 'original (copy)');
+
+        // A copy that quietly reverted to the site's key would move the cost of every
+        // request it claims onto the site, which is the one thing the original said not
+        // to do.
+        $this->assertSame(rule::KEYSOURCE_COURSE, (string) $copy->get('keysource'));
+    }
+
+    public function test_a_rule_cannot_name_a_key_source_that_does_not_exist(): void {
+        $rule = new rule();
+        $rule->set('name', 'strange');
+        $rule->set('targetid', 7);
+        $rule->set('keysource', 'somebodyelse');
+
+        $errors = $rule->validate();
+
+        $this->assertIsArray($errors);
+        $this->assertArrayHasKey('keysource', $errors);
+    }
+
     public function test_a_rule_needs_a_name_and_a_target(): void {
         $rule = new rule();
         $rule->set('name', '  ');

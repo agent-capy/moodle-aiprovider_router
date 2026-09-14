@@ -292,6 +292,38 @@ final class usage_aggregator_test extends \advanced_testcase {
         // somebody asked to be forgotten, which is the opposite of why it exists.
         $this->assertArrayNotHasKey('userid', $columns);
         $this->assertArrayNotHasKey('contextid', $columns);
+        // A user key belongs to one person, so keeping which key paid would put that
+        // person back into the summary under another name.
+        $this->assertArrayNotHasKey('keyid', $columns);
+        // Who paid, on the other hand, is a category and not a person.
+        $this->assertArrayHasKey('keysource', $columns);
+    }
+
+    public function test_what_people_paid_for_themselves_is_summarised_apart(): void {
+        $yesterday = $this->day(1);
+        $this->log($yesterday + HOURSECS, ['cost' => 0.25]);
+        $this->log($yesterday + HOURSECS, ['cost' => 4.0, 'keysource' => rule::KEYSOURCE_USER]);
+
+        $this->aggregator->run($this->now);
+
+        $costs = [];
+        foreach ($this->summaries($yesterday) as $row) {
+            $costs[$row->keysource] = (float) $row->cost;
+        }
+
+        // Added together this would read as 4.25 spent by the site, which is not a
+        // figure anybody could act on: most of it came out of somebody's own pocket.
+        $this->assertEqualsWithDelta(0.25, $costs[usage_logger::KEY_SITE], 0.000001);
+        $this->assertEqualsWithDelta(4.0, $costs[rule::KEYSOURCE_USER], 0.000001);
+    }
+
+    public function test_the_log_the_rule_and_the_summary_agree_on_who_paid(): void {
+        // Three tables and a rule name one thing between them. Were the two vocabularies
+        // ever to drift apart, every BYOK row would be summarised under a heading the
+        // rule that produced it does not use, and nothing would say so.
+        $this->assertSame(usage_logger::KEY_SITE, rule::KEYSOURCE_SITE);
+        $this->assertSame(key::SCOPE_USER, rule::KEYSOURCE_USER);
+        $this->assertSame(key::SCOPE_COURSE, rule::KEYSOURCE_COURSE);
     }
 
     public function test_days_are_counted_through_the_calendar_not_in_seconds(): void {

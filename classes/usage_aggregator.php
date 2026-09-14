@@ -144,6 +144,7 @@ class usage_aggregator {
                 'targetname' => $row->targetname,
                 'targetprovider' => $row->targetprovider,
                 'model' => $row->model,
+                'keysource' => (string) $row->keysource,
                 'currency' => $row->currency,
                 'requests' => (int) $row->requests,
                 'failures' => (int) $row->failures,
@@ -260,10 +261,14 @@ class usage_aggregator {
      * only some requests were covered by a rate reports the part that was known rather
      * than treating the rest as free. How many rows that was is counted beside it.
      *
+     * Who paid is one of the groups. Money somebody spent out of their own pocket is not
+     * the site's expenditure, and a figure that added the two together would answer
+     * nobody's question about what anything cost.
+     *
      * @return string The SQL.
      */
     protected function get_summary_sql(): string {
-        return 'SELECT courseid, actionname, targetid, targetname, targetprovider, model, currency,
+        return 'SELECT courseid, actionname, targetid, targetname, targetprovider, model, keysource, currency,
                        COUNT(*) AS requests,
                        SUM(CASE WHEN success = 1 THEN 0 ELSE 1 END) AS failures,
                        SUM(CASE WHEN prompttokens IS NULL THEN 0 ELSE prompttokens END) AS prompttokens,
@@ -272,6 +277,6 @@ class usage_aggregator {
                        SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedrequests
                   FROM {' . usage_logger::TABLE . '}
                  WHERE timecreated >= :start AND timecreated < :end
-              GROUP BY courseid, actionname, targetid, targetname, targetprovider, model, currency';
+              GROUP BY courseid, actionname, targetid, targetname, targetprovider, model, keysource, currency';
     }
 }

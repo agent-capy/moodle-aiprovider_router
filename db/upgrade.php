@@ -189,5 +189,32 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026091304, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026091401) {
+        // Whose key pays for the requests a rule claims.
+        $table = new xmldb_table('aiprovider_router_rule');
+        $field = new xmldb_field('keysource', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'site', 'targetid');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Which brought key paid for one request.
+        $table = new xmldb_table('aiprovider_router_log');
+        $field = new xmldb_field('keyid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'keysource');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // The summary gains the same dimension, so that money somebody spent themselves
+        // is never added into what the site spent. Existing summaries describe days
+        // before any key could be brought, so the default is right for all of them.
+        $table = new xmldb_table('aiprovider_router_daily');
+        $field = new xmldb_field('keysource', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'site', 'model');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026091401, 'aiprovider', 'router');
+    }
+
     return true;
 }

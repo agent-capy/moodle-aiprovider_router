@@ -191,6 +191,13 @@ site, not an obstacle on the path of every AI request.
 **AI Router usage** (`/ai/provider/router/usage.php`) shows a period — the last 7, 30, 90
 or 365 days — in a fixed shape: one time series, two breakdowns and one table.
 
+It shows **one payer at a time**, and starts on the site's own key, which is what the site
+actually spent. Requests paid for with keys people brought cost the site nothing, so a
+cost that added them in would be nobody's expenditure — not the site's, and not any one
+person's either. Switch **Paid for with** to see those instead, or to see everything
+together. Whenever the page is leaving something out it says how much, so a filtered
+screen is not mistaken for the whole of what the site did.
+
 | | |
 | --- | --- |
 | Day by day | Requests and estimated cost, cost on its own axis |
@@ -243,8 +250,9 @@ administrator maintains. Neither they nor the prices can change where a request 
 ### How long the history is kept
 
 A scheduled task, **Summarise AI Router usage**, runs once a day. It summarises each
-finished day into counts by course, action, target, model and currency, and then removes
-detail rows older than the retention period, which is 90 days unless the site changes it.
+finished day into counts by course, action, target, model, payer and currency, and then
+removes detail rows older than the retention period, which is 90 days unless the site
+changes it.
 Setting the retention to zero keeps everything.
 
 The two halves are deliberately unequal. A detail row is close to personal information:
@@ -268,7 +276,10 @@ keep, not this plugin's.
 
 The daily summaries hold no user ids at all. That is what lets them be kept: a summary
 that named people would have to be rebuilt every time somebody exercised their right to
-be forgotten, and a history rebuilt on demand is not a history.
+be forgotten, and a history rebuilt on demand is not a history. They record **whether** a
+brought key paid, which is a category, but never **which** key: a key somebody brought is
+one person's, so keeping its id would put that person back into the summary under another
+name.
 
 ## Bringing your own key
 

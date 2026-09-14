@@ -17,6 +17,11 @@ Feature: Seeing what the router handled
     And I should see "Why requests failed"
     And I should see "No request failed in this period."
 
+  Scenario: The dashboard answers what the site spent before anything else
+    When I visit "/ai/provider/router/usage.php"
+    Then I should see "Paid for with"
+    And the field "Paid for with" matches value "The site's own key"
+
   Scenario: How long detail is kept can be changed
     Given I visit "/ai/provider/router/usage.php"
     When I set the field "Days of detail to keep" to "30"

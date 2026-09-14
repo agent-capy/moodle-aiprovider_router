@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="ai/provider/router/db" VERSION="20260913" COMMENT="XMLDB file for the AI Router routing rules"
+<XMLDB PATH="ai/provider/router/db" VERSION="20260914" COMMENT="XMLDB file for the AI Router routing rules"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd"
 >
@@ -11,6 +11,7 @@
         <FIELD NAME="enabled" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Disabled rules are skipped without being deleted."/>
         <FIELD NAME="sortorder" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Priority. Lowest is evaluated first, and is renumbered from zero on every write."/>
         <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance to delegate to. Deliberately not a foreign key, so that deleting a provider instance in core cannot fail."/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Whose key pays for requests this rule claims: site, user or course. A column rather than a condition, because it says what to do once the rule has matched, which is the same side of the rule as the target. Holding a key is still a requirement for the rule to apply, and that is checked where the target is resolved."/>
         <FIELD NAME="timestart" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Rule is not evaluated before this time. Zero means no start."/>
         <FIELD NAME="timeend" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Rule is not evaluated after this time. Zero means no end."/>
         <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
@@ -63,7 +64,8 @@
         <FIELD NAME="completiontokens" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="cost" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Worked out when the row was written, never recalculated. Null when no price was known."/>
         <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
-        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Who paid. Always site until BYOK arrives; the column exists now so that history does not have a hole in it."/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Who paid: the site, the person who asked, or the course they asked in."/>
+        <FIELD NAME="keyid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Which brought key paid, so that a key whose provider keeps refusing it can be found. Null for the site's own key. Deliberately not carried into the daily summary: a user key belongs to one person, so summarising by it would be summarising by user."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
@@ -84,6 +86,7 @@
         <FIELD NAME="targetname" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Carried over from the log for the same reason it is kept there: once the detail rows are purged this is the only readable name left."/>
         <FIELD NAME="targetprovider" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Who paid. Grouped on, so that what people spent out of their own pocket is never added into what the site spent: a total mixing the two would be nobody's expenditure."/>
         <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Grouped on, so that changing the site currency splits the summary instead of adding unlike figures together."/>
         <FIELD NAME="requests" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="failures" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>

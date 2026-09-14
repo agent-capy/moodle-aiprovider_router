@@ -57,6 +57,38 @@ class usage_formatter {
     }
 
     /**
+     * What the payer being looked at leaves out.
+     *
+     * A screen showing one payer's figures says nothing about the rest, and nothing on
+     * it looks incomplete. A site whose teachers pay for most of the AI would otherwise
+     * read its own usage as a fraction of what is happening.
+     *
+     * @param \stdClass[] $bykeysource Every payer's figures for the period, unfiltered.
+     * @param string $keysource The payer being shown.
+     * @return string HTML, empty when nothing is being left out.
+     */
+    public static function elsewhere(array $bykeysource, string $keysource): string {
+        if ($keysource === usage_report::KEYSOURCE_ALL) {
+            return '';
+        }
+
+        $hidden = 0;
+        foreach ($bykeysource as $row) {
+            if ((string) $row->keysource !== $keysource) {
+                $hidden += (int) $row->requests;
+            }
+        }
+        if ($hidden === 0) {
+            return '';
+        }
+
+        return \html_writer::div(
+            get_string('usage:keysource:hidden', 'aiprovider_router', number_format($hidden)),
+            'text-muted',
+        );
+    }
+
+    /**
      * What a cost total is worth saying about itself.
      *
      * A total drawn from rates that covered only some of the requests is not the cost of

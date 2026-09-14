@@ -229,6 +229,91 @@ final class usage_report_test extends \advanced_testcase {
         $this->assertNull($passthrough->share);
     }
 
+    public function test_a_payer_can_be_asked_about_on_its_own(): void {
+        $this->log($this->day(0) + HOURSECS, ['cost' => 0.25]);
+        $this->log($this->day(0) + HOURSECS, ['cost' => 9.0, 'keysource' => rule::KEYSOURCE_USER]);
+
+        $site = usage_report::total($this->report->get_series(
+            $this->week(),
+            $this->now,
+            null,
+            rule::KEYSOURCE_SITE,
+        ));
+
+        // Nine of those units were spent by somebody out of their own pocket. A site
+        // asking what its AI cost is not asking about that money.
+        $this->assertSame(1, (int) $site->requests);
+        $this->assertEqualsWithDelta(0.25, (float) $site->cost, 0.000001);
+    }
+
+    public function test_a_payer_is_told_apart_on_both_sides_of_the_seam(): void {
+        // One day summarised, one day still only in the detail. Both carry the column,
+        // and a filter that worked on one of them would quietly halve the answer.
+        $this->log($this->day(1) + HOURSECS, ['keysource' => rule::KEYSOURCE_COURSE]);
+        $this->log($this->day(1) + HOURSECS);
+        $this->aggregator->run($this->now);
+        $this->log($this->day(0) + HOURSECS, ['keysource' => rule::KEYSOURCE_COURSE]);
+
+        $rows = $this->report->get_breakdown(
+            usage_report::BY_TARGET,
+            $this->week(),
+            $this->now,
+            null,
+            rule::KEYSOURCE_COURSE,
+        );
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(2, (int) $rows[0]->requests);
+    }
+
+    public function test_who_paid_is_a_breakdown_of_its_own(): void {
+        $this->log($this->day(1) + HOURSECS);
+        $this->aggregator->run($this->now);
+        $this->log($this->day(0) + HOURSECS, ['keysource' => rule::KEYSOURCE_USER]);
+        $this->log($this->day(0) + HOURSECS, ['keysource' => rule::KEYSOURCE_USER]);
+
+        $rows = $this->report->get_breakdown(usage_report::BY_KEYSOURCE, $this->week(), $this->now);
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $counts[$row->keysource] = (int) $row->requests;
+        }
+        $this->assertSame([rule::KEYSOURCE_USER => 2, rule::KEYSOURCE_SITE => 1], $counts);
+    }
+
+    public function test_asking_for_every_payer_narrows_nothing(): void {
+        $this->log($this->day(0) + HOURSECS);
+        $this->log($this->day(0) + HOURSECS, ['keysource' => rule::KEYSOURCE_USER]);
+
+        $all = usage_report::total($this->report->get_series(
+            $this->week(),
+            $this->now,
+            null,
+            usage_report::KEYSOURCE_ALL,
+        ));
+
+        $this->assertSame(2, (int) $all->requests);
+    }
+
+    public function test_failures_can_be_narrowed_to_one_payer_too(): void {
+        $this->log($this->day(0) + HOURSECS, [
+            'success' => 0,
+            'reason' => 'byok_key_rejected',
+            'keysource' => rule::KEYSOURCE_USER,
+        ]);
+        $this->log($this->day(0) + HOURSECS, ['success' => 0, 'reason' => 'all_targets_failed']);
+
+        $reasons = $this->report->get_failure_reasons(
+            $this->week(),
+            $this->now,
+            null,
+            rule::KEYSOURCE_USER,
+        );
+
+        $this->assertCount(1, $reasons);
+        $this->assertSame('byok_key_rejected', $reasons[0]->reason);
+    }
+
     public function test_an_unknown_breakdown_is_a_coding_error(): void {
         $this->expectException(\coding_exception::class);
 
