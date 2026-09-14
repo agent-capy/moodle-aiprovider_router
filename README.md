@@ -29,8 +29,8 @@ Still to come, and not in this version:
 
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
   `\core\encryption`, with a condition framework controlling who may register a key.
-  The store and the encryption are in place; there is no way to register a key yet, and
-  no rule can send a request with one
+  The store, the encryption and the policy are in place; there is no way to register a
+  key yet, and no rule can send a request with one
 - **Budget conditions**, which depend on the dashboards above
 
 ## Settings

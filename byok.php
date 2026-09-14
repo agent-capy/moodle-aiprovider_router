@@ -29,6 +29,8 @@
 require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
+use aiprovider_router\eligibility_policy;
+use aiprovider_router\form\byok_policy_form;
 use aiprovider_router\form\byok_targets_form;
 use aiprovider_router\key;
 use aiprovider_router\provider;
@@ -56,6 +58,21 @@ foreach (\core\di::get(\core_ai\manager::class)->get_provider_instances() as $in
 }
 
 $settings = new target_settings($DB);
+$policy = new eligibility_policy();
+
+// Both forms post here. Moodle tells them apart by the hidden field each one adds.
+$policyform = new byok_policy_form($url);
+if ($data = $policyform->get_data()) {
+    $policy->save((string) $data->access, byok_policy_form::read_conditions($data));
+    redirect(
+        $url,
+        get_string('byok:saved', 'aiprovider_router'),
+        null,
+        \core\output\notification::NOTIFY_SUCCESS,
+    );
+}
+$policyform->set_data(byok_policy_form::to_form_data($policy));
+
 $form = new byok_targets_form($url, ['targets' => $targets]);
 
 if ($data = $form->get_data()) {
@@ -82,6 +99,21 @@ $form->set_data($defaults);
 
 echo $OUTPUT->header();
 echo $OUTPUT->box(get_string('byok:intro', 'aiprovider_router'));
+
+echo $OUTPUT->heading(get_string('eligibility:heading', 'aiprovider_router'), 3);
+echo html_writer::div(get_string('eligibility:intro', 'aiprovider_router'));
+$unknown = $policy->get_unknown_conditions();
+if ($unknown) {
+    // A condition saved by a newer version of this plugin. Every condition has to hold,
+    // so ignoring one can only admit somebody the newer version would have refused.
+    echo $OUTPUT->notification(
+        get_string('eligibility:unknown', 'aiprovider_router', s(implode(', ', $unknown))),
+        'warning',
+    );
+}
+$policyform->display();
+
+echo $OUTPUT->heading(get_string('byok:targets', 'aiprovider_router'), 3);
 
 if (!$targets) {
     echo $OUTPUT->notification(get_string('defaulttarget:none', 'aiprovider_router'), 'info');

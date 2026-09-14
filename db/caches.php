@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Version details for aiprovider_router.
+ * Cache definitions for aiprovider_router.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
@@ -24,9 +24,21 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->component = 'aiprovider_router';
-$plugin->version = 2026091400;
-$plugin->requires = 2025041400;
-$plugin->supported = [500, 502];
-$plugin->maturity = MATURITY_ALPHA;
-$plugin->release = '0.0.1-dev';
+$definitions = [
+    // Whether each person may bring their own key. Asked on every request that would use
+    // one, and answering it means looking across the site's role assignments, which is
+    // not a query to repeat per request.
+    //
+    // The routing rules themselves are deliberately not cached: they are few, and a
+    // stale rule is a request sent to the wrong provider. This is the other case. The
+    // lifetime is short because it is what a change in who holds which role waits for;
+    // a change to the policy itself empties this outright instead.
+    'eligibility' => [
+        'mode' => cache_store::MODE_APPLICATION,
+        'simplekeys' => true,
+        'simpledata' => true,
+        'staticacceleration' => true,
+        'staticaccelerationsize' => 20,
+        'ttl' => 300,
+    ],
+];

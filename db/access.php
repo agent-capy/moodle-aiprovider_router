@@ -28,6 +28,19 @@ $capabilities = [
     // Seeing how much AI a course used, and which provider answered. The figures are
     // about the course rather than about the people in it: no prompt and no user is
     // shown, which is why teaching a course is enough to be allowed it.
+    // Registering and replacing the key a course pays with. Kept separate from bringing
+    // a key of one's own, which is governed by the site's policy rather than by a
+    // capability: a course key belongs to the course, so the question is who may act for
+    // the course, and that is a capability like any other.
+    'aiprovider/router:managecoursekey' => [
+        'captype' => 'write',
+        'contextlevel' => CONTEXT_COURSE,
+        'archetypes' => [
+            'editingteacher' => CAP_ALLOW,
+            'manager' => CAP_ALLOW,
+        ],
+    ],
+
     'aiprovider/router:viewusage' => [
         'captype' => 'read',
         'contextlevel' => CONTEXT_COURSE,
