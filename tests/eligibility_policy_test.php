@@ -16,8 +16,14 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\eligibility\cohort;
 use aiprovider_router\eligibility\profilefield;
 use aiprovider_router\eligibility\teaching;
+
+defined('MOODLE_INTERNAL') || die();
+
+global $CFG;
+require_once($CFG->dirroot . '/cohort/lib.php');
 
 /**
  * Tests for who the site allows to bring their own key.
@@ -34,6 +40,7 @@ use aiprovider_router\eligibility\teaching;
 #[\PHPUnit\Framework\Attributes\CoversClass(eligibility_policy::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(teaching::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(profilefield::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(cohort::class)]
 final class eligibility_policy_test extends \advanced_testcase {
     /** @var eligibility_policy The policy under test. */
     protected eligibility_policy $policy;
@@ -144,23 +151,118 @@ final class eligibility_policy_test extends \advanced_testcase {
         $this->assertFalse($this->policy->is_eligible((int) $other->id));
     }
 
-    public function test_every_condition_has_to_hold(): void {
-        $this->getDataGenerator()->create_custom_profile_field([
-            'datatype' => 'text',
-            'shortname' => 'staffcategory',
-            'name' => 'Staff category',
-        ]);
+    /**
+     * Somebody who teaches but is in no cohort, and a cohort they are not in.
+     *
+     * @return array The user and the cohort.
+     */
+    protected function teacher_outside_a_cohort(): array {
         $course = $this->getDataGenerator()->create_course();
-        $teacher = $this->getDataGenerator()->create_user(['profile_field_staffcategory' => 'Visitor']);
+        $teacher = $this->getDataGenerator()->create_user();
         $this->getDataGenerator()->enrol_user($teacher->id, $course->id, 'editingteacher');
+        $cohort = $this->getDataGenerator()->create_cohort();
+
+        return [$teacher, $cohort];
+    }
+
+    public function test_any_one_condition_is_enough_by_default(): void {
+        [$teacher, $cohort] = $this->teacher_outside_a_cohort();
 
         $this->policy->save(eligibility_policy::ACCESS_CONDITIONS, [
             'teaching' => ['roles' => [$this->role('editingteacher')]],
-            'profilefield' => ['field' => 'staffcategory', 'values' => ['Academic']],
+            'cohort' => ['cohorts' => [(int) $cohort->id]],
         ]);
 
-        // Teaching is not enough on its own once a second condition is named.
+        // Teachers, or anyone in the BYOK cohort: the ordinary shape of this policy, and
+        // a site with one policy and no list behind it has nowhere else to express it.
+        $this->assertSame(eligibility_policy::MATCH_ANY, $this->policy->get_match());
+        $this->assertTrue($this->policy->is_eligible((int) $teacher->id));
+    }
+
+    public function test_a_site_can_require_every_condition_instead(): void {
+        [$teacher, $cohort] = $this->teacher_outside_a_cohort();
+
+        $this->policy->save(
+            eligibility_policy::ACCESS_CONDITIONS,
+            [
+                'teaching' => ['roles' => [$this->role('editingteacher')]],
+                'cohort' => ['cohorts' => [(int) $cohort->id]],
+            ],
+            eligibility_policy::MATCH_ALL,
+        );
+
+        // The same two conditions now mean "teachers who are also in that cohort".
         $this->assertFalse($this->policy->is_eligible((int) $teacher->id));
+
+        cohort_add_member((int) $cohort->id, (int) $teacher->id);
+        eligibility_policy::purge();
+
+        $this->assertTrue($this->policy->is_eligible((int) $teacher->id));
+    }
+
+    public function test_a_cohort_member_matches_and_somebody_else_does_not(): void {
+        $cohort = $this->getDataGenerator()->create_cohort();
+        $member = $this->getDataGenerator()->create_user();
+        $other = $this->getDataGenerator()->create_user();
+        cohort_add_member((int) $cohort->id, (int) $member->id);
+
+        $this->policy->save(eligibility_policy::ACCESS_CONDITIONS, [
+            'cohort' => ['cohorts' => [(int) $cohort->id]],
+        ]);
+
+        $this->assertTrue($this->policy->is_eligible((int) $member->id));
+        $this->assertFalse($this->policy->is_eligible((int) $other->id));
+    }
+
+    public function test_a_cohort_condition_with_no_cohort_chosen_allows_nobody(): void {
+        $cohort = $this->getDataGenerator()->create_cohort();
+        $member = $this->getDataGenerator()->create_user();
+        cohort_add_member((int) $cohort->id, (int) $member->id);
+
+        $this->policy->save(eligibility_policy::ACCESS_CONDITIONS, ['cohort' => ['cohorts' => []]]);
+
+        $this->assertFalse($this->policy->is_eligible((int) $member->id));
+    }
+
+    public function test_a_cohort_that_has_been_deleted_is_named_as_such(): void {
+        $condition = new cohort(['cohorts' => [999999]]);
+
+        $this->assertFalse($condition->is_met((int) $this->getDataGenerator()->create_user()->id));
+        $this->assertStringContainsString('999999', $condition->get_description());
+    }
+
+    public function test_two_cohorts_of_the_same_name_can_be_told_apart(): void {
+        $category = $this->getDataGenerator()->create_category(['name' => 'Science']);
+        $this->getDataGenerator()->create_cohort(['name' => 'Pilot']);
+        $this->getDataGenerator()->create_cohort([
+            'name' => 'Pilot',
+            'contextid' => \context_coursecat::instance($category->id)->id,
+        ]);
+
+        $options = cohort::get_cohort_options();
+
+        $this->assertCount(2, $options);
+        $this->assertContains('Pilot', $options);
+        $this->assertContains('Pilot (Science)', $options);
+    }
+
+    public function test_an_unknown_match_setting_falls_back_to_any(): void {
+        [$teacher, $cohort] = $this->teacher_outside_a_cohort();
+        $this->policy->save(eligibility_policy::ACCESS_CONDITIONS, [
+            'teaching' => ['roles' => [$this->role('editingteacher')]],
+            'cohort' => ['cohorts' => [(int) $cohort->id]],
+        ], eligibility_policy::MATCH_ALL);
+        set_config(eligibility_policy::MATCH_SETTING, 'sometimes', 'aiprovider_router');
+        eligibility_policy::purge();
+
+        $this->assertSame(eligibility_policy::MATCH_ANY, $this->policy->get_match());
+        $this->assertTrue($this->policy->is_eligible((int) $teacher->id));
+    }
+
+    public function test_an_unknown_match_cannot_be_saved(): void {
+        $this->expectException(\coding_exception::class);
+
+        $this->policy->save(eligibility_policy::ACCESS_CONDITIONS, [], 'sometimes');
     }
 
     public function test_an_answer_is_remembered_rather_than_worked_out_again(): void {

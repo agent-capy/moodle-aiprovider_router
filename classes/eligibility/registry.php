@@ -35,6 +35,7 @@ class registry {
      */
     protected const TYPES = [
         'teaching',
+        'cohort',
         'profilefield',
     ];
 

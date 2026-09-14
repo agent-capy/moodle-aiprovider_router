@@ -57,6 +57,15 @@ class eligibility_policy {
     /** @var string The setting holding the conditions. */
     public const POLICY_SETTING = 'byokpolicy';
 
+    /** @var string Somebody has to satisfy every condition. */
+    public const MATCH_ALL = 'all';
+
+    /** @var string Satisfying any one condition is enough. */
+    public const MATCH_ANY = 'any';
+
+    /** @var string The setting holding which of those two applies. */
+    public const MATCH_SETTING = 'byokmatch';
+
     /** @var string The cache area holding what was decided about each person. */
     public const CACHE_AREA = 'eligibility';
 
@@ -81,6 +90,32 @@ class eligibility_policy {
     }
 
     /**
+     * Whether somebody has to satisfy every condition or just one of them.
+     *
+     * Spelled out rather than fixed, because a policy is a single statement with no list
+     * behind it. Routing rules can express a choice by being several rules; this cannot,
+     * so with only one of the two operators available half of the policies a site would
+     * want to write could not be written at all. "Teachers, or anyone in the BYOK cohort"
+     * and "teachers who are also in it" are both ordinary things to mean.
+     *
+     * @return string One of the match constants.
+     */
+    public function get_match(): string {
+        $match = (string) get_config('aiprovider_router', self::MATCH_SETTING);
+
+        return in_array($match, self::get_match_options(), true) ? $match : self::MATCH_ANY;
+    }
+
+    /**
+     * The two ways conditions can be combined, for a form.
+     *
+     * @return string[] The match constants.
+     */
+    public static function get_match_options(): array {
+        return [self::MATCH_ANY, self::MATCH_ALL];
+    }
+
+    /**
      * The conditions the site has set, as stored.
      *
      * @return array Configuration keyed by condition type.
@@ -94,10 +129,10 @@ class eligibility_policy {
     /**
      * The conditions the site has set, as objects this version understands.
      *
-     * A stored type this version does not know is dropped rather than guessed at, and
-     * because every remaining condition still has to hold, dropping one can only ever
-     * admit somebody a newer version would have refused. That is why an unknown type is
-     * also reported by the policy screen rather than passed over in silence.
+     * A stored type this version does not know is dropped rather than guessed at, which
+     * changes who is admitted in whichever direction the matching rule runs. That is why
+     * an unknown type is reported on the policy screen rather than passed over in
+     * silence: only a person can say whether the difference matters.
      *
      * @return eligibility_base[] Conditions keyed by type.
      */
@@ -170,13 +205,17 @@ class eligibility_policy {
             // Reading that as "everybody" would be the opposite of what was asked for.
             return false;
         }
+
+        $all = $this->get_match() === self::MATCH_ALL;
         foreach ($conditions as $condition) {
-            if (!$condition->is_met($userid)) {
-                return false;
+            if ($condition->is_met($userid) !== $all) {
+                // Under "any", the first condition met settles it; under "all", the first
+                // one not met does.
+                return !$all;
             }
         }
 
-        return true;
+        return $all;
     }
 
     /**
@@ -184,12 +223,17 @@ class eligibility_policy {
      *
      * @param string $access One of the access constants.
      * @param array $conditions Configuration keyed by condition type.
+     * @param string $match One of the match constants.
      */
-    public function save(string $access, array $conditions): void {
+    public function save(string $access, array $conditions, string $match = self::MATCH_ANY): void {
         if (!in_array($access, self::get_access_options(), true)) {
             throw new \coding_exception('Unknown access setting: ' . $access);
         }
+        if (!in_array($match, self::get_match_options(), true)) {
+            throw new \coding_exception('Unknown match setting: ' . $match);
+        }
         set_config(self::ACCESS_SETTING, $access, 'aiprovider_router');
+        set_config(self::MATCH_SETTING, $match, 'aiprovider_router');
         set_config(self::POLICY_SETTING, json_encode($conditions), 'aiprovider_router');
         self::purge();
     }

@@ -63,7 +63,11 @@ $policy = new eligibility_policy();
 // Both forms post here. Moodle tells them apart by the hidden field each one adds.
 $policyform = new byok_policy_form($url);
 if ($data = $policyform->get_data()) {
-    $policy->save((string) $data->access, byok_policy_form::read_conditions($data));
+    $policy->save(
+        (string) $data->access,
+        byok_policy_form::read_conditions($data),
+        (string) ($data->match ?? eligibility_policy::MATCH_ANY),
+    );
     redirect(
         $url,
         get_string('byok:saved', 'aiprovider_router'),

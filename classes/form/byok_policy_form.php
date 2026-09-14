@@ -47,6 +47,15 @@ class byok_policy_form extends \moodleform {
         $mform->setDefault('access', eligibility_policy::ACCESS_NOBODY);
         $mform->addHelpButton('access', 'eligibility:access', 'aiprovider_router');
 
+        $matches = [];
+        foreach (eligibility_policy::get_match_options() as $match) {
+            $matches[$match] = get_string('eligibility:match:' . $match, 'aiprovider_router');
+        }
+        $mform->addElement('select', 'match', get_string('eligibility:match', 'aiprovider_router'), $matches);
+        $mform->setDefault('match', eligibility_policy::MATCH_ANY);
+        $mform->addHelpButton('match', 'eligibility:match', 'aiprovider_router');
+        $mform->hideIf('match', 'access', 'neq', eligibility_policy::ACCESS_CONDITIONS);
+
         foreach (registry::get_types() as $type) {
             $class = 'aiprovider_router\\eligibility\\' . $type;
             $class::add_to_form($mform);
@@ -84,7 +93,7 @@ class byok_policy_form extends \moodleform {
      * @return array Values keyed by element name.
      */
     public static function to_form_data(eligibility_policy $policy): array {
-        $values = ['access' => $policy->get_access()];
+        $values = ['access' => $policy->get_access(), 'match' => $policy->get_match()];
         $stored = $policy->get_stored_conditions();
         foreach (registry::get_types() as $type) {
             $class = 'aiprovider_router\\eligibility\\' . $type;

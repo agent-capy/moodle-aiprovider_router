@@ -19,14 +19,17 @@ namespace aiprovider_router\eligibility;
 /**
  * One thing the site requires of somebody before they may bring their own key.
  *
- * Every enabled condition has to hold, and choice within a condition is how alternatives
- * are expressed, exactly as for routing rules. The difference is when they are asked:
- * these are asked again on every request, not only when a key is registered, so that a
- * site which tightens its policy stops using the keys it no longer allows without anybody
- * having to go and find them.
+ * Whether all of them have to hold or any one of them is enough is the site's choice,
+ * because a policy is a single statement with no list behind it: routing rules express a
+ * choice by being several rules, and this cannot. Choice within one condition is always
+ * an or, exactly as for routing rules.
  *
- * A condition with no configuration is not met. A policy that fell open when somebody
- * saved an empty form would hand the site's AI budget to everybody.
+ * They differ from routing conditions in when they are asked: again on every request, not
+ * only when a key is registered, so that a site which tightens its policy stops using the
+ * keys it no longer allows without anybody having to go and find them.
+ *
+ * A condition with no configuration is not met, under either matching rule. A policy that
+ * fell open when somebody saved an empty form would hand the site's AI to everybody.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
