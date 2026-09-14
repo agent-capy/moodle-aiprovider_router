@@ -50,6 +50,15 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var string Reason recorded when the router turned the request down on purpose. */
     public const REASON_DECLINED = 'no_rule_matched';
 
+    /** @var string Reason recorded when a registered key could not be decrypted. */
+    public const REASON_KEY_UNREADABLE = 'byok_decrypt_failed';
+
+    /** @var string Reason recorded when the provider refused the key it was given. */
+    public const REASON_KEY_REJECTED = 'byok_key_rejected';
+
+    /** @var string Reason recorded when every instance the payer has a key for failed. */
+    public const REASON_NO_KEY_LEFT = 'byok_no_key_left';
+
     /** @var string[] Finish reasons that mean the token budget ran out. */
     protected const TRUNCATED = ['length', 'max_tokens', 'model_length'];
 
@@ -89,12 +98,22 @@ abstract class abstract_processor extends \core_ai\process_base {
         $resolver = $this->get_resolver();
         $candidates = $resolver->get_candidates($this->action);
         if (!$candidates) {
-            // Declining and being misconfigured both leave nothing to delegate to, and
-            // an administrator reading the monitor needs to tell them apart: one is the
-            // site doing what it was told, the other is waiting to be fixed.
-            $outcome = $resolver->was_declined()
-                ? $this->fail(503, 'norulematched', self::REASON_DECLINED)
-                : $this->fail(503, 'nodefaulttarget', self::REASON_NO_TARGET);
+            // Three quite different things leave nothing to delegate to, and an
+            // administrator reading the monitor needs to tell them apart: the site doing
+            // what it was told, a site waiting to be fixed, and a key that is registered
+            // and cannot be read. The last of those must not be quietly retried
+            // elsewhere: somebody asked to pay for this request themselves.
+            if ($resolver->get_unreadable_key() !== null) {
+                $outcome = $this->fail(
+                    500,
+                    'byokdecryptfailed:' . $resolver->get_keysource(),
+                    self::REASON_KEY_UNREADABLE,
+                );
+            } else if ($resolver->was_declined()) {
+                $outcome = $this->fail(503, 'norulematched', self::REASON_DECLINED);
+            } else {
+                $outcome = $this->fail(503, 'nodefaulttarget', self::REASON_NO_TARGET);
+            }
             $this->record_usage($resolver, null, null, 0);
 
             return $outcome;
@@ -104,8 +123,9 @@ abstract class abstract_processor extends \core_ai\process_base {
         $last = null;
         $threw = false;
         $attempts = 0;
-        foreach ($candidates as $target) {
+        foreach ($candidates as $candidate) {
             $attempts++;
+            $target = $candidate->target;
             try {
                 $response = $delegator->delegate($target, $this->action);
             } catch (\Throwable $e) {
@@ -121,13 +141,27 @@ abstract class abstract_processor extends \core_ai\process_base {
             }
 
             if (!$response->get_success()) {
+                if ($candidate->is_byok() && $this->was_key_refused($response)) {
+                    // The key reached the provider and the provider would not have it.
+                    // Nobody else's key is going to change that, and the person who
+                    // brought it is the only one who can put it right, so they are told
+                    // rather than moved quietly onto somebody else's money.
+                    $outcome = $this->fail(
+                        (int) $response->get_errorcode(),
+                        'byokkeyrejected:' . $candidate->keysource,
+                        self::REASON_KEY_REJECTED,
+                    );
+                    $this->record_usage($resolver, $candidate, null, $attempts);
+
+                    return $outcome;
+                }
                 $last = $response;
                 continue;
             }
 
             $data = $response->get_response_data();
             if ($this->has_content($data)) {
-                $this->record_usage($resolver, $target, $data, $attempts, true);
+                $this->record_usage($resolver, $candidate, $data, $attempts, true);
 
                 return ['success' => true] + $data;
             }
@@ -140,7 +174,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                 $outcome = $this->fail(502, 'emptyresponse', self::REASON_EMPTY);
                 // The target still charged for the thinking it did, so the tokens are
                 // recorded even though the user got nothing readable.
-                $this->record_usage($resolver, $target, $data, $attempts);
+                $this->record_usage($resolver, $candidate, $data, $attempts);
 
                 return $outcome;
             }
@@ -149,11 +183,29 @@ abstract class abstract_processor extends \core_ai\process_base {
 
         // Pass the target's status code through so that a 429 stays a 429.
         $code = $last === null ? 502 : ($last->get_errorcode() ?: 502);
-        $reason = ($last === null && $threw) ? self::REASON_TARGET_THREW : self::REASON_ALL_FAILED;
-        $outcome = $this->fail($code, 'alltargetsfailed', $reason);
+        $keysource = $resolver->get_keysource();
+        if ($keysource !== rule::KEYSOURCE_SITE) {
+            // Everything the payer holds a key for has been tried. Worth its own reason:
+            // it says the fallback chain was short because of who was paying, not that
+            // the site's providers are all down.
+            $outcome = $this->fail($code, 'byoknokeyleft:' . $keysource, self::REASON_NO_KEY_LEFT);
+        } else {
+            $reason = ($last === null && $threw) ? self::REASON_TARGET_THREW : self::REASON_ALL_FAILED;
+            $outcome = $this->fail($code, 'alltargetsfailed', $reason);
+        }
         $this->record_usage($resolver, null, null, $attempts);
 
         return $outcome;
+    }
+
+    /**
+     * Whether a failure was the provider refusing the key rather than anything else.
+     *
+     * @param response_base $response What the target returned.
+     * @return bool True when the key itself was refused.
+     */
+    protected function was_key_refused(response_base $response): bool {
+        return in_array((int) $response->get_errorcode(), key_tester::REJECTED, true);
     }
 
     /**
@@ -164,20 +216,24 @@ abstract class abstract_processor extends \core_ai\process_base {
      * apart from targets breaking, which means something quite different.
      *
      * @param target_resolver $resolver The resolver that chose, holding the matched rule.
-     * @param \core_ai\provider|null $target The target that answered, if one did.
+     * @param candidate|null $candidate The candidate that answered, if one did.
      * @param array|null $data The response data from that target.
      * @param int $attempts How many targets were tried.
      * @param bool $success Whether the user got an answer.
      */
     protected function record_usage(
         target_resolver $resolver,
-        ?\core_ai\provider $target,
+        ?candidate $candidate,
         ?array $data,
         int $attempts,
         bool $success = false,
     ): void {
         $context = $resolver->get_evaluated_context($this->action);
         $rule = $resolver->get_matched_rule();
+        $target = $candidate?->target;
+        // A request that never reached a target can still have been somebody's to pay
+        // for, and a key that could not be read is exactly the case worth finding again.
+        $keyid = $candidate?->get_keyid() ?? $resolver->get_unreadable_key()?->get('id');
 
         $entry = (object) [
             'timecreated' => time(),
@@ -196,6 +252,8 @@ abstract class abstract_processor extends \core_ai\process_base {
             'errorcode' => $success ? null : $this->failurecode,
             'reason' => $success ? null : $this->reason,
             'attempts' => $attempts,
+            'keysource' => $resolver->get_keysource(),
+            'keyid' => $keyid === null ? null : (int) $keyid,
             'prompttokens' => isset($data['prompttokens']) ? (int) $data['prompttokens'] : null,
             'completiontokens' => isset($data['completiontokens']) ? (int) $data['completiontokens'] : null,
         ];

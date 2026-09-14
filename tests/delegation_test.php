@@ -69,7 +69,7 @@ final class delegation_test extends \advanced_testcase {
     /**
      * Run generate_text through the router against the given targets.
      *
-     * @param \core_ai\provider[] $targets The candidates, in order.
+     * @param \core_ai\provider[]|candidate[] $targets The candidates, in order.
      * @return \core_ai\aiactions\responses\response_base The response the router produced.
      */
     protected function route(array $targets): \core_ai\aiactions\responses\response_base {
@@ -79,7 +79,13 @@ final class delegation_test extends \advanced_testcase {
         $action = new generate_text(contextid: \context_system::instance()->id, userid: 2, prompttext: 'Hello');
 
         $resolver = $this->createStub(target_resolver::class);
-        $resolver->method('get_candidates')->willReturn($targets);
+        $resolver->method('get_candidates')->willReturn(array_map(
+            static fn($target) => $target instanceof candidate ? $target : new candidate($target),
+            $targets,
+        ));
+        // A stub answers a string method with the empty string, which is not one of the
+        // key sources and would send every exhausted chain down the brought key path.
+        $resolver->method('get_keysource')->willReturn(rule::KEYSOURCE_SITE);
 
         $processor = new class ($router, $action, $resolver, new delegator($DB)) extends process_generate_text {
             /**

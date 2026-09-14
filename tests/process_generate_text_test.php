@@ -58,7 +58,13 @@ final class process_generate_text_test extends \advanced_testcase {
             : [];
 
         $resolver = $this->createStub(target_resolver::class);
-        $resolver->method('get_candidates')->willReturn($targets);
+        $resolver->method('get_candidates')->willReturn(array_map(
+            static fn($target) => $target instanceof candidate ? $target : new candidate($target),
+            $targets,
+        ));
+        // A stub answers a string method with the empty string, which is not one of the
+        // key sources and would send every exhausted chain down the brought key path.
+        $resolver->method('get_keysource')->willReturn(rule::KEYSOURCE_SITE);
 
         $delegator = $this->createStub(delegator::class);
         $delegator->method('delegate')->willReturnOnConsecutiveCalls(...$responses ?: [null]);

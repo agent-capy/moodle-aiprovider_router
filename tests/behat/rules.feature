@@ -56,6 +56,16 @@ Feature: Routing requests by rule
     When I visit "/ai/provider/router/rules.php"
     Then I should see "Never reached: a rule above this one takes every request."
 
+  Scenario: A rule paid for with a brought key says so, and warns when there is nowhere to put one
+    Given I visit "/ai/provider/router/rule.php"
+    When I set the following fields to these values:
+      | Rule name     | Teachers pay for their own          |
+      | Delegate to   | Test OpenAI                         |
+      | Paid for with | A key the person asking has brought |
+    And I click on "Save changes" "button"
+    Then I should see "Paid for with: A key the person asking has brought"
+    And I should see "nobody has said which field of this provider's configuration a key goes in"
+
   Scenario: A rule cannot be saved without a delegation target
     Given I visit "/ai/provider/router/rule.php"
     When I set the field "Rule name" to "No target"

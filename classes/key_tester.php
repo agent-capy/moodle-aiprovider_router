@@ -43,7 +43,7 @@ class key_tester {
     protected const PROMPT = 'Hi';
 
     /** @var int[] Status codes that mean the key itself was refused. */
-    protected const REJECTED = [401, 403];
+    public const REJECTED = [401, 403];
 
     /**
      * Constructor.

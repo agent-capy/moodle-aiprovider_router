@@ -24,12 +24,12 @@ Developed as part of a 2026 domestic research and development project funded by 
 - **Dashboards** — what the site used, day by day and by target, action and model, for
   administrators, and a smaller per-course view for teachers
 - **Daily summaries** that outlive the detail rows, which are kept for a set period
+- **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
+  `\core\encryption`, a policy controlling who may bring one, and rules that send a
+  request with somebody's own key instead of the site's
 
 Still to come, and not in this version:
 
-- **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
-  `\core\encryption`, with a policy controlling who may bring one. Keys can be
-  registered and tested; **no rule can send a request with one yet**
 - **Budget conditions**, which depend on the dashboards above
 
 ## Settings
@@ -85,11 +85,14 @@ it is not in the admin tree: Moodle never reads an `aiprovider` plugin's `settin
 so there is no admin tree entry to hang it on.
 
 The list shows the rules in the order they are considered, with what each one requires,
-where it delegates, and buttons to reorder, copy, switch off or delete. Two things are
+where it delegates, whose key pays for it, and buttons to reorder, copy, switch off or
+delete. Two things are
 called out there, because both are easy to create and hard to spot afterwards:
 
 - a rule with **no conditions**, which takes every request that reaches it;
-- any rule **below** such a rule, which nothing can reach.
+- any rule **below** such a rule, which nothing can reach;
+- a rule asking for a **brought key** at a provider nobody has said the key field of,
+  which can never be honoured and whose only symptom is that it never claims anything.
 
 A rule naming a provider instance that has since been deleted is flagged in the list and
 reported by the **Rule delegation targets** status check. Requests matching it fall
@@ -139,6 +142,8 @@ condition, while "teacher, in this course" is two.
 | Situation | What the router does |
 | --- | --- |
 | A rule matches and its target can be used | Delegates there, with the default delegation target behind it as a fallback |
+| A rule matches, asks for a brought key, and there is one | Delegates there with that key, followed only by the other instances the same payer has a key for |
+| A rule matches, asks for a brought key, and there is none | Moves on to the next rule. Holding a key is part of what such a rule requires |
 | A rule matches but its target has been deleted, switched off, or cannot perform the action | Moves on to the next rule. There is nothing to carry the rule out with, and stopping there would strand the request |
 | No rule matches | Follows the *When no rule matches* setting |
 | *When no rule matches* is set to decline | The default delegation target is not used as a fallback either. An administrator who keeps unclaimed requests away from a provider does not expect a failure to send one there |
@@ -295,9 +300,14 @@ A course key stays when the teacher who entered it stops teaching, and any teach
 course can replace it. That is the point of it: a key registered so that a class can use
 AI should not stop working because one member of staff moved on.
 
-**Nothing here routes anything yet.** Keys can be registered, tested and removed, and the
-policy decides who may bring one, but no rule can be told to use a key. That arrives with
-the rest of this feature.
+A rule decides when a brought key is used, through its **Paid for with** setting. Holding
+a key is then part of what the rule requires: where there is none the rule does not claim
+the request and the next rule is considered, so
+
+1. *Teachers → OpenAI, paid for with a key the person asking has brought*
+2. *Teachers → Sakura AI Engine, paid for by the site*
+
+reads as "their own key if they have one, ours otherwise".
 
 ### Who may bring one
 
@@ -333,6 +343,25 @@ The encryption key lives in a file under the site data directory, not in the dat
 none of them**, which the site status report says as an error rather than leaving it to be
 discovered one failed request at a time.
 
+### What happens when a brought key is used
+
+| Situation | What the router does |
+| --- | --- |
+| No key is registered for the person, or for the course | The rule does not claim the request. This is an ordinary state, not a failure, and the next rule is considered |
+| The rule asks for a course key and the request came from outside any course | The same: there is no course to charge |
+| The person may no longer bring a key | The same. Their key is not deleted; it stops being used |
+| Nobody has said which field this provider's key goes in | The same. Delegating without putting the key anywhere would charge the site while the person believed they were paying |
+| The key is registered and cannot be decrypted | **Stops the request** and says so. This is a fault in the site, and carrying on to the next rule would quietly move the cost onto the site |
+| The provider refuses the key (401 or 403) | **Stops the request** and tells the person whose key it was. Nobody else's key would change the answer, and they are the only one who can put it right |
+| The provider fails for some other reason | Tries the other instances the same person or course has a key for, and no others |
+
+That last line is the rule the whole feature turns on: **while a brought key is paying,
+the fallback chain never leaves it.** The default delegation target does not stand behind
+a request somebody asked to pay for themselves.
+
+Requests are recorded with who paid and which key, and the dashboard shows one payer at a
+time, so what the site spent stays separate from what people spent themselves.
+
 ### Testing a key
 
 Testing sends one very short request to the provider and reports whether the key was
@@ -355,6 +384,7 @@ The router tries its candidates in order and returns the first usable answer.
 | Throws | Tries the next candidate. Moodle does not catch exceptions on the way to a provider, and the providers that ship with Moodle catch Guzzle's `RequestException` but not `ConnectException`, so an unreachable endpoint would otherwise end the whole request |
 | Answers with nothing | Tries the next candidate, because an empty answer shown as though it had worked is worse than a failure |
 | Answers with nothing after running out of tokens | Reports it rather than retrying. Another target would spend its budget the same way, and shortening the input is something the user can act on |
+| Refuses a brought key | Reports it rather than retrying. See *Bringing your own key* |
 
 Messages shown to users never name a provider, a rule or an instance. Details that would
 identify a target — including what an exception said — go to the developer log instead.

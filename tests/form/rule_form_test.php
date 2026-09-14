@@ -158,6 +158,24 @@ final class rule_form_test extends \advanced_testcase {
         $this->assertArrayHasKey('targetid', $errors);
     }
 
+    public function test_the_form_refuses_a_key_source_that_does_not_exist(): void {
+        $form = new rule_form(null, ['targets' => [7 => 'Somewhere']]);
+
+        $errors = $form->validation(
+            ['name' => 'Strange', 'targetid' => 7, 'keysource' => 'somebodyelse'],
+            [],
+        );
+
+        $this->assertArrayHasKey('keysource', $errors);
+    }
+
+    public function test_a_rule_that_says_nothing_about_keys_is_paid_for_by_the_site(): void {
+        $form = new rule_form(null, ['targets' => [7 => 'Somewhere']]);
+
+        // What every rule written before this setting existed meant.
+        $this->assertSame([], $form->validation(['name' => 'Fine', 'targetid' => 7], []));
+    }
+
     public function test_the_form_refuses_a_window_that_ends_before_it_starts(): void {
         $form = new rule_form(null, ['targets' => [7 => 'Somewhere']]);
 

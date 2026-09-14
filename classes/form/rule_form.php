@@ -57,6 +57,15 @@ class rule_form extends \moodleform {
         $mform->setType('targetid', PARAM_INT);
         $mform->addHelpButton('targetid', 'rule:target', 'aiprovider_router');
 
+        $keysources = [];
+        foreach (rule::get_keysources() as $keysource) {
+            $keysources[$keysource] = get_string('keysource:' . $keysource, 'aiprovider_router');
+        }
+        $mform->addElement('select', 'keysource', get_string('rule:keysource', 'aiprovider_router'), $keysources);
+        $mform->setType('keysource', PARAM_ALPHA);
+        $mform->setDefault('keysource', rule::KEYSOURCE_SITE);
+        $mform->addHelpButton('keysource', 'rule:keysource', 'aiprovider_router');
+
         $mform->addElement('advcheckbox', 'enabled', get_string('rule:enabled', 'aiprovider_router'));
         $mform->setDefault('enabled', 1);
 
@@ -102,6 +111,7 @@ class rule_form extends \moodleform {
         $candidate = new rule();
         $candidate->set('name', (string) ($data['name'] ?? ''));
         $candidate->set('targetid', (int) ($data['targetid'] ?? 0));
+        $candidate->set('keysource', (string) ($data['keysource'] ?? rule::KEYSOURCE_SITE));
         $candidate->set('timestart', (int) ($data['timestart'] ?? 0));
         $candidate->set('timeend', (int) ($data['timeend'] ?? 0));
 

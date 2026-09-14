@@ -33,6 +33,13 @@ use core_ai\provider as ai_provider;
  * alongside other providers, where declining simply means the next provider is asked.
  * Declining is also a legitimate way to keep AI spending to the cases rules describe.
  *
+ * A rule can also say that somebody other than the site pays. Holding a key is then part
+ * of what the rule requires: where there is none the rule simply does not apply and the
+ * next one is asked, which is how "their own key if they have one, the site's otherwise"
+ * is written as two rules. A key that is there and cannot be read is the opposite case
+ * and stops the request, because carrying on would charge the site for a request somebody
+ * asked to pay for themselves.
+ *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -46,6 +53,12 @@ class target_resolver {
 
     /** @var evaluation_context|null What the rules were told about the last request. */
     protected ?evaluation_context $evaluated = null;
+
+    /** @var string Whose key the last resolution asked for. */
+    protected string $keysource = rule::KEYSOURCE_SITE;
+
+    /** @var key|null A key that is registered and cannot be decrypted. */
+    protected ?key $unreadable = null;
 
     /**
      * Constructor.
@@ -62,11 +75,13 @@ class target_resolver {
      * Candidate targets for an action, in the order they should be tried.
      *
      * @param action_base $action The action to be delegated.
-     * @return ai_provider[] Usable targets. Empty when nothing can handle the action.
+     * @return candidate[] Usable targets. Empty when nothing can handle the action.
      */
     public function get_candidates(action_base $action): array {
         $this->matchedrule = null;
         $this->declined = false;
+        $this->keysource = rule::KEYSOURCE_SITE;
+        $this->unreadable = null;
         $instances = $this->get_instances_by_id();
 
         $this->evaluated = $this->get_evaluation_context($action);
@@ -75,12 +90,46 @@ class target_resolver {
             if ($target === null || !$this->is_usable($target, $action)) {
                 continue;
             }
-            $this->matchedrule = $rule;
+            if (!$rule->is_byok()) {
+                $this->matchedrule = $rule;
 
-            return $this->with_fallback($target, $instances, $action);
+                return $this->with_fallback(new candidate($target), $instances, $action);
+            }
+
+            $candidates = $this->with_brought_key($rule, $target, $instances, $action);
+            if ($candidates === null) {
+                // Nobody has a key here. An ordinary state, and the rule does not apply.
+                continue;
+            }
+            $this->matchedrule = $rule;
+            $this->keysource = (string) $rule->get('keysource');
+
+            return $candidates;
         }
 
         return $this->get_unmatched_candidates($instances, $action);
+    }
+
+    /**
+     * Whose key the last resolution asked for.
+     *
+     * @return string One of the rule key sources.
+     */
+    public function get_keysource(): string {
+        return $this->keysource;
+    }
+
+    /**
+     * The key that stopped the last resolution by being unreadable, if one did.
+     *
+     * A registered key that cannot be decrypted is a fault in the site, not an absent
+     * key, and the two lead to opposite behaviour. Reporting it separately is what keeps
+     * them apart at the one point where they otherwise look alike: no candidates.
+     *
+     * @return key|null The key, or null when nothing of the sort happened.
+     */
+    public function get_unreadable_key(): ?key {
+        return $this->unreadable;
     }
 
     /**
@@ -127,7 +176,7 @@ class target_resolver {
      *
      * @param ai_provider[] $instances Every provider instance, keyed by id.
      * @param action_base $action The action to be delegated.
-     * @return ai_provider[] The candidates, which may be none.
+     * @return candidate[] The candidates, which may be none.
      */
     protected function get_unmatched_candidates(array $instances, action_base $action): array {
         if ($this->router->get_nomatch_behaviour() === provider::NOMATCH_DECLINE) {
@@ -138,7 +187,146 @@ class target_resolver {
 
         $target = $this->get_default_target($instances, $action);
 
-        return $target === null ? [] : [$target];
+        return $target === null ? [] : [new candidate($target)];
+    }
+
+    /**
+     * The candidates for a rule that asks somebody other than the site to pay.
+     *
+     * @param rule $rule The matching rule.
+     * @param ai_provider $target The instance it names.
+     * @param ai_provider[] $instances Every provider instance, keyed by id.
+     * @param action_base $action The action to be delegated.
+     * @return candidate[]|null The candidates, or null when there is no key here at all,
+     *                          which means the rule does not apply.
+     */
+    protected function with_brought_key(
+        rule $rule,
+        ai_provider $target,
+        array $instances,
+        action_base $action,
+    ): ?array {
+        $scope = (string) $rule->get('keysource');
+        $scopeid = $this->get_scopeid($scope);
+        if ($scopeid <= 0) {
+            // A course key wanted by a request made outside any course, or a user key
+            // with nobody to own it.
+            return null;
+        }
+        if ($scope === rule::KEYSOURCE_USER && !$this->get_policy()->is_eligible($scopeid)) {
+            // Asked again here, not only when the key was registered, so that a policy
+            // the administrator tightens stops being obeyed on the next request rather
+            // than when somebody remembers to go and delete the keys.
+            return null;
+        }
+
+        $injection = $this->get_injector()->for_subject($target, $scope, $scopeid);
+        if ($injection->status === key_status::UNREADABLE) {
+            $this->unreadable = $injection->key;
+            $this->matchedrule = $rule;
+            $this->keysource = $scope;
+
+            return [];
+        }
+        if (!$injection->is_usable()) {
+            return null;
+        }
+
+        return $this->with_key_fallback($injection, $scope, $scopeid, $instances, $action);
+    }
+
+    /**
+     * Who is paying, as a subject the key store can be asked about.
+     *
+     * @param string $scope One of the rule key sources.
+     * @return int The user or course id, or zero when there is none here.
+     */
+    protected function get_scopeid(string $scope): int {
+        if ($scope === rule::KEYSOURCE_COURSE) {
+            // Resolved exactly as the rules resolve it, so that a request from a module
+            // or a block counts as being in the course it belongs to.
+            return (int) ($this->evaluated?->get_courseid() ?? 0);
+        }
+
+        return (int) ($this->evaluated?->get_userid() ?? 0);
+    }
+
+    /**
+     * A target carrying a brought key, followed by the others that subject has a key for.
+     *
+     * The fallback chain is confined to instances the same subject holds a key for. A
+     * request somebody asked to pay for themselves must not quietly become a request the
+     * site pays for because the first provider was busy.
+     *
+     * Every one of those keys is decrypted here, including the ones that will not be
+     * needed if the first target answers. They all belong to the subject whose key is
+     * already being read, and there are as many of them as the site has delegation
+     * targets, so the alternative is complexity bought for very little.
+     *
+     * @param key_injection $first The instance the rule named, carrying its key.
+     * @param string $scope One of the rule key sources.
+     * @param int $scopeid The user or course paying.
+     * @param ai_provider[] $instances Every provider instance, keyed by id.
+     * @param action_base $action The action to be delegated.
+     * @return candidate[] The candidates, in the order they should be tried.
+     */
+    protected function with_key_fallback(
+        key_injection $first,
+        string $scope,
+        int $scopeid,
+        array $instances,
+        action_base $action,
+    ): array {
+        $candidates = [new candidate($first->target, $scope, $first->key)];
+        $named = (int) $first->key->get('targetid');
+
+        // Nothing orders these, so they are tried in a stable order rather than an
+        // arbitrary one. An administrator who wants a particular order writes rules.
+        foreach ($this->get_keys($scope, $scopeid) as $targetid => $key) {
+            $instance = $instances[(int) $targetid] ?? null;
+            if ((int) $targetid === $named || $instance === null || !$this->is_usable($instance, $action)) {
+                continue;
+            }
+            $injection = $this->get_injector()->inject($instance, $key);
+            if ($injection->is_usable()) {
+                $candidates[] = new candidate($injection->target, $scope, $key);
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * Every key one subject holds.
+     *
+     * @param string $scope One of the rule key sources.
+     * @param int $scopeid The user or course.
+     * @return key[] The keys, keyed by target id.
+     */
+    protected function get_keys(string $scope, int $scopeid): array {
+        global $DB;
+
+        return (new key_repository($DB))->get_all($scope, $scopeid);
+    }
+
+    /**
+     * How a key is put into the instance it belongs to.
+     *
+     * @return key_injector The injector.
+     */
+    protected function get_injector(): key_injector {
+        global $DB;
+
+        return new key_injector($DB);
+    }
+
+    /**
+     * Who the site allows to bring a key.
+     *
+     * @return eligibility_policy The policy.
+     */
+    protected function get_policy(): eligibility_policy {
+        return new eligibility_policy();
     }
 
     /**
@@ -149,21 +337,21 @@ class target_resolver {
      * a failed request there anyway would spend money at a provider they deliberately
      * kept out of the picture.
      *
-     * @param ai_provider $target The instance the matching rule named.
+     * @param candidate $target The instance the matching rule named.
      * @param ai_provider[] $instances Every provider instance, keyed by id.
      * @param action_base $action The action to be delegated.
-     * @return ai_provider[] The candidates, in the order they should be tried.
+     * @return candidate[] The candidates, in the order they should be tried.
      */
-    protected function with_fallback(ai_provider $target, array $instances, action_base $action): array {
+    protected function with_fallback(candidate $target, array $instances, action_base $action): array {
         if ($this->router->get_nomatch_behaviour() === provider::NOMATCH_DECLINE) {
             return [$target];
         }
         $fallback = $this->get_default_target($instances, $action);
-        if ($fallback === null || (int) $fallback->id === (int) $target->id) {
+        if ($fallback === null || (int) $fallback->id === (int) $target->target->id) {
             return [$target];
         }
 
-        return [$target, $fallback];
+        return [$target, new candidate($fallback)];
     }
 
     /**

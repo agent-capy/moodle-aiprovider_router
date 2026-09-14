@@ -117,6 +117,12 @@ $string['eligibility:teaching:described'] = 'they hold one of these roles somewh
 $string['eligibility:teaching_help'] = 'Anywhere in the course tree counts, including a role held on a category, which is how a site says somebody teaches every course under it. Nobody matches until at least one role is chosen.';
 $string['eligibility:unknown'] = 'This policy also holds conditions this version does not understand ({$a}), which are being ignored. Who that admits or refuses depends on how the conditions are combined, so check the policy still says what you mean before relying on it. Saving this form will remove them.';
 $string['error:alltargetsfailed'] = 'The AI service could not be reached. Please try again shortly.';
+$string['error:byokdecryptfailed:course'] = 'The key registered for this course cannot be read, so the request was not sent. Please ask your site administrator to look at it.';
+$string['error:byokdecryptfailed:user'] = 'Your own key cannot be read, so the request was not sent. Registering it again will replace it.';
+$string['error:byokkeyrejected:course'] = 'The key registered for this course was refused. Please ask whoever looks after this course to check it.';
+$string['error:byokkeyrejected:user'] = 'Your own key was refused. Please check it where you obtained it, and register it again.';
+$string['error:byoknokeyleft:course'] = 'The request could not be handled by anything this course has a key for. Please try again shortly, or ask whoever looks after this course to check its keys.';
+$string['error:byoknokeyleft:user'] = 'The request could not be handled by anything you have a key for. Please try again shortly, or check your own keys.';
 $string['error:delegationunavailable'] = 'The AI service is unavailable. Please contact your site administrator.';
 $string['error:emptyresponse'] = 'The AI did not return an answer. Try shortening your input, or try again.';
 $string['error:nodefaulttarget'] = 'The AI request could not be handled. Please contact your site administrator.';
@@ -260,6 +266,12 @@ $string['rule:error:endbeforestart'] = 'The end of the active period has to come
 $string['rule:error:keysource'] = 'Choose whose key pays for the requests this rule claims.';
 $string['rule:error:noname'] = 'Give the rule a name, so that it can be told apart from the others.';
 $string['rule:error:notarget'] = 'Choose the provider instance this rule delegates to.';
+$string['rule:keysource'] = 'Paid for with';
+$string['rule:keysource_help'] = 'Which key requests this rule claims are charged to. The site\'s own key is the one already configured on the provider instance, and is what every rule meant before this setting existed.
+
+Choosing a brought key adds a requirement to the rule: it only claims a request when a key is actually registered, for the person asking or for the course they are working in. Where there is none, the request carries on to the next rule — so putting a rule paid for by the site below one paid for with a brought key says "their own key if they have one, ours otherwise".
+
+A brought key also narrows what happens when a provider fails. The request is only tried again at providers the same person or course has registered a key for, never at one the site would pay for.';
 $string['rule:name'] = 'Rule name';
 $string['rule:saved'] = 'Rule "{$a}" has been saved.';
 $string['rule:target'] = 'Delegate to';
@@ -269,6 +281,7 @@ $string['rule:timestart'] = 'Active from';
 $string['rule:window'] = 'Active period';
 $string['rule:window_help'] = 'Outside this period the rule is skipped entirely, as though it were switched off. Leave both empty for a rule that always applies.';
 $string['rules:add'] = 'Add a rule';
+$string['rules:byoknotsupported'] = 'This rule asks for a brought key, but nobody has said which field of this provider\'s configuration a key goes in, so the rule can never be honoured. Answer for it under "Say where a brought key goes".';
 $string['rules:confirmdelete'] = 'Delete the rule "{$a}"? Requests it used to claim will be handled by the rules below it, or by the "When no rule matches" setting. This cannot be undone.';
 $string['rules:copyof'] = 'Copy of {$a}';
 $string['rules:deleted'] = 'Rule "{$a}" has been deleted.';
@@ -278,6 +291,7 @@ $string['rules:duplicate'] = 'Copy';
 $string['rules:enable'] = 'Switch on';
 $string['rules:heading'] = 'AI Router rules';
 $string['rules:intro'] = 'Rules are considered from the top down, and the first one that matches decides where the request goes. A rule matches when every condition on it is satisfied; a condition listing several values is satisfied by any one of them. A request no rule claims is handled according to the router\'s own "When no rule matches" setting.';
+$string['rules:keysource'] = 'Paid for with: {$a}';
 $string['rules:manage'] = 'Manage routing rules';
 $string['rules:missingtarget'] = 'Instance {$a}, which no longer exists. Requests matching this rule fall through to the next rule.';
 $string['rules:movedown'] = 'Move down';

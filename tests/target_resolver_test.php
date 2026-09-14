@@ -110,14 +110,33 @@ final class target_resolver_test extends \advanced_testcase {
     }
 
     /**
+     * A rule that asks somebody other than the site to pay.
+     *
+     * @param string $name The rule name.
+     * @param int $targetid Where it delegates.
+     * @param string $keysource Whose key pays.
+     * @return rule The saved rule.
+     */
+    protected function add_byok(string $name, int $targetid, string $keysource): rule {
+        $rule = new rule();
+        $rule->set('name', $name);
+        $rule->set('targetid', $targetid);
+        $rule->set('keysource', $keysource);
+
+        return $this->repository->save($rule);
+    }
+
+    /**
      * The action every test routes.
      *
+     * @param int $userid Who is asking.
+     * @param int|null $contextid Where they are asking from, or null for the site.
      * @return generate_text The action.
      */
-    protected function action(): generate_text {
+    protected function action(int $userid = 0, ?int $contextid = null): generate_text {
         return new generate_text(
-            contextid: \context_system::instance()->id,
-            userid: 0,
+            contextid: $contextid ?? \context_system::instance()->id,
+            userid: $userid,
             prompttext: 'Hello',
         );
     }
@@ -126,13 +145,33 @@ final class target_resolver_test extends \advanced_testcase {
      * The ids of the candidates a resolver returns, in order.
      *
      * @param target_resolver $resolver The resolver.
+     * @param generate_text|null $action The request, or null for one from nobody in particular.
      * @return int[] The instance ids.
      */
-    protected function candidates(target_resolver $resolver): array {
+    protected function candidates(target_resolver $resolver, ?generate_text $action = null): array {
         return array_map(
-            static fn(ai_provider $instance): int => (int) $instance->id,
-            $resolver->get_candidates($this->action()),
+            static fn(candidate $candidate): int => (int) $candidate->target->id,
+            $resolver->get_candidates($action ?? $this->action()),
         );
+    }
+
+    /**
+     * Somebody who is allowed to bring a key, and has brought one.
+     *
+     * @param int $targetid The instance the key is for.
+     * @param string $secret The key.
+     * @return \stdClass The user.
+     */
+    protected function key_holder(int $targetid, string $secret = 'their-own-key'): \stdClass {
+        global $DB;
+
+        set_config(eligibility_policy::ACCESS_SETTING, eligibility_policy::ACCESS_EVERYBODY, 'aiprovider_router');
+        eligibility_policy::purge();
+        $user = $this->getDataGenerator()->create_user();
+        (new target_settings($DB))->set_key_field($targetid, 'apikey');
+        (new key_repository($DB))->save(key::SCOPE_USER, (int) $user->id, $targetid, $secret);
+
+        return $user;
     }
 
     public function test_without_rules_the_default_target_is_used(): void {
@@ -293,6 +332,130 @@ final class target_resolver_test extends \advanced_testcase {
         // A site that routes everything by rule and refuses the rest has no use for a
         // default target, and core would otherwise skip the router as unconfigured.
         $this->assertTrue($router->is_provider_configured());
+    }
+
+    public function test_a_rule_wanting_a_key_nobody_brought_hands_on_to_the_next_rule(): void {
+        global $DB;
+        (new target_settings($DB))->set_key_field(8, 'apikey');
+        set_config(eligibility_policy::ACCESS_SETTING, eligibility_policy::ACCESS_EVERYBODY, 'aiprovider_router');
+        eligibility_policy::purge();
+        $user = $this->getDataGenerator()->create_user();
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $this->add('the site pays', 9);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        // An ordinary state, not a failure. Two rules in this order are how a site says
+        // "their own key if they have one, ours otherwise".
+        $this->assertSame([9, 7], $this->candidates($resolver, $this->action((int) $user->id)));
+        $this->assertSame('the site pays', $resolver->get_matched_rule()?->get('name'));
+    }
+
+    public function test_a_brought_key_is_put_into_the_instance_the_rule_named(): void {
+        $user = $this->key_holder(8);
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8)]);
+
+        $candidates = $resolver->get_candidates($this->action((int) $user->id));
+
+        $this->assertSame('their-own-key', $candidates[0]->target->config['apikey']);
+        $this->assertSame(rule::KEYSOURCE_USER, $candidates[0]->keysource);
+        $this->assertNotNull($candidates[0]->get_keyid());
+    }
+
+    public function test_a_key_that_cannot_be_read_stops_the_request_instead(): void {
+        global $DB;
+        $user = $this->key_holder(8);
+        $DB->set_field(key::TABLE, 'secret', 'nonsense', ['scopeid' => $user->id]);
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $this->add('the site pays', 9);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        $candidates = $resolver->get_candidates($this->action((int) $user->id));
+
+        // The line between hole 1 and hole 4. Falling through to the rule below would
+        // charge the site for a request somebody asked to pay for themselves, and the
+        // only sign of it would be a bill.
+        $this->assertSame([], $candidates);
+        $this->assertNotNull($resolver->get_unreadable_key());
+        $this->assertSame('their own key', $resolver->get_matched_rule()?->get('name'));
+        $this->assertSame(rule::KEYSOURCE_USER, $resolver->get_keysource());
+        $this->assertDebuggingCalled();
+    }
+
+    public function test_a_provider_nobody_has_said_the_key_field_of_is_treated_as_keyless(): void {
+        global $DB;
+        set_config(eligibility_policy::ACCESS_SETTING, eligibility_policy::ACCESS_EVERYBODY, 'aiprovider_router');
+        eligibility_policy::purge();
+        $user = $this->getDataGenerator()->create_user();
+        (new key_repository($DB))->save(key::SCOPE_USER, (int) $user->id, 8, 'their-own-key');
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $this->add('the site pays', 9);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        // Delegating without putting the key anywhere would send the request charged to
+        // the site while the person who brought one believed they were paying.
+        $this->assertSame([9, 7], $this->candidates($resolver, $this->action((int) $user->id)));
+        $this->assertNull($resolver->get_unreadable_key());
+    }
+
+    public function test_somebody_who_may_no_longer_bring_a_key_stops_using_theirs(): void {
+        $user = $this->key_holder(8);
+        set_config(eligibility_policy::ACCESS_SETTING, eligibility_policy::ACCESS_NOBODY, 'aiprovider_router');
+        eligibility_policy::purge();
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $this->add('the site pays', 9);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        // Decided again here rather than only when the key was registered, so that an
+        // administrator tightening the policy is obeyed on the next request. The key is
+        // not deleted; it simply stops being used.
+        $this->assertSame([9, 7], $this->candidates($resolver, $this->action((int) $user->id)));
+    }
+
+    public function test_only_instances_the_payer_has_a_key_for_stand_behind_a_brought_key(): void {
+        global $DB;
+        $user = $this->key_holder(8);
+        (new target_settings($DB))->set_key_field(9, 'apikey');
+        (new key_repository($DB))->save(key::SCOPE_USER, (int) $user->id, 9, 'their-other-key');
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        // The default target, 7, is not among them. A request somebody asked to pay for
+        // themselves must not quietly become one the site pays for because the first
+        // provider was busy.
+        $this->assertSame([8, 9], $this->candidates($resolver, $this->action((int) $user->id)));
+    }
+
+    public function test_a_course_key_is_found_from_where_the_request_was_made(): void {
+        global $DB;
+        $course = $this->getDataGenerator()->create_course();
+        (new target_settings($DB))->set_key_field(8, 'apikey');
+        (new key_repository($DB))->save(key::SCOPE_COURSE, (int) $course->id, 8, 'the-course-key');
+        $this->add_byok('the course pays', 8, rule::KEYSOURCE_COURSE);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8)]);
+
+        $candidates = $resolver->get_candidates(
+            $this->action(0, \context_course::instance($course->id)->id),
+        );
+
+        // Nobody in the course needs a key of their own, which is the whole point of a
+        // course key.
+        $this->assertSame('the-course-key', $candidates[0]->target->config['apikey']);
+        $this->assertSame(rule::KEYSOURCE_COURSE, $candidates[0]->keysource);
+    }
+
+    public function test_a_course_key_cannot_be_found_outside_a_course(): void {
+        global $DB;
+        $course = $this->getDataGenerator()->create_course();
+        (new target_settings($DB))->set_key_field(8, 'apikey');
+        (new key_repository($DB))->save(key::SCOPE_COURSE, (int) $course->id, 8, 'the-course-key');
+        $this->add_byok('the course pays', 8, rule::KEYSOURCE_COURSE);
+        $this->add('the site pays', 9);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        // There is no course to charge, which is an absence rather than a fault, so the
+        // request carries on down the list.
+        $this->assertSame([9, 7], $this->candidates($resolver));
     }
 
     public function test_a_router_with_neither_rules_nor_a_target_is_not_configured(): void {

@@ -81,24 +81,64 @@ class rule_formatter {
     }
 
     /**
-     * Where the rule sends a request.
+     * Where the rule sends a request, and whose key pays for it.
      *
      * @param rule $rule The rule.
      * @param string[] $targets Instance names keyed by id.
+     * @param int[] $byokcapable Ids of the instances a brought key can actually go into.
      * @return string HTML.
      */
-    public static function target(rule $rule, array $targets): string {
+    public static function target(rule $rule, array $targets, array $byokcapable = []): string {
         $targetid = (int) $rule->get('targetid');
         if (isset($targets[$targetid])) {
-            return s($targets[$targetid]);
+            $output = s($targets[$targetid]);
+        } else {
+            // The instance has been deleted, or it is a router. Either way this rule
+            // cannot be carried out and requests matching it fall through to the next.
+            $output = \html_writer::span(
+                get_string('rules:missingtarget', 'aiprovider_router', $targetid),
+                'text-danger',
+            );
         }
 
-        // The instance has been deleted, or it is a router. Either way this rule cannot
-        // be carried out and requests matching it fall through to the next rule.
-        return \html_writer::span(
-            get_string('rules:missingtarget', 'aiprovider_router', $targetid),
-            'text-danger',
+        return $output . self::keysource($rule, $byokcapable);
+    }
+
+    /**
+     * Whose key pays for the requests this rule claims.
+     *
+     * A rule asking for a brought key at an instance nobody has said the key field of is
+     * the case worth calling out. Nothing about it looks wrong: the rule is valid, the
+     * instance is there and working, and the only symptom is that the rule never seems
+     * to claim anything.
+     *
+     * @param rule $rule The rule.
+     * @param int[] $byokcapable Ids of the instances a brought key can actually go into.
+     * @return string HTML, empty for a rule the site pays for.
+     */
+    protected static function keysource(rule $rule, array $byokcapable): string {
+        if (!$rule->is_byok()) {
+            // Every rule was this before keys could be brought, so saying it on all of
+            // them would bury the one rule an administrator is looking for.
+            return '';
+        }
+
+        $output = \html_writer::div(
+            get_string(
+                'rules:keysource',
+                'aiprovider_router',
+                get_string('keysource:' . $rule->get('keysource'), 'aiprovider_router'),
+            ),
+            'text-muted',
         );
+        if (!in_array((int) $rule->get('targetid'), array_map('intval', $byokcapable), true)) {
+            $output .= \html_writer::div(
+                get_string('rules:byoknotsupported', 'aiprovider_router'),
+                'text-warning',
+            );
+        }
+
+        return $output;
     }
 
     /**

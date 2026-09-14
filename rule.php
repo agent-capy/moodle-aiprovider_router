@@ -73,6 +73,7 @@ if ($data = $form->get_data()) {
     $rule->set('name', $data->name);
     $rule->set('enabled', !empty($data->enabled));
     $rule->set('targetid', (int) $data->targetid);
+    $rule->set('keysource', (string) ($data->keysource ?? rule::KEYSOURCE_SITE));
     $rule->set('timestart', (int) ($data->timestart ?? 0));
     $rule->set('timeend', (int) ($data->timeend ?? 0));
 
@@ -92,6 +93,7 @@ if ($id) {
         'name' => $rule->get('name'),
         'enabled' => $rule->get('enabled') ? 1 : 0,
         'targetid' => $rule->get('targetid'),
+        'keysource' => $rule->get('keysource'),
         'timestart' => $rule->get('timestart'),
         'timeend' => $rule->get('timeend'),
     ] + rule_form::conditions_to_form_data($existingconditions)));

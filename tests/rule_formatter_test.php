@@ -113,6 +113,52 @@ final class rule_formatter_test extends \advanced_testcase {
         $this->assertSame('Somewhere', rule_formatter::target($rule, [7 => 'Somewhere']));
     }
 
+    public function test_a_rule_paid_for_by_the_site_says_nothing_about_keys(): void {
+        $rule = $this->add('ordinary', 7);
+
+        // Every rule was this before keys could be brought, so saying it on all of them
+        // would bury the one rule an administrator is looking for.
+        $this->assertSame('Somewhere', rule_formatter::target($rule, [7 => 'Somewhere']));
+    }
+
+    public function test_a_rule_paid_for_with_a_brought_key_says_whose(): void {
+        $rule = $this->add('byok', 7);
+        $rule->set('keysource', rule::KEYSOURCE_USER);
+
+        $output = rule_formatter::target($rule, [7 => 'Somewhere'], [7]);
+
+        $this->assertStringContainsString(
+            get_string('keysource:' . rule::KEYSOURCE_USER, 'aiprovider_router'),
+            $output,
+        );
+    }
+
+    public function test_a_brought_key_with_nowhere_to_go_is_called_out(): void {
+        $rule = $this->add('byok', 7);
+        $rule->set('keysource', rule::KEYSOURCE_COURSE);
+
+        // Nobody has said which configuration field this provider's key goes in, so the
+        // rule is valid, the instance works, and the rule silently never claims anything.
+        $output = rule_formatter::target($rule, [7 => 'Somewhere'], []);
+
+        $this->assertStringContainsString(
+            get_string('rules:byoknotsupported', 'aiprovider_router'),
+            $output,
+        );
+    }
+
+    public function test_a_brought_key_that_has_somewhere_to_go_is_not_called_out(): void {
+        $rule = $this->add('byok', 7);
+        $rule->set('keysource', rule::KEYSOURCE_COURSE);
+
+        $output = rule_formatter::target($rule, [7 => 'Somewhere'], [7]);
+
+        $this->assertStringNotContainsString(
+            get_string('rules:byoknotsupported', 'aiprovider_router'),
+            $output,
+        );
+    }
+
     public function test_a_disabled_rule_says_so(): void {
         $rule = $this->add('off');
         $rule->set('enabled', false);

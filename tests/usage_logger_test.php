@@ -42,6 +42,9 @@ require_once(__DIR__ . '/fixtures/mock/process_generate_image.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(usage_logger::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(abstract_processor::class)]
 final class usage_logger_test extends \advanced_testcase {
+    /** @var int The user every routed request is made by, which is the site administrator. */
+    protected const REQUESTER = 2;
+
     /** @var rule_repository Where the rules live. */
     protected rule_repository $repository;
 
@@ -87,6 +90,40 @@ final class usage_logger_test extends \advanced_testcase {
     }
 
     /**
+     * A rule that asks somebody other than the site to pay.
+     *
+     * @param string $name The rule name.
+     * @param int $targetid Where it delegates.
+     * @param string $keysource Whose key pays.
+     * @return rule The saved rule.
+     */
+    protected function add_byok(string $name, int $targetid, string $keysource): rule {
+        $rule = new rule();
+        $rule->set('name', $name);
+        $rule->set('targetid', $targetid);
+        $rule->set('keysource', $keysource);
+
+        return $this->repository->save($rule);
+    }
+
+    /**
+     * Register a key for the person the routed requests are made by.
+     *
+     * @param int $targetid The instance the key is for.
+     * @param string $secret The key.
+     * @return key The stored key.
+     */
+    protected function bring_key(int $targetid, string $secret = 'their-own-key'): key {
+        global $DB;
+
+        set_config(eligibility_policy::ACCESS_SETTING, eligibility_policy::ACCESS_EVERYBODY, 'aiprovider_router');
+        eligibility_policy::purge();
+        (new target_settings($DB))->set_key_field($targetid, 'apikey');
+
+        return (new key_repository($DB))->save(key::SCOPE_USER, self::REQUESTER, $targetid, $secret);
+    }
+
+    /**
      * Route a request through the rules and the real delegation chain.
      *
      * @param ai_provider[] $instances The provider instances the site has.
@@ -105,7 +142,7 @@ final class usage_logger_test extends \advanced_testcase {
         $router = new provider(enabled: true, name: 'Router', config: json_encode($config), id: 1);
         $action = new generate_text(
             contextid: ($context ?? \context_system::instance())->id,
-            userid: 2,
+            userid: self::REQUESTER,
             prompttext: 'Hello',
         );
 
@@ -309,11 +346,101 @@ final class usage_logger_test extends \advanced_testcase {
         $this->assertNull($this->logged()->courseid);
     }
 
-    public function test_a_request_is_charged_to_the_site_until_byok_arrives(): void {
+    public function test_a_request_no_rule_asked_anybody_to_pay_for_is_the_sites(): void {
         $this->route([$this->target(7, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi'])]);
 
-        // The column exists now so that history does not have a hole in it later.
-        $this->assertSame(usage_logger::KEY_SITE, $this->logged()->keysource);
+        $row = $this->logged();
+        $this->assertSame(usage_logger::KEY_SITE, $row->keysource);
+        $this->assertNull($row->keyid);
+    }
+
+    public function test_a_request_paid_for_with_a_brought_key_records_which_one(): void {
+        $key = $this->bring_key(7);
+        $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
+
+        $this->route([$this->target(7, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi'])]);
+
+        $row = $this->logged();
+        $this->assertSame(rule::KEYSOURCE_USER, $row->keysource);
+        // Which key, so that one the provider keeps refusing can be found again. The
+        // daily summary deliberately does not keep this.
+        $this->assertSame((int) $key->get('id'), (int) $row->keyid);
+    }
+
+    public function test_a_key_that_cannot_be_read_is_a_fault_and_is_recorded_as_one(): void {
+        global $DB;
+        $key = $this->bring_key(7);
+        $DB->set_field(key::TABLE, 'secret', 'nonsense', ['id' => $key->get('id')]);
+        $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
+        $this->add('the site pays', 8);
+
+        $response = $this->route([
+            $this->target(7, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi']),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi']),
+        ]);
+
+        // Not an absent key, so not a rule that quietly hands on to the one below it.
+        $this->assertFalse($response->get_success());
+        $row = $this->logged();
+        $this->assertSame(abstract_processor::REASON_KEY_UNREADABLE, $row->reason);
+        $this->assertSame(rule::KEYSOURCE_USER, $row->keysource);
+        $this->assertSame((int) $key->get('id'), (int) $row->keyid);
+        $this->assertSame(0, (int) $row->attempts);
+        $this->assertDebuggingCalled();
+    }
+
+    public function test_a_key_the_provider_refuses_stops_the_request_there(): void {
+        $this->bring_key(7);
+        $this->bring_key(8, 'their-other-key');
+        $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
+
+        $response = $this->route([
+            $this->target(7, \aiprovider_mock\provider::FAILURE, ['errorcode' => 401]),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi']),
+        ]);
+
+        // Their other key would have worked, and using it would have hidden the fact
+        // that one of their keys has stopped being accepted. They are the only person
+        // who can put that right, so they are told.
+        $this->assertFalse($response->get_success());
+        $this->assertSame(401, $response->get_errorcode());
+        $row = $this->logged();
+        $this->assertSame(abstract_processor::REASON_KEY_REJECTED, $row->reason);
+        $this->assertSame(1, (int) $row->attempts);
+    }
+
+    public function test_running_out_of_brought_keys_is_its_own_reason(): void {
+        $this->bring_key(7);
+        $this->bring_key(8, 'their-other-key');
+        $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
+
+        $this->route([
+            $this->target(7, \aiprovider_mock\provider::FAILURE, ['errorcode' => 500]),
+            $this->target(8, \aiprovider_mock\provider::FAILURE, ['errorcode' => 500]),
+        ]);
+
+        $row = $this->logged();
+        // Different from every target failing: it says the chain was short because of
+        // who was paying, not that the site's providers are all down.
+        $this->assertSame(abstract_processor::REASON_NO_KEY_LEFT, $row->reason);
+        $this->assertSame(2, (int) $row->attempts);
+        $this->assertSame(rule::KEYSOURCE_USER, $row->keysource);
+    }
+
+    public function test_the_site_is_not_asked_to_pay_when_a_brought_key_fails(): void {
+        $this->bring_key(7);
+        $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
+
+        $this->route([
+            $this->target(7, \aiprovider_mock\provider::FAILURE, ['errorcode' => 500]),
+            $this->target(9, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi']),
+        ], ['defaulttarget' => 9]);
+
+        // Instance 9 is the default target and would have answered. Sending the request
+        // there would have moved the cost onto the site without anybody saying so.
+        $row = $this->logged();
+        $this->assertSame(1, (int) $row->attempts);
+        $this->assertSame(abstract_processor::REASON_NO_KEY_LEFT, $row->reason);
     }
 
     public function test_a_history_that_cannot_be_written_does_not_stop_the_request(): void {
