@@ -96,6 +96,31 @@ class key_repository {
     }
 
     /**
+     * One key by its id, but only if it belongs to the subject asking for it.
+     *
+     * Screens act on a key id taken from the request, so the subject is part of the
+     * lookup rather than checked afterwards: a key id from somewhere else simply does not
+     * resolve here.
+     *
+     * @param int $id The key id.
+     * @param string $scope One of the key scopes.
+     * @param int $scopeid The user or course.
+     * @return key|null The key, or null when it is not theirs.
+     */
+    public function get_for(int $id, string $scope, int $scopeid): ?key {
+        if ($id <= 0) {
+            return null;
+        }
+        $record = $this->db->get_record(key::TABLE, [
+            'id' => $id,
+            'scope' => $scope,
+            'scopeid' => $scopeid,
+        ]);
+
+        return $record ? new key(0, $record) : null;
+    }
+
+    /**
      * Every key registered by or for one subject.
      *
      * @param string $scope One of the key scopes.

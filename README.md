@@ -28,9 +28,8 @@ Developed as part of a 2026 domestic research and development project funded by 
 Still to come, and not in this version:
 
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
-  `\core\encryption`, with a condition framework controlling who may register a key.
-  The store, the encryption and the policy are in place; there is no way to register a
-  key yet, and no rule can send a request with one
+  `\core\encryption`, with a policy controlling who may bring one. Keys can be
+  registered and tested; **no rule can send a request with one yet**
 - **Budget conditions**, which depend on the dashboards above
 
 ## Settings
@@ -270,6 +269,69 @@ keep, not this plugin's.
 The daily summaries hold no user ids at all. That is what lets them be kept: a summary
 that named people would have to be rebuilt every time somebody exercised their right to
 be forgotten, and a history rebuilt on demand is not a history.
+
+## Bringing your own key
+
+A key somebody brings pays for their own requests instead of the site paying. Two kinds
+exist and they are not alike.
+
+| | Whose it is | Who may set it | What it pays for |
+| --- | --- | --- | --- |
+| A personal key | The person who registered it | Anyone the site's policy admits | Their own requests |
+| A course key | The course | Anyone who may edit the course (`aiprovider/router:managecoursekey`) | Every request made in that course |
+
+A course key stays when the teacher who entered it stops teaching, and any teacher of that
+course can replace it. That is the point of it: a key registered so that a class can use
+AI should not stop working because one member of staff moved on.
+
+**Nothing here routes anything yet.** Keys can be registered, tested and removed, and the
+policy decides who may bring one, but no rule can be told to use a key. That arrives with
+the rest of this feature.
+
+### Who may bring one
+
+**AI Router keys** (`/ai/provider/router/byok.php`) sets the policy: nobody, anybody with
+an account, or only people matching conditions — a role held anywhere in the course tree,
+membership of a cohort, or a profile field. The conditions can be combined either way,
+because both readings are ordinary: "teachers, or anyone in the BYOK cohort" needs any one
+of them, and "teachers who are also in that cohort" needs all of them.
+
+The policy is checked when a key is registered **and again on every request that would use
+one**, so tightening it stops the keys it no longer allows from being used. Those keys are
+not deleted; they stop being used and remain their owners' to remove.
+
+### Where a key goes
+
+Providers do not agree on what the field holding a key is called: Moodle's own say
+`apikey`, Sakura AI Engine says `account_token`, another says `systemtoken` and ollama
+takes none. Substituting "the apikey field" would work for some and silently do nothing
+for others — the request would go out charged to the site while the person who brought a
+key believed they were paying — so the same page asks an administrator to confirm the
+field for each provider, offering a guess taken from the instance's own configuration.
+
+A provider nobody has answered for cannot take a key.
+
+### What is stored
+
+The key, encrypted with `\core\encryption`, and its last few characters in readable form
+so that its owner can tell their keys apart. Nothing shows a key again, to anybody, and
+nothing exports one. Registering a key for the same provider replaces it.
+
+The encryption key lives in a file under the site data directory, not in the database.
+**A site restored from a database backup without that file keeps every key and can read
+none of them**, which the site status report says as an error rather than leaving it to be
+discovered one failed request at a time.
+
+### Testing a key
+
+Testing sends one very short request to the provider and reports whether the key was
+accepted. The provider may charge a small amount for it, which the screen says, and
+nothing is ever tested unless somebody asks for it.
+
+Only three answers are possible: accepted, refused, or no conclusion. A provider that
+cannot be reached, or that fails for its own reasons, reports the third — telling somebody
+their key is wrong when the provider is simply having a bad day sends them looking for a
+problem that is not there.
 
 ## Behaviour when a target fails
 
