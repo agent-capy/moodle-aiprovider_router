@@ -284,6 +284,20 @@ class usage_aggregator {
     }
 
     /**
+     * Midnight of the first day of the month a moment falls in.
+     *
+     * Worked out through the calendar rather than by counting days, for the same reason
+     * add_days() is: months are not all the same length, and a budget counted by the
+     * calendar month has to start where the calendar says it does.
+     *
+     * @param int $time The moment.
+     * @return int Midnight of the first of that month.
+     */
+    public function month_of(int $time): int {
+        return $this->at($time)->modify('first day of this month')->setTime(0, 0)->getTimestamp();
+    }
+
+    /**
      * The same time of day, a number of days away.
      *
      * Done through the calendar rather than by adding 86400 seconds, because on the two

@@ -41,4 +41,26 @@ $definitions = [
         'staticaccelerationsize' => 20,
         'ttl' => 300,
     ],
+
+    // What has been spent, for the conditions and caps that route on it. Asked on every
+    // request a budget applies to, and answering it means summing the history, which is
+    // not a query to repeat per request either.
+    //
+    // ⚠ The lifetime is what a limit is accurate to. Requests arriving while a figure
+    // is held see the spending as it was when it was measured, so a burst can carry a
+    // site past its limit by whatever it can spend in that time. A minute is short
+    // enough for that to stay small and long enough to be worth having; making it
+    // shorter buys accuracy nobody can rely on anyway, because the request being
+    // weighed has not been paid for yet.
+    //
+    // Not simple data: a figure that is not known is stored as null, and a store that
+    // took the entry apart would hand back something else.
+    'budget' => [
+        'mode' => cache_store::MODE_APPLICATION,
+        'simplekeys' => true,
+        'simpledata' => false,
+        'staticacceleration' => true,
+        'staticaccelerationsize' => 20,
+        'ttl' => 60,
+    ],
 ];
