@@ -69,6 +69,11 @@ if (!in_array($keysource, $keysources, true)) {
 $form = new usage_settings_form($url);
 if ($data = $form->get_data()) {
     set_config(usage_aggregator::RETENTION_SETTING, max(0, (int) $data->logretentiondays), 'aiprovider_router');
+    set_config(
+        usage_aggregator::SUMMARY_RETENTION_SETTING,
+        max(0, (int) $data->summaryretentiondays),
+        'aiprovider_router',
+    );
     redirect(
         new moodle_url($url, ['days' => $days]),
         get_string('usage:saved', 'aiprovider_router'),
@@ -78,7 +83,10 @@ if ($data = $form->get_data()) {
 }
 
 $aggregator = new usage_aggregator($DB);
-$form->set_data(['logretentiondays' => $aggregator->get_retention_days()]);
+$form->set_data([
+    'logretentiondays' => $aggregator->get_retention_days(),
+    'summaryretentiondays' => $aggregator->get_summary_retention_days(),
+]);
 
 $report = new usage_report($DB, $aggregator);
 $currency = price_book::get_currency();

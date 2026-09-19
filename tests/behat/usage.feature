@@ -36,6 +36,14 @@ Feature: Seeing what the router handled
     Then I should see "Saved."
     And the field "Days of detail to keep" matches value "0"
 
+  Scenario: Summaries cannot be kept for less time than the detail behind them
+    Given I visit "/ai/provider/router/usage.php"
+    When I set the following fields to these values:
+      | Days of detail to keep   | 90 |
+      | Days of summaries to keep | 30 |
+    And I click on "Save changes" "button"
+    Then I should see "Keep summaries for at least as long as the detailed records"
+
   Scenario: A negative retention is refused
     Given I visit "/ai/provider/router/usage.php"
     When I set the field "Days of detail to keep" to "-1"

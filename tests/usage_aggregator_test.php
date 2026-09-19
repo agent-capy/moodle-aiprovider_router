@@ -66,7 +66,7 @@ final class usage_aggregator_test extends \advanced_testcase {
 
         return $DB->insert_record(usage_logger::TABLE, (object) ($fields + [
             'timecreated' => $time,
-            'userid' => 0,
+            'userid' => 3,
             'contextid' => 0,
             'courseid' => null,
             'actionname' => 'generate_text',
@@ -283,20 +283,96 @@ final class usage_aggregator_test extends \advanced_testcase {
         $this->assertSame(usage_aggregator::DEFAULT_RETENTION, $this->aggregator->get_retention_days());
     }
 
-    public function test_the_summary_holds_no_identities(): void {
+    public function test_the_summary_says_who_used_it_but_not_what_they_asked(): void {
         global $DB;
 
         $columns = $DB->get_columns(usage_aggregator::TABLE);
 
-        // Decision J. A summary naming people would have to be rebuilt every time
-        // somebody asked to be forgotten, which is the opposite of why it exists.
-        $this->assertArrayNotHasKey('userid', $columns);
+        // WP4 decision J kept people out of the summary, on the grounds that removing
+        // one of them would mean rebuilding it. That reasoning does not hold for a table
+        // with a userid: one person's rows are deleted and everybody else's figures are
+        // untouched. What it bought back is the ability to account for a year of
+        // spending after the detail has been purged.
+        $this->assertArrayHasKey('userid', $columns);
+        // What was asked for is another matter, and is not here or in the detail either.
+        $this->assertArrayNotHasKey('prompt', $columns);
         $this->assertArrayNotHasKey('contextid', $columns);
-        // A user key belongs to one person, so keeping which key paid would put that
-        // person back into the summary under another name.
+        // A user key belongs to one person, so keeping which key paid would say who they
+        // were a second time, in a column nothing needs.
         $this->assertArrayNotHasKey('keyid', $columns);
-        // Who paid, on the other hand, is a category and not a person.
         $this->assertArrayHasKey('keysource', $columns);
+    }
+
+    public function test_two_people_on_one_day_are_counted_apart(): void {
+        $yesterday = $this->day(1);
+        $this->log($yesterday + HOURSECS, ['userid' => 3]);
+        $this->log($yesterday + HOURSECS, ['userid' => 3]);
+        $this->log($yesterday + HOURSECS, ['userid' => 4]);
+
+        $this->aggregator->run($this->now);
+
+        $counts = [];
+        foreach ($this->summaries($yesterday) as $row) {
+            $counts[(int) $row->userid] = (int) $row->requests;
+        }
+        $this->assertSame([3 => 2, 4 => 1], $counts);
+    }
+
+    public function test_summaries_are_kept_for_ever_unless_the_site_says_otherwise(): void {
+        set_config(usage_aggregator::RETENTION_SETTING, 30, 'aiprovider_router');
+        $this->log($this->day(400) + HOURSECS);
+        $this->aggregator->summarise_day($this->day(400));
+
+        $purged = $this->aggregator->purge_summaries($this->now);
+
+        $this->assertSame(0, $purged);
+        $this->assertCount(1, $this->summaries($this->day(400)));
+    }
+
+    public function test_summaries_past_their_retention_are_removed(): void {
+        set_config(usage_aggregator::RETENTION_SETTING, 30, 'aiprovider_router');
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 90, 'aiprovider_router');
+        $this->log($this->day(400) + HOURSECS);
+        $this->log($this->day(10) + HOURSECS);
+        // Summarised directly: one run only catches up sixty days at a time, so a run
+        // here would reach the old day and stop long before the recent one.
+        $this->aggregator->summarise_day($this->day(400));
+        $this->aggregator->summarise_day($this->day(10));
+
+        $purged = $this->aggregator->purge_summaries($this->now);
+
+        $this->assertSame(1, $purged);
+        $this->assertCount(0, $this->summaries($this->day(400)));
+        $this->assertCount(1, $this->summaries($this->day(10)));
+    }
+
+    public function test_a_summary_is_never_removed_while_its_detail_survives(): void {
+        global $DB;
+        // A site that asked to keep summaries for less time than the detail. Reports read
+        // the summaries for the older half of a period, so obeying this literally would
+        // report those days as nothing having happened, with nothing looking wrong.
+        set_config(usage_aggregator::RETENTION_SETTING, 90, 'aiprovider_router');
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 10, 'aiprovider_router');
+        $this->log($this->day(40) + HOURSECS);
+        $this->aggregator->summarise_day($this->day(40));
+
+        $purged = $this->aggregator->purge_summaries($this->now);
+
+        $this->assertSame(0, $purged);
+        $this->assertCount(1, $this->summaries($this->day(40)));
+        // The detail is still there, which is exactly why the summary had to stay.
+        $this->assertSame(1, $DB->count_records(usage_logger::TABLE));
+    }
+
+    public function test_keeping_every_detail_row_keeps_every_summary(): void {
+        set_config(usage_aggregator::RETENTION_SETTING, 0, 'aiprovider_router');
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 30, 'aiprovider_router');
+        $this->log($this->day(400) + HOURSECS);
+        $this->aggregator->summarise_day($this->day(400));
+
+        // Nothing is gained by dropping the summary of a day the site can still see in
+        // full, and the report would lose the day either way.
+        $this->assertSame(0, $this->aggregator->purge_summaries($this->now));
     }
 
     public function test_what_people_paid_for_themselves_is_summarised_apart(): void {

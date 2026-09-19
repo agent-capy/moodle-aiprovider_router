@@ -255,15 +255,21 @@ administrator maintains. Neither they nor the prices can change where a request 
 ### How long the history is kept
 
 A scheduled task, **Summarise AI Router usage**, runs once a day. It summarises each
-finished day into counts by course, action, target, model, payer and currency, and then
-removes detail rows older than the retention period, which is 90 days unless the site
-changes it.
+finished day into counts by person, course, action, target, model, payer and currency,
+and then removes detail rows older than the retention period, which is 90 days unless the
+site changes it.
 Setting the retention to zero keeps everything.
 
 The two halves are deliberately unequal. A detail row is close to personal information:
-it says that a particular person asked for something, somewhere, at a time. The summary
-is not — it names nobody — so it is kept indefinitely and is what a report covering last
-year is drawn from.
+it says that a particular person asked for something, somewhere, at a time. A summary says
+how much somebody used on a day and nothing about what they asked for, which is what a
+site needs to account for its AI spending long after the detail has gone.
+
+Summaries have a retention period of their own, which is **unlimited** by default. Set it
+if your site would rather not keep person level history indefinitely. It cannot be shorter
+than the detail period: reports read the summaries for the older part of any period, so
+those days would simply read as empty, and nothing about the page would look wrong. A
+summary is never removed while the day it describes still has detail rows.
 
 Nothing is ever removed that has not been summarised first, whatever the retention period
 says. A site whose cron has been stopped for a month catches up on the days it missed
@@ -279,12 +285,15 @@ through Moodle's privacy API. **The prompt itself is never stored** — its leng
 to route the request and then forgotten, and what the AI answered is Moodle's record to
 keep, not this plugin's.
 
-The daily summaries hold no user ids at all. That is what lets them be kept: a summary
-that named people would have to be rebuilt every time somebody exercised their right to
-be forgotten, and a history rebuilt on demand is not a history. They record **whether** a
-brought key paid, which is a category, but never **which** key: a key somebody brought is
-one person's, so keeping its id would put that person back into the summary under another
-name.
+The daily summaries name the person too, and are reported, exported and deleted the same
+way. Removing somebody from them is a row deletion: everybody else's figures are untouched
+and nothing is recomputed, which is what makes it affordable to name anybody at all.
+Summaries written before this plugin recorded the person belong to **nobody** rather than
+to user zero, and are shown that way.
+
+They record **whether** a brought key paid, which is a category, but never **which** key:
+a key somebody brought is one person's, so keeping its id would say who they were a second
+time, in a column nothing needs.
 
 ## Bringing your own key
 

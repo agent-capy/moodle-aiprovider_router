@@ -216,5 +216,22 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026091401, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026091900) {
+        // Who made the requests a summary row counts. Nullable, because the rows written
+        // before this column existed did not record it, and zero would read as a real
+        // account rather than as "this was not kept".
+        $table = new xmldb_table('aiprovider_router_daily');
+        $field = new xmldb_field('userid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'courseid');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+        $index = new xmldb_index('userid-daystart', XMLDB_INDEX_NOTUNIQUE, ['userid', 'daystart']);
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        upgrade_plugin_savepoint(true, 2026091900, 'aiprovider', 'router');
+    }
+
     return true;
 }

@@ -44,6 +44,16 @@ class usage_settings_form extends \moodleform {
         $mform->setDefault('logretentiondays', usage_aggregator::DEFAULT_RETENTION);
         $mform->addHelpButton('logretentiondays', 'usage:retention', 'aiprovider_router');
 
+        $mform->addElement(
+            'text',
+            'summaryretentiondays',
+            get_string('usage:summaryretention', 'aiprovider_router'),
+            ['size' => 8],
+        );
+        $mform->setType('summaryretentiondays', PARAM_INT);
+        $mform->setDefault('summaryretentiondays', usage_aggregator::DEFAULT_SUMMARY_RETENTION);
+        $mform->addHelpButton('summaryretentiondays', 'usage:summaryretention', 'aiprovider_router');
+
         $this->add_action_buttons(false, get_string('savechanges'));
     }
 
@@ -51,8 +61,19 @@ class usage_settings_form extends \moodleform {
     public function validation($data, $files): array {
         $errors = parent::validation($data, $files);
 
-        if ((int) ($data['logretentiondays'] ?? 0) < 0) {
-            $errors['logretentiondays'] = get_string('usage:error:retention', 'aiprovider_router');
+        foreach (['logretentiondays', 'summaryretentiondays'] as $field) {
+            if ((int) ($data[$field] ?? 0) < 0) {
+                $errors[$field] = get_string('usage:error:retention', 'aiprovider_router');
+            }
+        }
+
+        // Summaries are what the detail rows leave behind, so keeping them for less time
+        // than the detail asks for the impossible: reports read the summaries for the
+        // older half of any period, and those days would simply read as empty.
+        $detail = (int) ($data['logretentiondays'] ?? 0);
+        $summary = (int) ($data['summaryretentiondays'] ?? 0);
+        if ($detail > 0 && $summary > 0 && $summary < $detail) {
+            $errors['summaryretentiondays'] = get_string('usage:error:summaryretention', 'aiprovider_router');
         }
 
         return $errors;

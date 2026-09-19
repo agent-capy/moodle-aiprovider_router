@@ -213,6 +213,17 @@ $string['price:timefrom'] = 'In effect from';
 $string['price:timefrom_help'] = 'A request is costed with the rate in force when it was made, and that cost is kept. Adding a new rate from today therefore leaves last month\'s figures as they were.';
 $string['price:tokenrate'] = 'Token rates';
 $string['price:tokenrate_help'] = 'Entered per million tokens, the way providers publish them, so that a published price list can be copied without doing arithmetic first. Leave a field empty if that part is not charged.';
+$string['privacy:metadata:daily'] = 'A daily summary of how much AI each person used, kept so that a site can account for its AI spending after the detailed records have been removed. It says how much and when, never what was asked for.';
+$string['privacy:metadata:daily:actionname'] = 'Which kind of AI request the day\'s figures cover.';
+$string['privacy:metadata:daily:completiontokens'] = 'How many tokens the AI generated in reply that day.';
+$string['privacy:metadata:daily:cost'] = 'What that day is estimated to have cost, at the rates recorded for the site.';
+$string['privacy:metadata:daily:courseid'] = 'The course the requests belonged to, where they belonged to one.';
+$string['privacy:metadata:daily:daystart'] = 'The day being summarised.';
+$string['privacy:metadata:daily:model'] = 'The AI model that answered.';
+$string['privacy:metadata:daily:prompttokens'] = 'How many tokens the requests were counted as that day.';
+$string['privacy:metadata:daily:requests'] = 'How many requests were made that day.';
+$string['privacy:metadata:daily:targetname'] = 'The AI provider the requests were delegated to.';
+$string['privacy:metadata:daily:userid'] = 'The user the day\'s figures belong to.';
 $string['privacy:metadata:key'] = 'Keys brought by a user, or registered for a course by a teacher. The key itself is stored encrypted and is never exported: it is read only at the moment a request uses it.';
 $string['privacy:metadata:key:hint'] = 'The last few characters of the key, so that its owner can tell their keys apart without any of them being decrypted.';
 $string['privacy:metadata:key:scope'] = 'Whether the key belongs to a person or to a course.';
@@ -234,6 +245,7 @@ $string['privacy:metadata:log:timecreated'] = 'When the request was made.';
 $string['privacy:metadata:log:userid'] = 'The user who made the request.';
 $string['privacy:path:keys'] = 'AI Router keys';
 $string['privacy:path:log'] = 'AI Router requests';
+$string['privacy:path:summaries'] = 'AI Router daily summaries';
 $string['rates:add'] = 'Add a rate';
 $string['rates:confirmdelete'] = 'Delete this rate? Requests already recorded keep the cost they were given; only requests from now on are affected.';
 $string['rates:currency'] = 'Currency';
@@ -346,6 +358,7 @@ $string['usage:cost:none'] = 'No cost is shown: no rate covers any of the {$a->r
 $string['usage:cost:partial'] = 'The cost covers {$a->costed} of {$a->requests} requests. The rest are not free, only unpriced: no rate covers the provider and model that answered them.';
 $string['usage:cost:unknown'] = 'Not priced';
 $string['usage:error:retention'] = 'Enter zero or more days.';
+$string['usage:error:summaryretention'] = 'Keep summaries for at least as long as the detailed records, or enter zero to keep them for ever. Summaries are what the detailed records leave behind, so a shorter period would leave the older part of every report empty.';
 $string['usage:heading'] = 'AI Router usage';
 $string['usage:intro'] = 'Moodle records this plugin as the provider for everything routed through it, so this page is where the rest of the answer is. Prompts are never recorded. Costs are estimates worked out from the rates, and are not a bill.';
 $string['usage:keysource'] = 'Paid for with';
@@ -374,6 +387,12 @@ $string['usage:retention_help'] = 'Each request is recorded in full until this m
 $string['usage:saved'] = 'Saved.';
 $string['usage:settings'] = 'How long detail is kept';
 $string['usage:settings_intro'] = 'A detail row says that somebody asked for something, in a place, at a time. A daily summary says how many requests a course made and which provider answered, and names nobody, which is why the two are kept for different lengths of time.';
+$string['usage:summaryretention'] = 'Days of summaries to keep';
+$string['usage:summaryretention_help'] = 'Summaries say how much AI each person used on each day, and are what a report covering last year is drawn from once the detailed records have gone. They are much smaller than the detailed records and hold nothing about what was asked for, but they do name people.
+
+Enter zero to keep them for ever, which is what this plugin did before summaries named anybody. Enter a number of days if your site would rather not keep person level history indefinitely.
+
+Unlike the detailed records, nothing is waiting behind a summary: it is the last copy of its day, so removing it removes that day from every report.';
 $string['usage:table:bymodel'] = 'By model';
 $string['usage:total:cost'] = 'Estimated cost';
 $string['usage:total:failures'] = 'Failed';

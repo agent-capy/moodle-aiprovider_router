@@ -213,6 +213,17 @@ $string['price:timefrom'] = '適用開始';
 $string['price:timefrom_help'] = '要求はそのとき適用されていた単価で計算され、その値が保存されます。今日から新しい単価を追加しても、先月の数字は当時のまま変わりません。';
 $string['price:tokenrate'] = 'トークン単価';
 $string['price:tokenrate_help'] = 'プロバイダの公表に合わせて100万トークンあたりで入力します（公表価格をそのまま書き写せるようにするため）。課金対象でない項目は空欄のままにしてください。';
+$string['privacy:metadata:daily'] = '各利用者が1日にどれだけ AI を使ったかの集計。明細を削除したあとも、サイトが AI の支出を説明できるように保持します。どれだけ使ったかと、いつかを記録し、何を尋ねたかは記録しません。';
+$string['privacy:metadata:daily:actionname'] = 'その日の集計が対象とする AI 要求の種類。';
+$string['privacy:metadata:daily:completiontokens'] = 'その日に AI が生成したトークン数。';
+$string['privacy:metadata:daily:cost'] = 'サイトに登録された単価による、その日の推定コスト。';
+$string['privacy:metadata:daily:courseid'] = '要求が属していたコース（属していた場合）。';
+$string['privacy:metadata:daily:daystart'] = '集計対象の日。';
+$string['privacy:metadata:daily:model'] = '応答した AI モデル。';
+$string['privacy:metadata:daily:prompttokens'] = 'その日の要求として数えられたトークン数。';
+$string['privacy:metadata:daily:requests'] = 'その日の要求件数。';
+$string['privacy:metadata:daily:targetname'] = '要求を委譲した AI プロバイダ。';
+$string['privacy:metadata:daily:userid'] = 'その日の集計が属する利用者。';
 $string['privacy:metadata:key'] = 'ユーザーが持ち込んだ鍵、および教師がコースのために登録した鍵。鍵そのものは暗号化して保管し、エクスポートには含めません（実際に要求で使う瞬間にのみ復号します）。';
 $string['privacy:metadata:key:hint'] = '鍵の末尾数文字。復号せずに自分の鍵を見分けるために保持します。';
 $string['privacy:metadata:key:scope'] = 'その鍵が個人のものかコースのものか。';
@@ -234,6 +245,7 @@ $string['privacy:metadata:log:timecreated'] = '要求が行われた日時。';
 $string['privacy:metadata:log:userid'] = '要求を行ったユーザー。';
 $string['privacy:path:keys'] = 'AIルータの鍵';
 $string['privacy:path:log'] = 'AIルータの要求履歴';
+$string['privacy:path:summaries'] = 'AIルータ 日次集計';
 $string['rates:add'] = '単価を追加する';
 $string['rates:confirmdelete'] = 'この単価を削除しますか。すでに記録済みの要求は当時のコストのまま残り、影響を受けるのはこれ以降の要求だけです。';
 $string['rates:currency'] = '通貨';
@@ -346,6 +358,7 @@ $string['usage:cost:none'] = 'コストは表示できません。この期間�
 $string['usage:cost:partial'] = 'このコストは{$a->requests}件のうち{$a->costed}件分です。残りは無料なのではなく、応答したプロバイダとモデルの単価が未設定です。';
 $string['usage:cost:unknown'] = '単価未設定';
 $string['usage:error:retention'] = '0以上の日数を入力してください。';
+$string['usage:error:summaryretention'] = '集計は、少なくとも明細と同じ日数だけ保持してください（無期限にするならゼロ）。集計は明細が消えたあとに残るものなので、これより短いと、すべてのレポートの古い側が空になります。';
 $string['usage:heading'] = 'AIルータの利用状況';
 $string['usage:intro'] = 'Moodle はルータを経由した要求をすべて「このプラグインが処理した」としか記録しません。その先を示すのがこのページです。プロンプトは記録していません。コストは単価からの推定値であり、請求額ではありません。';
 $string['usage:keysource'] = '支払いに使う鍵';
@@ -374,6 +387,12 @@ $string['usage:retention_help'] = '各要求はこの日数のあいだ明細と
 $string['usage:saved'] = '保存しました。';
 $string['usage:settings'] = '明細の保持期間';
 $string['usage:settings_intro'] = '明細の1行は「誰かが、どこかで、いつ、何かを求めた」という記録です。日次集計は「そのコースが何件使い、どのプロバイダが応答したか」であって個人を含みません。保持期間を分けているのはこのためです。';
+$string['usage:summaryretention'] = '集計を保持する日数';
+$string['usage:summaryretention_help'] = '集計は、各利用者が各日にどれだけ AI を使ったかを記録したもので、明細が消えたあとに昨年分のレポートを作る元になります。明細よりずっと小さく、何を尋ねたかは持ちませんが、個人名は持ちます。
+
+ゼロを入れると無期限に保持します（集計が個人を持たなかったころの動作と同じです）。個人単位の履歴を無期限に持ちたくないサイトは、日数を指定してください。
+
+明細と違って、集計の後ろに控えているものはありません。集計はその日の最後の写しなので、消せばその日はすべてのレポートから消えます。';
 $string['usage:table:bymodel'] = 'モデル別';
 $string['usage:total:cost'] = '推定コスト';
 $string['usage:total:failures'] = '失敗';

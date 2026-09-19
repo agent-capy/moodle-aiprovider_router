@@ -21,9 +21,13 @@ namespace aiprovider_router;
  *
  * The two belong together and in this order. A detail row holds what somebody asked an
  * AI to do, in a context and at a time, so it is close to personal information and is
- * not worth keeping for years. A summary is not: it counts requests by day, course,
- * target and model, and holds nobody's identity, so it can be kept indefinitely and is
- * what a report covering last year is drawn from.
+ * not worth keeping for years. A summary holds how much was used, by whom, on what day:
+ * enough for a site to account for its AI spending a year later, and not enough to say
+ * what anybody asked for.
+ *
+ * Both have a retention period. The summary's is unlimited by default, which is what it
+ * was before it named anybody, and a site that would rather not keep person level
+ * history for ever can now say so.
  *
  * Nothing is ever purged that has not been summarised first, whatever the retention
  * period says. A site whose cron has been stopped for a month would otherwise come back
@@ -48,6 +52,12 @@ class usage_aggregator {
 
     /** @var string Config holding how many days of detail to keep. */
     public const RETENTION_SETTING = 'logretentiondays';
+
+    /** @var string Config holding how many days of summary to keep. */
+    public const SUMMARY_RETENTION_SETTING = 'summaryretentiondays';
+
+    /** @var int Days of summary kept when the site has not chosen. */
+    public const DEFAULT_SUMMARY_RETENTION = 0;
 
     /**
      * Constructor.
@@ -80,6 +90,7 @@ class usage_aggregator {
             'days' => count($days),
             'rows' => $written,
             'purged' => $this->purge($now),
+            'purgedsummaries' => $this->purge_summaries($now),
         ];
     }
 
@@ -139,6 +150,7 @@ class usage_aggregator {
             $records[] = (object) [
                 'daystart' => $day,
                 'courseid' => $row->courseid === null ? null : (int) $row->courseid,
+                'userid' => $row->userid === null ? null : (int) $row->userid,
                 'actionname' => (string) $row->actionname,
                 'targetid' => $row->targetid === null ? null : (int) $row->targetid,
                 'targetname' => $row->targetname,
@@ -196,6 +208,41 @@ class usage_aggregator {
     }
 
     /**
+     * Remove summary rows older than the summary retention period.
+     *
+     * A summary is never removed while the day it describes still has detail rows.
+     * Reports read the summaries up to the day the task has reached and the detail
+     * beyond it, so a day whose summary had gone but whose detail was still there would
+     * be reported as nothing having happened. Nothing would look wrong about it.
+     *
+     * Keeping every summary remains the default, which is what they did before they
+     * named anybody.
+     *
+     * @param int $now The current time.
+     * @return int How many summary rows were removed.
+     */
+    public function purge_summaries(int $now): int {
+        $days = $this->get_summary_retention_days();
+        $detaildays = $this->get_retention_days();
+        if ($days <= 0 || $detaildays <= 0) {
+            // Either summaries are kept for ever, or the detail is, and a site keeping
+            // every detail row has nothing to gain from dropping the summary of a day
+            // it can still see in full.
+            return 0;
+        }
+
+        $today = $this->day_of($now);
+        $cutoff = min($this->add_days($today, -$days), $this->add_days($today, -$detaildays));
+        $params = ['cutoff' => $cutoff];
+        $count = $this->db->count_records_select(self::TABLE, 'daystart < :cutoff', $params);
+        if ($count > 0) {
+            $this->db->delete_records_select(self::TABLE, 'daystart < :cutoff', $params);
+        }
+
+        return $count;
+    }
+
+    /**
      * How many days of detail the site keeps.
      *
      * @return int The number of days, or zero to keep everything.
@@ -204,6 +251,20 @@ class usage_aggregator {
         $configured = get_config('aiprovider_router', self::RETENTION_SETTING);
         if ($configured === false || $configured === '') {
             return self::DEFAULT_RETENTION;
+        }
+
+        return max(0, (int) $configured);
+    }
+
+    /**
+     * How many days of summary the site keeps.
+     *
+     * @return int The number of days, or zero to keep everything.
+     */
+    public function get_summary_retention_days(): int {
+        $configured = get_config('aiprovider_router', self::SUMMARY_RETENTION_SETTING);
+        if ($configured === false || $configured === '') {
+            return self::DEFAULT_SUMMARY_RETENTION;
         }
 
         return max(0, (int) $configured);
@@ -265,10 +326,15 @@ class usage_aggregator {
      * the site's expenditure, and a figure that added the two together would answer
      * nobody's question about what anything cost.
      *
+     * So is who asked. A site that has to account for its AI spending needs to be able
+     * to say where it went long after the detail rows are gone, and the summary is the
+     * only thing left by then. Which screens may show a name is a separate question,
+     * settled by capability rather than by leaving the column out.
+     *
      * @return string The SQL.
      */
     protected function get_summary_sql(): string {
-        return 'SELECT courseid, actionname, targetid, targetname, targetprovider, model, keysource, currency,
+        return 'SELECT courseid, userid, actionname, targetid, targetname, targetprovider, model, keysource, currency,
                        COUNT(*) AS requests,
                        SUM(CASE WHEN success = 1 THEN 0 ELSE 1 END) AS failures,
                        SUM(CASE WHEN prompttokens IS NULL THEN 0 ELSE prompttokens END) AS prompttokens,
@@ -277,6 +343,7 @@ class usage_aggregator {
                        SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedrequests
                   FROM {' . usage_logger::TABLE . '}
                  WHERE timecreated >= :start AND timecreated < :end
-              GROUP BY courseid, actionname, targetid, targetname, targetprovider, model, keysource, currency';
+              GROUP BY courseid, userid, actionname, targetid, targetname, targetprovider, model,
+                       keysource, currency';
     }
 }
