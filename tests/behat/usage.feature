@@ -22,6 +22,17 @@ Feature: Seeing what the router handled
     Then I should see "Paid for with"
     And the field "Paid for with" matches value "The site's own key"
 
+  Scenario: The report by person says its costs are estimates before showing any
+    When I visit "/ai/provider/router/userusage.php"
+    Then I should see "AI Router usage by person"
+    And I should see "Every cost here is worked out from the rates entered for this site"
+    And I should see "Who has registered a key"
+
+  Scenario: The report by person is reached from the usage page
+    Given I visit "/ai/provider/router/usage.php"
+    When I click on "AI Router usage by person" "button"
+    Then I should see "Who used the AI, how much of it, and what it cost"
+
   Scenario: How long detail is kept can be changed
     Given I visit "/ai/provider/router/usage.php"
     When I set the field "Days of detail to keep" to "30"

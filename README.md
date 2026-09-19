@@ -221,6 +221,39 @@ The shape is fixed on purpose. Answering each new question with another chart is
 report grows without limit, and the questions a site owner has are how much is being used,
 where it goes, what it costs and what is failing.
 
+### Who used it
+
+**AI Router usage by person** (`/ai/provider/router/userusage.php`, linked from the
+dashboard) answers the question the dashboard deliberately does not: which named people
+used the AI, how much, and what it cost. A site asked to account for its AI spending
+eventually has to answer that, and the summaries keep enough to answer it long after the
+detailed records have gone.
+
+| | |
+| --- | --- |
+| By person | Requests, tokens, what the site's key paid and what the person's own key paid, kept apart |
+| One person, day by day | Goes back as far as the summaries do |
+| One person's individual requests | When, where in Moodle, which provider and model. ⚠ Only as far back as the detailed records |
+| Who has registered a key | Every brought key, whose it is, when it was registered and whether it last worked |
+
+It also downloads as a spreadsheet, since a report like this is usually produced to be
+read outside Moodle.
+
+**Every cost on that page is an estimate**, worked out from the rates entered for this
+site — including the costs shown against keys people brought, where it is an estimate of
+what their own provider would have charged rather than a record of what it did. The page
+says so above the figures, because a number quoted elsewhere without that sentence reads
+as a bill.
+
+Nothing about a key itself appears there, not even the last few characters shown to its
+owner. An administrator asking who brings keys has no use for a fragment of somebody's
+credential.
+
+It is granted by `aiprovider/router:viewuserusage`, which **only managers have** by
+default. The same figures narrowed to one course are a record of what each learner did,
+and whether anybody at course level should hold that is a question for the site rather
+than an assumption this plugin makes for it.
+
 ### What teachers see
 
 A course with AI use through the router gets an **AI usage in this course** entry, which

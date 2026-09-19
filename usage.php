@@ -180,6 +180,15 @@ if ($detailfrom !== null && $detailfrom > $from) {
     );
 }
 
+if (has_capability('aiprovider/router:viewuserusage', $context)) {
+    // The question this page deliberately does not answer.
+    echo $OUTPUT->single_button(
+        new moodle_url('/ai/provider/router/userusage.php'),
+        get_string('report:heading', 'aiprovider_router'),
+        'get',
+    );
+}
+
 echo $OUTPUT->heading(get_string('usage:settings', 'aiprovider_router'), 3);
 echo html_writer::div(get_string('usage:settings_intro', 'aiprovider_router'));
 $form->display();

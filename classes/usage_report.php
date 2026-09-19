@@ -46,6 +46,9 @@ class usage_report {
     /** @var string Break the figures down by whose key paid. */
     public const BY_KEYSOURCE = 'keysource';
 
+    /** @var string Break the figures down by the person who asked, and by who paid. */
+    public const BY_USER = 'user';
+
     /** @var string Asked for in place of a key source, to leave the figures unfiltered. */
     public const KEYSOURCE_ALL = 'all';
 
@@ -55,6 +58,7 @@ class usage_report {
         self::BY_ACTION => ['actionname'],
         self::BY_MODEL => ['model'],
         self::BY_KEYSOURCE => ['keysource'],
+        self::BY_USER => ['userid', 'keysource'],
     ];
 
     /** @var string[] The figures every row of every report carries. */
@@ -335,7 +339,7 @@ class usage_report {
         $select = $fields ? implode(', ', $fields) . ',' : '';
         $group = $fields ? ' GROUP BY ' . implode(', ', $fields) : '';
 
-        return $this->db->get_records_sql(
+        return $this->rows(
             'SELECT ' . $select . '
                     SUM(requests) AS requests,
                     SUM(failures) AS failures,
@@ -371,7 +375,7 @@ class usage_report {
         $select = $fields ? implode(', ', $fields) . ',' : '';
         $group = $fields ? ' GROUP BY ' . implode(', ', $fields) : '';
 
-        return $this->db->get_records_sql(
+        return $this->rows(
             'SELECT ' . $select . '
                     COUNT(*) AS requests,
                     SUM(CASE WHEN success = 1 THEN 0 ELSE 1 END) AS failures,
@@ -383,6 +387,29 @@ class usage_report {
               WHERE ' . $where . $group,
             $params,
         );
+    }
+
+    /**
+     * Run a grouped query and return its rows as a plain list.
+     *
+     * Not get_records_sql(). That keys the result on the first column, so a grouping
+     * whose first column repeats - by person and then by who paid, where one person
+     * has both - silently keeps only the last row of each. Nothing here wants the rows
+     * keyed anyway; they are gathered by collect() under a key of its own making.
+     *
+     * @param string $sql The query.
+     * @param array $params Its parameters.
+     * @return \stdClass[] The rows, in the order the database returned them.
+     */
+    protected function rows(string $sql, array $params): array {
+        $rows = [];
+        $recordset = $this->db->get_recordset_sql($sql, $params);
+        foreach ($recordset as $row) {
+            $rows[] = $row;
+        }
+        $recordset->close();
+
+        return $rows;
     }
 
     /**

@@ -41,6 +41,19 @@ $capabilities = [
         ],
     ],
 
+    // Seeing which named people used the AI and what it cost, which is what a site needs
+    // when it is asked to account for its AI spending. Kept apart from the ordinary
+    // monitor, and away from teachers by default: the same figures for one course are a
+    // record of what each learner did, and whether anybody should hold that is a question
+    // for the site rather than an assumption this plugin makes for it.
+    'aiprovider/router:viewuserusage' => [
+        'captype' => 'read',
+        'contextlevel' => CONTEXT_SYSTEM,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+        ],
+    ],
+
     'aiprovider/router:viewusage' => [
         'captype' => 'read',
         'contextlevel' => CONTEXT_COURSE,
