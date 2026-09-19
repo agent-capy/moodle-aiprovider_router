@@ -86,9 +86,15 @@ class rule_formatter {
      * @param rule $rule The rule.
      * @param string[] $targets Instance names keyed by id.
      * @param int[] $byokcapable Ids of the instances a brought key can actually go into.
+     * @param int[] $byokonly Ids of the instances the site's own key may not be used at.
      * @return string HTML.
      */
-    public static function target(rule $rule, array $targets, array $byokcapable = []): string {
+    public static function target(
+        rule $rule,
+        array $targets,
+        array $byokcapable = [],
+        array $byokonly = [],
+    ): string {
         $targetid = (int) $rule->get('targetid');
         if (isset($targets[$targetid])) {
             $output = s($targets[$targetid]);
@@ -101,25 +107,34 @@ class rule_formatter {
             );
         }
 
-        return $output . self::keysource($rule, $byokcapable);
+        return $output . self::keysource($rule, $byokcapable, $byokonly);
     }
 
     /**
      * Whose key pays for the requests this rule claims.
      *
-     * A rule asking for a brought key at an instance nobody has said the key field of is
-     * the case worth calling out. Nothing about it looks wrong: the rule is valid, the
-     * instance is there and working, and the only symptom is that the rule never seems
-     * to claim anything.
+     * Two cases are worth calling out, and neither looks wrong from the list. A rule
+     * asking for a brought key at an instance nobody has said the key field of can
+     * never be honoured; a rule paying with the site's key at an instance kept for
+     * brought keys only can never be honoured either. Both are valid rules at working
+     * instances whose only symptom is that they never seem to claim anything.
      *
      * @param rule $rule The rule.
      * @param int[] $byokcapable Ids of the instances a brought key can actually go into.
-     * @return string HTML, empty for a rule the site pays for.
+     * @param int[] $byokonly Ids of the instances the site's own key may not be used at.
+     * @return string HTML, empty for an ordinary rule the site pays for.
      */
-    protected static function keysource(rule $rule, array $byokcapable): string {
+    protected static function keysource(rule $rule, array $byokcapable, array $byokonly = []): string {
         if (!$rule->is_byok()) {
             // Every rule was this before keys could be brought, so saying it on all of
             // them would bury the one rule an administrator is looking for.
+            if (in_array((int) $rule->get('targetid'), array_map('intval', $byokonly), true)) {
+                return \html_writer::div(
+                    get_string('rules:byokonlytarget', 'aiprovider_router'),
+                    'text-warning',
+                );
+            }
+
             return '';
         }
 

@@ -110,12 +110,12 @@ if ($action === 'delete' && $ruleid > 0 && !$confirm) {
 $rules = $repository->get_all();
 $conditions = $repository->get_conditions_for(array_keys($rules));
 $targets = target_resolver::get_delegation_targets();
-// Which instances a brought key could actually be put into, so that a rule asking for one
-// where that has not been settled says so rather than quietly never claiming anything.
-$byokcapable = array_keys(array_filter(
-    (new target_settings($DB))->get_all(),
-    fn(string $keyfield): bool => $keyfield !== target_settings::NO_KEY,
-));
+// Which instances a brought key could actually be put into, and which ones the site's own
+// key may not be used at, so that a rule which can never be honoured says so rather than
+// quietly never claiming anything.
+$settings = new target_settings($DB);
+$byokcapable = $settings->get_byok_capable_ids();
+$byokonly = $settings->get_byok_only_ids();
 
 echo $OUTPUT->box(get_string('rules:intro', 'aiprovider_router'));
 
@@ -141,7 +141,7 @@ if (!$rules) {
             (string) ($position + 1),
             rule_formatter::name($rule, $reachable),
             rule_formatter::conditions($conditions[$id] ?? []),
-            rule_formatter::target($rule, $targets, $byokcapable),
+            rule_formatter::target($rule, $targets, $byokcapable, $byokonly),
             rule_formatter::actions($url, $rule, $position, $last),
         ];
         if (!$rule->get('enabled')) {

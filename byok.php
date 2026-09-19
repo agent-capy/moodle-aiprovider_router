@@ -81,8 +81,10 @@ $form = new byok_targets_form($url, ['targets' => $targets]);
 
 if ($data = $form->get_data()) {
     foreach (array_keys($targets) as $targetid) {
-        $element = 'keyfield_' . $targetid;
-        $settings->set_key_field($targetid, (string) ($data->$element ?? ''));
+        $field = 'keyfield_' . $targetid;
+        $mode = 'byokmode_' . $targetid;
+        $settings->set_key_field($targetid, (string) ($data->$field ?? ''));
+        $settings->set_mode($targetid, (string) ($data->$mode ?? target_settings::MODE_ALLOWED));
     }
     redirect(
         $url,
@@ -93,11 +95,13 @@ if ($data = $form->get_data()) {
 }
 
 $current = $settings->get_all();
+$modes = $settings->get_all_modes();
 $defaults = [];
 foreach ($targets as $targetid => $target) {
     // An instance nobody has answered for is offered the guess, so that confirming is
     // usually a matter of agreeing rather than of going and looking something up.
     $defaults['keyfield_' . $targetid] = $current[$targetid] ?? target_settings::guess($target);
+    $defaults['byokmode_' . $targetid] = $modes[$targetid] ?? target_settings::MODE_ALLOWED;
 }
 $form->set_data($defaults);
 

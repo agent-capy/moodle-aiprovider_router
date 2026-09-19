@@ -30,6 +30,12 @@ use core_ai\provider as ai_provider;
  * So the field is guessed from the instance's own configuration and then confirmed by an
  * administrator. A guess is a starting point offered on a form, never a decision.
  *
+ * Beside it, and deliberately apart from it, is whether the site lets anybody bring a
+ * key here at all. The two were one thing at first, and saying "no keys here" meant
+ * claiming the provider took none - a statement about the provider, used to express a
+ * decision of the site's. They are separate now: keyfield says where a key goes, which
+ * is a fact, and byokmode says what this site allows, which is not.
+ *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -40,6 +46,15 @@ class target_settings {
 
     /** @var string Recorded when an administrator says a target takes no key. */
     public const NO_KEY = '';
+
+    /** @var string People may bring a key here, and the site's own key works too. */
+    public const MODE_ALLOWED = 'allowed';
+
+    /** @var string This site does not let anybody bring a key here. */
+    public const MODE_DISALLOWED = 'disallowed';
+
+    /** @var string This provider may only be reached with a key somebody brought. */
+    public const MODE_ONLY = 'only';
 
     /** @var string[] Configuration names that are a key, in the order they are preferred. */
     protected const KNOWN = [
@@ -89,23 +104,36 @@ class target_settings {
      * @param string $field The field name, or the empty string for a target that takes none.
      */
     public function set_key_field(int $targetid, string $field): void {
+        $this->write($targetid, ['keyfield' => $field]);
+    }
+
+    /**
+     * Write some of a target's settings, leaving the rest as they were.
+     *
+     * @param int $targetid The delegation target.
+     * @param array $values Column and value pairs to store.
+     */
+    protected function write(int $targetid, array $values): void {
         global $USER;
 
         $now = time();
         $record = $this->db->get_record(self::TABLE, ['targetid' => $targetid]);
         if ($record === false) {
-            $this->db->insert_record(self::TABLE, (object) [
+            $this->db->insert_record(self::TABLE, (object) ($values + [
                 'targetid' => $targetid,
-                'keyfield' => $field,
+                'keyfield' => self::NO_KEY,
+                'byokmode' => self::MODE_ALLOWED,
                 'usermodified' => (int) $USER->id,
                 'timecreated' => $now,
                 'timemodified' => $now,
-            ]);
+            ]));
 
             return;
         }
 
-        $record->keyfield = $field;
+        foreach ($values as $column => $value) {
+            $record->$column = $value;
+        }
         $record->usermodified = (int) $USER->id;
         $record->timemodified = $now;
         $this->db->update_record(self::TABLE, $record);
@@ -126,6 +154,119 @@ class target_settings {
     }
 
     /**
+     * What this site allows at a target.
+     *
+     * A target nobody has answered for is allowed, because the question that stops a
+     * key being used there is the other one: nobody has said where the key would go.
+     *
+     * @param int $targetid The delegation target.
+     * @return string One of the MODE_ constants.
+     */
+    public function get_mode(int $targetid): string {
+        $record = $this->db->get_record(self::TABLE, ['targetid' => $targetid]);
+        if ($record === false) {
+            return self::MODE_ALLOWED;
+        }
+
+        return self::clean_mode((string) $record->byokmode);
+    }
+
+    /**
+     * Record what this site allows at a target.
+     *
+     * @param int $targetid The delegation target.
+     * @param string $mode One of the MODE_ constants.
+     */
+    public function set_mode(int $targetid, string $mode): void {
+        $this->write($targetid, ['byokmode' => self::clean_mode($mode)]);
+    }
+
+    /**
+     * What this site allows at every target it has been asked about.
+     *
+     * @return string[] Modes keyed by target id.
+     */
+    public function get_all_modes(): array {
+        $modes = [];
+        foreach ($this->db->get_records(self::TABLE) as $record) {
+            $modes[(int) $record->targetid] = self::clean_mode((string) $record->byokmode);
+        }
+
+        return $modes;
+    }
+
+    /**
+     * The targets a brought key would actually be used at.
+     *
+     * @return int[] The target ids.
+     */
+    public function get_byok_capable_ids(): array {
+        $ids = [];
+        foreach ($this->db->get_records(self::TABLE) as $record) {
+            if ((string) $record->keyfield === self::NO_KEY) {
+                continue;
+            }
+            if (self::clean_mode((string) $record->byokmode) === self::MODE_DISALLOWED) {
+                continue;
+            }
+            $ids[] = (int) $record->targetid;
+        }
+
+        return $ids;
+    }
+
+    /**
+     * The targets the site's own key may not be used at.
+     *
+     * Read in one query, because it is asked on the path of every request that has to
+     * choose a target.
+     *
+     * @return int[] The target ids.
+     */
+    public function get_byok_only_ids(): array {
+        $ids = [];
+        foreach ($this->db->get_records(self::TABLE, ['byokmode' => self::MODE_ONLY]) as $record) {
+            // A target set to "brought keys only" with nowhere to put a brought key
+            // would be reachable by nobody at all. An unfinished setting narrows what
+            // can be done, it does not take a provider away.
+            if ((string) $record->keyfield !== self::NO_KEY) {
+                $ids[] = (int) $record->targetid;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Whether this provider may only be reached with a key somebody brought.
+     *
+     * @param int $targetid The delegation target.
+     * @return bool True when the site's own key may not be used here.
+     */
+    public function is_byok_only(int $targetid): bool {
+        return $this->get_mode($targetid) === self::MODE_ONLY && $this->supports_byok($targetid);
+    }
+
+    /**
+     * The modes an administrator can choose between.
+     *
+     * @return string[] The mode names.
+     */
+    public static function get_modes(): array {
+        return [self::MODE_ALLOWED, self::MODE_DISALLOWED, self::MODE_ONLY];
+    }
+
+    /**
+     * A stored mode, or the safe reading of one this version does not know.
+     *
+     * @param string $mode The stored value.
+     * @return string One of the MODE_ constants.
+     */
+    protected static function clean_mode(string $mode): string {
+        return in_array($mode, self::get_modes(), true) ? $mode : self::MODE_ALLOWED;
+    }
+
+    /**
      * Forget a target's answer, for a provider instance that has been deleted.
      *
      * @param int $targetid The delegation target.
@@ -137,13 +278,19 @@ class target_settings {
     /**
      * Whether a key can actually be brought to this target.
      *
+     * Two questions at once, and both have to be answered yes: somebody has said where
+     * a key would go, and the site has not said that keys are unwelcome here.
+     *
      * @param int $targetid The delegation target.
-     * @return bool True when a field has been confirmed and it is not "no key".
+     * @return bool True when a key brought here would be used.
      */
     public function supports_byok(int $targetid): bool {
-        $field = $this->get_key_field($targetid);
+        $record = $this->db->get_record(self::TABLE, ['targetid' => $targetid]);
+        if ($record === false || (string) $record->keyfield === self::NO_KEY) {
+            return false;
+        }
 
-        return $field !== null && $field !== self::NO_KEY;
+        return self::clean_mode((string) $record->byokmode) !== self::MODE_DISALLOWED;
     }
 
     /**

@@ -414,6 +414,29 @@ field for each provider, offering a guess taken from the instance's own configur
 
 A provider nobody has answered for cannot take a key.
 
+### What each provider allows
+
+Beside the field, and separately from it, each provider carries what this site allows
+there. The two are different kinds of statement: where a key goes is a fact about the
+provider, and whether people may bring one is a decision of the site's.
+
+| Setting | What happens |
+| --- | --- |
+| **People may bring their own** | The default. Keys can be registered here, and the site's own key works as before. |
+| **This site allows no brought keys here** | The provider disappears from the key registration page, and a rule asking for a brought key here is never honoured. Requests still go through it on the site's own key. |
+| **Only usable with a brought key** | The site's own key is refused here. A rule paying with it moves on to the next rule, the provider is never used as the default target or as a fallback behind another rule, and only requests carrying somebody's own key reach it. |
+
+The last one is the way to keep a provider off the site's bill entirely. It is enforced
+before the request leaves Moodle, so a request the site would have paid for moves on to
+the next rule rather than spending a round trip being refused by the provider.
+
+Rules that can never be honoured are called out in the rule list: one asking for a
+brought key where nobody has said the field, and one paying with the site's key at a
+provider reserved for brought keys.
+
+Reserving a provider that takes no key is refused, because nothing would then be able to
+reach it at all.
+
 ### What is stored
 
 The key, encrypted with `\core\encryption`, and its last few characters in readable form

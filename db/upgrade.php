@@ -233,5 +233,19 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026091900, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026091903) {
+        // Whether the site lets people bring a key to each provider, which until now
+        // could only be said by claiming the provider took no key at all. Existing rows
+        // were written by administrators who had just said where a key goes, so
+        // allowing one is what they meant.
+        $table = new xmldb_table('aiprovider_router_target');
+        $field = new xmldb_field('byokmode', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'allowed', 'keyfield');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026091903, 'aiprovider', 'router');
+    }
+
     return true;
 }

@@ -458,6 +458,58 @@ final class target_resolver_test extends \advanced_testcase {
         $this->assertSame([9, 7], $this->candidates($resolver));
     }
 
+    public function test_a_provider_reserved_for_brought_keys_refuses_the_sites_own(): void {
+        global $DB;
+        $settings = new target_settings($DB);
+        $settings->set_key_field(8, 'apikey');
+        $settings->set_mode(8, target_settings::MODE_ONLY);
+        $this->add('the site pays', 8);
+        $this->add('and then this one', 9);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        // Turned away here rather than at the provider. Letting the request go and be
+        // refused would spend a round trip finding out what the site already knows.
+        $this->assertSame([9, 7], $this->candidates($resolver, $this->action()));
+        $this->assertSame('and then this one', $resolver->get_matched_rule()?->get('name'));
+    }
+
+    public function test_a_provider_reserved_for_brought_keys_still_takes_one(): void {
+        global $DB;
+        $user = $this->key_holder(8);
+        (new target_settings($DB))->set_mode(8, target_settings::MODE_ONLY);
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8)]);
+
+        $candidates = $resolver->get_candidates($this->action((int) $user->id));
+
+        $this->assertSame('their-own-key', $candidates[0]->target->config['apikey']);
+        $this->assertSame(rule::KEYSOURCE_USER, $candidates[0]->keysource);
+    }
+
+    public function test_a_provider_reserved_for_brought_keys_is_not_a_default_target(): void {
+        global $DB;
+        $settings = new target_settings($DB);
+        $settings->set_key_field(7, 'apikey');
+        $settings->set_mode(7, target_settings::MODE_ONLY);
+        $resolver = $this->resolver([$this->instance(7)]);
+
+        // Nothing claimed the request and the only place left is one the site may not
+        // pay at. Better nothing than a bill the administrator ruled out.
+        $this->assertSame([], $resolver->get_candidates($this->action()));
+    }
+
+    public function test_a_provider_reserved_for_brought_keys_is_no_fallback_for_the_site(): void {
+        global $DB;
+        $settings = new target_settings($DB);
+        $settings->set_key_field(7, 'apikey');
+        $settings->set_mode(7, target_settings::MODE_ONLY);
+        $this->add('the site pays', 9);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(9)]);
+
+        // The default target stands behind every rule, so it has to be refused there too.
+        $this->assertSame([9], $this->candidates($resolver, $this->action()));
+    }
+
     public function test_a_router_with_neither_rules_nor_a_target_is_not_configured(): void {
         $router = new provider(enabled: true, name: 'Router', config: '{}', id: 1);
 

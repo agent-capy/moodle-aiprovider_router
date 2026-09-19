@@ -108,6 +108,68 @@ final class target_settings_test extends \advanced_testcase {
         $this->assertCount(1, $this->settings->get_all());
     }
 
+    public function test_a_target_nobody_has_answered_for_allows_keys_in_principle(): void {
+        // The thing stopping a key being used there is the other question: nobody has
+        // said where it would go.
+        $this->assertSame(target_settings::MODE_ALLOWED, $this->settings->get_mode(7));
+        $this->assertFalse($this->settings->supports_byok(7));
+        $this->assertFalse($this->settings->is_byok_only(7));
+    }
+
+    public function test_a_site_can_refuse_brought_keys_at_a_provider_that_takes_one(): void {
+        $this->settings->set_key_field(7, 'apikey');
+        $this->assertTrue($this->settings->supports_byok(7));
+
+        $this->settings->set_mode(7, target_settings::MODE_DISALLOWED);
+
+        // Saying so no longer means claiming the provider takes no key, which was a
+        // statement about the provider rather than a decision of the site's.
+        $this->assertFalse($this->settings->supports_byok(7));
+        $this->assertSame('apikey', $this->settings->get_key_field(7));
+        $this->assertSame([], $this->settings->get_byok_capable_ids());
+    }
+
+    public function test_a_provider_can_be_reserved_for_brought_keys(): void {
+        $this->settings->set_key_field(7, 'apikey');
+        $this->settings->set_mode(7, target_settings::MODE_ONLY);
+
+        $this->assertTrue($this->settings->supports_byok(7));
+        $this->assertTrue($this->settings->is_byok_only(7));
+        $this->assertSame([7], $this->settings->get_byok_only_ids());
+        $this->assertSame([7], $this->settings->get_byok_capable_ids());
+    }
+
+    public function test_reserving_a_provider_that_takes_no_key_leaves_it_as_it_was(): void {
+        $this->settings->set_key_field(7, target_settings::NO_KEY);
+        $this->settings->set_mode(7, target_settings::MODE_ONLY);
+
+        // An unfinished setting narrows what can be done; it does not take a provider
+        // away from everybody. The form refuses this combination, and a site that
+        // reaches it another way still has a working provider.
+        $this->assertFalse($this->settings->is_byok_only(7));
+        $this->assertSame([], $this->settings->get_byok_only_ids());
+    }
+
+    public function test_one_setting_does_not_overwrite_the_other(): void {
+        $this->settings->set_mode(7, target_settings::MODE_ONLY);
+        $this->settings->set_key_field(7, 'apikey');
+
+        $this->assertSame('apikey', $this->settings->get_key_field(7));
+        $this->assertSame(target_settings::MODE_ONLY, $this->settings->get_mode(7));
+    }
+
+    public function test_a_mode_this_version_does_not_know_is_read_as_allowed(): void {
+        global $DB;
+        $this->settings->set_key_field(7, 'apikey');
+        // Written by a newer version of this plugin. Refusing requests on the strength
+        // of a word this version cannot read would be the worse guess.
+        $DB->set_field(target_settings::TABLE, 'byokmode', 'somethingelse', ['targetid' => 7]);
+
+        $this->assertSame(target_settings::MODE_ALLOWED, $this->settings->get_mode(7));
+        $this->assertTrue($this->settings->supports_byok(7));
+        $this->assertFalse($this->settings->is_byok_only(7));
+    }
+
     public function test_answers_are_forgotten_with_the_instance_they_were_about(): void {
         $this->settings->set_key_field(1, 'apikey');
         $this->settings->set_key_field(2, 'apikey');

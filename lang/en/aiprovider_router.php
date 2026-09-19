@@ -24,10 +24,14 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+$string['byok:error:onlywithoutfield'] = 'A provider reserved for brought keys cannot also be one that takes no key: nothing would be able to reach it. Say which field a key goes in, or allow the site\'s own key here.';
 $string['byok:heading'] = 'AI Router keys';
 $string['byok:held'] = 'This site is holding {$a} brought keys.';
 $string['byok:intro'] = 'Keys people bring have to be put somewhere in the provider\'s own configuration, and providers do not agree on what that field is called: some call it an API key, others a token, and some take no key at all. Choosing the wrong one would send the request charged to the site while the person who brought a key believed they were paying for it, so the choice is made here rather than guessed at.';
 $string['byok:manage'] = 'Say where a brought key goes';
+$string['byok:mode:allowed'] = 'and people may bring their own';
+$string['byok:mode:disallowed'] = 'and this site allows no brought keys here';
+$string['byok:mode:only'] = 'and this provider may only be used with a brought key';
 $string['byok:nokey'] = 'This provider takes no key';
 $string['byok:saved'] = 'Saved.';
 $string['byok:targets'] = 'Where a brought key goes';
@@ -351,6 +355,7 @@ $string['rule:window'] = 'Active period';
 $string['rule:window_help'] = 'Outside this period the rule is skipped entirely, as though it were switched off. Leave both empty for a rule that always applies.';
 $string['rules:add'] = 'Add a rule';
 $string['rules:byoknotsupported'] = 'This rule asks for a brought key, but nobody has said which field of this provider\'s configuration a key goes in, so the rule can never be honoured. Answer for it under "Say where a brought key goes".';
+$string['rules:byokonlytarget'] = 'This rule is paid for with the site\'s own key, but this provider is reserved for keys people bring, so the rule can never be honoured and requests matching it fall through to the next rule.';
 $string['rules:confirmdelete'] = 'Delete the rule "{$a}"? Requests it used to claim will be handled by the rules below it, or by the "When no rule matches" setting. This cannot be undone.';
 $string['rules:copyof'] = 'Copy of {$a}';
 $string['rules:deleted'] = 'Rule "{$a}" has been deleted.';

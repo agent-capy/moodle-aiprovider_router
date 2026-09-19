@@ -57,6 +57,9 @@ class target_resolver {
     /** @var string Whose key the last resolution asked for. */
     protected string $keysource = rule::KEYSOURCE_SITE;
 
+    /** @var int[]|null The targets the site's own key may not be used at, once read. */
+    protected ?array $byokonly = null;
+
     /** @var key|null A key that is registered and cannot be decrypted. */
     protected ?key $unreadable = null;
 
@@ -82,12 +85,13 @@ class target_resolver {
         $this->declined = false;
         $this->keysource = rule::KEYSOURCE_SITE;
         $this->unreadable = null;
+        $this->byokonly = null;
         $instances = $this->get_instances_by_id();
 
         $this->evaluated = $this->get_evaluation_context($action);
         foreach ($this->get_evaluator()->matches($this->evaluated) as $rule) {
             $target = $instances[(int) $rule->get('targetid')] ?? null;
-            if ($target === null || !$this->is_usable($target, $action)) {
+            if ($target === null || !$this->is_usable($target, $action, $rule->is_byok())) {
                 continue;
             }
             if (!$rule->is_byok()) {
@@ -284,7 +288,7 @@ class target_resolver {
         // arbitrary one. An administrator who wants a particular order writes rules.
         foreach ($this->get_keys($scope, $scopeid) as $targetid => $key) {
             $instance = $instances[(int) $targetid] ?? null;
-            if ((int) $targetid === $named || $instance === null || !$this->is_usable($instance, $action)) {
+            if ((int) $targetid === $named || $instance === null || !$this->is_usable($instance, $action, true)) {
                 continue;
             }
             $injection = $this->get_injector()->inject($instance, $key);
@@ -418,9 +422,10 @@ class target_resolver {
      *
      * @param ai_provider $instance The candidate instance.
      * @param action_base $action The action to be delegated.
+     * @param bool $brought Whether the request would be paid for with a brought key.
      * @return bool True if the instance may be used.
      */
-    protected function is_usable(ai_provider $instance, action_base $action): bool {
+    protected function is_usable(ai_provider $instance, action_base $action, bool $brought = false): bool {
         // Never delegate to a router. A router chain would loop, and the single
         // instance restriction only stops routers being created through the UI.
         if ($instance instanceof provider) {
@@ -435,8 +440,30 @@ class target_resolver {
             return false;
         }
         $actionconfig = $instance->actionconfig[$action::class] ?? [];
+        if (empty($actionconfig['enabled'])) {
+            return false;
+        }
 
-        return !empty($actionconfig['enabled']);
+        // A provider the site has set aside for brought keys only. Turned away here
+        // rather than at the provider, so that a request the site would have paid for
+        // moves on to the next rule instead of spending a round trip finding out.
+        return $brought || !in_array((int) $instance->id, $this->get_byok_only(), true);
+    }
+
+    /**
+     * The targets the site's own key may not be used at.
+     *
+     * Read once per resolution. Every candidate is weighed against it, and the answer
+     * cannot change in the middle of choosing one.
+     *
+     * @return int[] The target ids.
+     */
+    protected function get_byok_only(): array {
+        global $DB;
+
+        $this->byokonly ??= (new target_settings($DB))->get_byok_only_ids();
+
+        return $this->byokonly;
     }
 
     /**
