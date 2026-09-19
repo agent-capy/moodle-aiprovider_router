@@ -155,7 +155,7 @@ final class rule_evaluator_test extends \advanced_testcase {
     }
 
     public function test_a_condition_this_version_does_not_know_is_not_met(): void {
-        $this->add('from the future', 7, ['budget' => ['limit' => 100]]);
+        $this->add('from the future', 7, ['futurecondition' => ['limit' => 100]]);
 
         // A rule written on a newer version stops matching rather than matching every
         // request on the site.

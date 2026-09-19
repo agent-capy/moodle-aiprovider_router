@@ -95,6 +95,22 @@ abstract class base {
     abstract public static function read_from_form(\stdClass $data): ?array;
 
     /**
+     * Check what was typed into this condition's controls before the rule is saved.
+     *
+     * The default is that nothing here can be typed wrongly, which is true of every
+     * condition built out of lists of things that already exist. A condition taking a
+     * number has something to say, and says it beside the field rather than dropping
+     * the condition silently: a rule that lost a condition matches more than it was
+     * meant to.
+     *
+     * @param array $data The submitted data.
+     * @return array Messages keyed by the form element they belong to.
+     */
+    public static function validate_form(array $data): array {
+        return [];
+    }
+
+    /**
      * Turn stored configuration back into form values.
      *
      * @param array $config The stored configuration.

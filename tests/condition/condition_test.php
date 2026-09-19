@@ -229,7 +229,7 @@ final class condition_test extends \advanced_testcase {
         // A rule written on a newer version can carry one. The evaluator turns a null
         // into an unmet condition, so such a rule stops matching instead of matching
         // everything.
-        $this->assertNull(registry::make('budget', []));
+        $this->assertNull(registry::make('futurecondition', []));
         $this->assertNull(registry::make('registry', []));
         $this->assertNull(registry::make('base', []));
     }

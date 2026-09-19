@@ -84,7 +84,7 @@ final class rule_form_test extends \advanced_testcase {
         $rule->set('name', 'written on a newer version');
         $rule->set('targetid', 7);
         $saved = $repository->save($rule, [
-            'budget' => ['limit' => 100],
+            'futurecondition' => ['limit' => 100],
             'course' => ['courseids' => [11]],
         ]);
         $existing = $repository->get_conditions((int) $saved->get('id'));
@@ -95,7 +95,7 @@ final class rule_form_test extends \advanced_testcase {
         // Losing the condition would widen the rule, and nothing on the screen would have
         // said so. The form carries it through untouched instead.
         $after = $repository->get_conditions((int) $saved->get('id'));
-        $this->assertSame(['budget' => ['limit' => 100], 'course' => ['courseids' => [12]]], $after);
+        $this->assertSame(['course' => ['courseids' => [12]], 'futurecondition' => ['limit' => 100]], $after);
     }
 
     public function test_stored_conditions_come_back_as_form_values(): void {
@@ -110,7 +110,7 @@ final class rule_form_test extends \advanced_testcase {
     }
 
     public function test_a_condition_this_version_cannot_show_is_left_out_of_the_form(): void {
-        $data = rule_form::conditions_to_form_data(['budget' => ['limit' => 100]]);
+        $data = rule_form::conditions_to_form_data(['futurecondition' => ['limit' => 100]]);
 
         $this->assertSame([], $data);
     }

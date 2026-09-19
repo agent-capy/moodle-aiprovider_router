@@ -115,6 +115,13 @@ class rule_form extends \moodleform {
         $candidate->set('timestart', (int) ($data['timestart'] ?? 0));
         $candidate->set('timeend', (int) ($data['timeend'] ?? 0));
 
+        foreach (registry::get_types() as $type) {
+            $class = '\\aiprovider_router\\condition\\' . $type;
+            foreach ($class::validate_form($data) as $element => $message) {
+                $errors[$element] = $message;
+            }
+        }
+
         // A valid rule validates to true rather than to an empty list of problems.
         $problems = $candidate->validate();
         if (is_array($problems)) {

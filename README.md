@@ -27,10 +27,13 @@ Developed as part of a 2026 domestic research and development project funded by 
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
   `\core\encryption`, a policy controlling who may bring one, and rules that send a
   request with somebody's own key instead of the site's
+- **Budget conditions** — route by how much has been spent already, by the site, by a
+  course or by a person, over a rolling period or a calendar month
 
 Still to come, and not in this version:
 
-- **Budget conditions**, which depend on the dashboards above
+- **Key owner limits** — a cap somebody can set on the key they brought
+- **Notifications** when spending passes a threshold
 
 ## Settings
 
@@ -159,6 +162,43 @@ tokeniser. A rule reading "at least 2000 tokens" would fire at roughly 2000 char
 Japanese and roughly 8000 of English, and nobody could say what it meant. A character
 count means one thing. The rule tester shows both figures for a prompt you have in mind,
 which is where a threshold is worked out.
+
+### Routing by budget
+
+A **Budget** condition asks how much has been spent already, and can be written either
+way round: *is under* a limit, or *has reached* it. Two rules are what express what
+should happen on each side of it, and there is no separate "what to do when the budget
+runs out" setting, because the order of the rules already says it:
+
+```
+1. Budget has room  ->  the expensive instance
+2. (no conditions)  ->  the cheap instance
+```
+
+Delete the second rule, on a site that declines requests matching nothing, and the same
+pair blocks instead of switching.
+
+The spending measured is **what the site paid for**. Requests covered by a key somebody
+brought cost the site nothing and are left out of every budget, however large they are; a
+limit on a brought key belongs to whoever brought it. The period is either the last *N*
+days, counted from midnight today, or the current calendar month, and the figures come
+from the daily summaries as far as they reach and from the detail rows beyond them, so a
+budget still works over periods the detail rows no longer cover.
+
+Two things are worth knowing before relying on one.
+
+**A budget nobody can measure is not a budget with room left in it.** Costs are worked
+out from the rates entered on this site, so a request whose model has no rate has no cost
+at all, and a site that has entered no rates spends nothing however much it uses. A
+budget condition whose spending cannot be worked out is satisfied **neither** way round,
+so rules carrying one never match and requests fall through to whatever comes after them.
+The **Rates for budget conditions** status check says so when a site routes by budget
+and its rates do not cover what is being used.
+
+**A limit is accurate to about a minute.** Adding up the history on every AI request
+would be too much work for the path a request takes, so the figures are held briefly. A
+burst of requests can therefore carry spending a little past a limit. Making the window
+shorter would not fix it, because the request being weighed has not been paid for yet.
 
 ## Usage history
 

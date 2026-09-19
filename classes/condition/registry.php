@@ -32,7 +32,9 @@ class registry {
      * The known condition types, in the order they are presented.
      *
      * Narrow and cheap first, so that reading a rule tells you what it is about before
-     * it tells you how big the prompt has to be.
+     * it tells you how big the prompt has to be. Budget comes last for both reasons: it
+     * says least about what a rule is for, and it is the only one that reads the
+     * history to answer.
      *
      * @var string[]
      */
@@ -43,6 +45,7 @@ class registry {
         'category',
         'role',
         'promptlength',
+        'budget',
     ];
 
     /**

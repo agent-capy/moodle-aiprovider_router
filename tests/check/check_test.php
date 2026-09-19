@@ -18,6 +18,10 @@ namespace aiprovider_router\check;
 
 use aiprovider_router\fixture_text_provider;
 use aiprovider_router\key;
+use aiprovider_router\rule;
+use aiprovider_router\rule_repository;
+use aiprovider_router\spend_ledger;
+use aiprovider_router\usage_logger;
 use aiprovider_router\key_repository;
 use aiprovider_router\order_inspector;
 use aiprovider_router\provider;
@@ -46,6 +50,7 @@ require_once(__DIR__ . '/../fixtures/fixture_unconfigured_provider.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(actionconflict::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(singleinstance::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(byokkeys::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(budgetrates::class)]
 final class check_test extends \advanced_testcase {
     #[\Override]
     public function setUp(): void {
@@ -211,10 +216,104 @@ final class check_test extends \advanced_testcase {
         $this->assertStringContainsString('1', $result->get_summary());
     }
 
+    /**
+     * Give the site a rule that routes by budget.
+     */
+    protected function budget_rule(): void {
+        global $DB;
+        $rule = new rule();
+        $rule->set('name', 'While there is money left');
+        $rule->set('targetid', 3);
+        (new rule_repository($DB))->save($rule, ['budget' => [
+            'scope' => spend_ledger::SCOPE_SITE,
+            'direction' => 'under',
+            'amount' => 100.0,
+            'period' => spend_ledger::PERIOD_ROLLING,
+            'days' => 30,
+        ]]);
+    }
+
+    /**
+     * Write one recorded request.
+     *
+     * @param float|null $cost What it cost, or null when no rate covered it.
+     */
+    protected function request(?float $cost): void {
+        global $DB;
+        $DB->insert_record(usage_logger::TABLE, (object) [
+            'timecreated' => time() - HOURSECS,
+            'userid' => 5,
+            'contextid' => 0,
+            'courseid' => null,
+            'actionname' => 'generate_text',
+            'targetid' => 1,
+            'targetname' => 'Target one',
+            'targetprovider' => 'aiprovider_openai',
+            'model' => 'gpt-4o',
+            'currency' => 'USD',
+            'success' => 1,
+            'attempts' => 1,
+            'cost' => $cost,
+            'keysource' => usage_logger::KEY_SITE,
+        ]);
+    }
+
+    public function test_rates_are_only_load_bearing_once_a_rule_routes_by_budget(): void {
+        $this->request(null);
+
+        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        // Rates are worth having anyway, for the monitor. Nothing here depends on them.
+        $this->assertSame(result::NA, $result->get_status());
+    }
+
+    public function test_a_budget_rule_with_no_rates_at_all_is_an_error(): void {
+        $this->budget_rule();
+        $this->request(null);
+        $this->request(null);
+
+        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        // The rule is enabled, looks right, and can never match. Nothing else on the
+        // site would say so.
+        $this->assertSame(result::ERROR, $result->get_status());
+        $this->assertStringContainsString('2', $result->get_summary());
+    }
+
+    public function test_a_mostly_unpriced_site_is_told_its_budgets_understate(): void {
+        $this->budget_rule();
+        $this->request(1.0);
+        $this->request(null);
+        $this->request(null);
+        $this->request(null);
+
+        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::WARNING, $result->get_status());
+    }
+
+    public function test_a_priced_site_with_budget_rules_is_fine(): void {
+        $this->budget_rule();
+        $this->request(1.0);
+        $this->request(2.0);
+
+        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::OK, $result->get_status());
+    }
+
+    public function test_a_site_that_has_recorded_nothing_is_not_told_off(): void {
+        $this->budget_rule();
+
+        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::NA, $result->get_status());
+    }
+
     public function test_every_check_offers_somewhere_to_go_and_has_a_name(): void {
         $inspector = $this->inspector([5 => $this->router(5)], ',5');
 
-        foreach ([...self::all_checks(), byokkeys::class] as $class) {
+        foreach ([...self::all_checks(), byokkeys::class, budgetrates::class] as $class) {
             $check = new $class($inspector);
             $this->assertNotEmpty($check->get_name(), $class);
             $this->assertNotNull($check->get_action_link(), $class);

@@ -81,9 +81,9 @@ final class rule_formatter_test extends \advanced_testcase {
     }
 
     public function test_a_condition_type_this_version_cannot_read_is_pointed_out(): void {
-        $output = rule_formatter::conditions(['budget' => ['limit' => 100]]);
+        $output = rule_formatter::conditions(['futurecondition' => ['limit' => 100]]);
 
-        $this->assertStringContainsString('budget', $output);
+        $this->assertStringContainsString('futurecondition', $output);
     }
 
     public function test_a_prompt_length_condition_is_described_in_characters(): void {
