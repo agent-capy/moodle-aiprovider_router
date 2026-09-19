@@ -319,6 +319,29 @@ it was made and keeps that figure, so adding a rate today leaves last month's nu
 they were. A request no rate covers is recorded **without a cost** rather than with a cost
 of zero, which would say it was free.
 
+#### Providers that cost nothing
+
+A model you run yourself has no bill to estimate, and there is a right way to say so:
+give it a rate of **0**, with the model left empty so it covers everything that provider
+answers with. No rate and a rate of zero are different statements — no rate means nobody
+knows what a request cost, and zero means it was free — and several things downstream
+depend on which one you meant:
+
+- **Budget conditions can be measured.** Spending that cannot be worked out satisfies a
+  budget condition neither way round, so on a site whose traffic is entirely unpriced
+  those rules never match. With a rate of zero the spending is a known zero and budgets
+  work again.
+- **The status check stays quiet.** *Rates for budget conditions* counts requests that
+  reached no rate, and a free provider entered as zero is priced, not missing.
+- **Dashboards stop reporting a gap.** An unpriced request is shown as such, beside the
+  figure, so that a total is never mistaken for the whole story.
+
+**Token counts do not depend on any of this.** Every request records the tokens the
+provider reported, priced or not, and the dashboards and reports add them up the same
+way — so usage of a local model is measured in full even though it costs nothing. Moodle's
+own Ollama provider reports token counts, and the router keeps whatever the provider
+sent back.
+
 One currency applies site-wide and nothing is converted: choosing an exchange rate source,
 a moment and a rounding rule would lay a second layer of error over a figure that is
 already an estimate. To work in yen, set the currency to JPY and enter the rates in yen.

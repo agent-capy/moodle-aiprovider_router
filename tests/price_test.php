@@ -117,6 +117,28 @@ final class price_test extends \advanced_testcase {
         $this->assertNull((new price_book($DB))->find('aiprovider_somewhere', 'model', time()));
     }
 
+    public function test_a_rate_of_zero_is_free_rather_than_unknown(): void {
+        // How a site says a provider costs nothing: a model somebody runs themselves,
+        // where there is no bill to estimate. Leaving the rate out instead would record
+        // every request as costing an unknown amount, which reads as a gap in the
+        // records rather than as a fact about the provider.
+        $record = $this->add('aiprovider_ollama', '', 0.0, 0.0);
+
+        $this->assertSame(0.0, $record->cost(1000, 1000));
+        $this->assertNotNull($record->cost(1000, 1000));
+    }
+
+    public function test_a_provider_wide_rate_of_zero_covers_every_model(): void {
+        global $DB;
+        $this->add('aiprovider_ollama', '', 0.0, 0.0);
+        $book = new price_book($DB);
+
+        // One row with the model left empty is all a free provider needs, whatever it
+        // is asked to run.
+        $this->assertSame(0.0, $book->find('aiprovider_ollama', 'gpt-oss:120b', 100)?->cost(500, 500));
+        $this->assertSame(0.0, $book->find('aiprovider_ollama', 'llama3', 100)?->cost(500, 500));
+    }
+
     public function test_a_rate_with_nothing_filled_in_costs_nothing_knowable(): void {
         $record = $this->add('aiprovider_openai', 'gpt-x', null, null);
 

@@ -132,6 +132,9 @@ if ($action === 'delete' && $priceid > 0) {
 }
 
 echo $OUTPUT->box(get_string('rates:intro', 'aiprovider_router'));
+// Said here because the difference is invisible afterwards: a request with no rate and
+// a request that was free both show no money, and only one of them is a known figure.
+echo html_writer::div(get_string('rates:zero', 'aiprovider_router'), 'text-muted');
 
 echo $OUTPUT->heading(get_string('rates:prices', 'aiprovider_router'), 3);
 

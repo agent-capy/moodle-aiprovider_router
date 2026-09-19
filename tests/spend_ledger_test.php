@@ -179,6 +179,38 @@ final class spend_ledger_test extends \advanced_testcase {
         $this->assertSame(0, $spend->costedrequests);
     }
 
+    public function test_a_provider_that_costs_nothing_is_a_known_zero(): void {
+        // A model the site runs itself, entered with a rate of zero. The requests are
+        // priced, and priced at nothing, which is a different state from unpriced: a
+        // budget can be measured against it and the coverage is complete.
+        $this->log($this->day(0) + HOURSECS, ['cost' => 0.0, 'targetprovider' => 'aiprovider_ollama']);
+        $this->log($this->day(0) + HOURSECS, ['cost' => 0.0, 'targetprovider' => 'aiprovider_ollama']);
+
+        [$from, $to] = $this->week();
+        $spend = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+
+        $this->assertTrue($spend->is_known());
+        $this->assertTrue($spend->is_complete());
+        $this->assertSame(0.0, $spend->get_amount());
+        $this->assertFalse($spend->has_reached(0.5));
+        // And the requests are counted whether or not anything was paid for them.
+        $this->assertSame(2, $spend->requests);
+        $this->assertSame(2, $spend->costedrequests);
+    }
+
+    public function test_free_requests_do_not_hide_paid_ones(): void {
+        $this->log($this->day(0) + HOURSECS, ['cost' => 0.0, 'targetprovider' => 'aiprovider_ollama']);
+        $this->log($this->day(0) + HOURSECS, ['cost' => 4.0]);
+
+        [$from, $to] = $this->week();
+        $spend = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+
+        // A site running some traffic on its own hardware and some on a paid provider
+        // still has a complete figure for what it spent.
+        $this->assertSame(4.0, $spend->get_amount());
+        $this->assertTrue($spend->is_complete());
+    }
+
     public function test_a_period_with_nothing_in_it_is_known_to_be_nothing(): void {
         [$from, $to] = $this->week();
         $spend = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
