@@ -77,6 +77,44 @@ final class key_repository_test extends \advanced_testcase {
         $this->assertNull($second->get('verifystatus'));
     }
 
+    public function test_a_key_starts_with_no_limit_on_it(): void {
+        $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-a-key-abcd');
+
+        $this->assertFalse($saved->has_cap());
+        $this->assertSame(0.0, $saved->get_cap_amount());
+        $this->assertSame(spend_ledger::PERIOD_MONTH, $saved->get_cap_period());
+    }
+
+    public function test_an_owner_can_limit_their_own_key_and_lift_it_again(): void {
+        $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-a-key-abcd');
+
+        $this->repository->set_cap($saved, 25.0, spend_ledger::PERIOD_ROLLING, 7);
+        $reloaded = $this->repository->find(key::SCOPE_USER, 7, 3);
+        $this->assertTrue($reloaded->has_cap());
+        $this->assertSame(25.0, $reloaded->get_cap_amount());
+        $this->assertSame(spend_ledger::PERIOD_ROLLING, $reloaded->get_cap_period());
+        $this->assertSame(7, $reloaded->get_cap_days());
+
+        // Emptying the amount is how somebody says they want no limit, which is not
+        // the same as a limit of nothing.
+        $this->repository->set_cap($reloaded, null, spend_ledger::PERIOD_MONTH, 30);
+        $this->assertFalse($this->repository->find(key::SCOPE_USER, 7, 3)->has_cap());
+    }
+
+    public function test_replacing_a_key_keeps_the_limit_its_owner_set(): void {
+        $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-the-first-aaaa');
+        $this->repository->set_cap($saved, 25.0, spend_ledger::PERIOD_MONTH, 30);
+
+        $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-the-second-bbbb');
+
+        // Replacing a key is not a new month. The provider carries on billing the same
+        // account, and the ledger counts the same spending, so clearing the limit here
+        // would quietly undo it.
+        $reloaded = $this->repository->find(key::SCOPE_USER, 7, 3);
+        $this->assertSame(25.0, $reloaded->get_cap_amount());
+        $this->assertSame('sk-the-second-bbbb', $this->repository->reveal($reloaded));
+    }
+
     public function test_the_same_target_can_hold_a_key_for_each_subject(): void {
         $this->repository->save(key::SCOPE_USER, 7, 3, 'user-seven-key');
         $this->repository->save(key::SCOPE_USER, 8, 3, 'user-eight-key');

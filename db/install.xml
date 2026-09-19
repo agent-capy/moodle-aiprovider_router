@@ -145,7 +145,7 @@
         <INDEX NAME="targetid" UNIQUE="true" FIELDS="targetid"/>
       </INDEXES>
     </TABLE>
-    <TABLE NAME="aiprovider_router_key" COMMENT="Keys brought by a user or registered for a course, encrypted with the site key. One key per subject and delegation target.">
+    <TABLE NAME="aiprovider_router_key" COMMENT="Keys brought by a user or registered for a course, encrypted with the site key. One key per subject and delegation target. Carries the limit the owner has put on their own spending, which is theirs to set and nobody else's.">
       <FIELDS>
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="scope" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="Whose key it is: user or course."/>
@@ -155,6 +155,9 @@
         <FIELD NAME="hint" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="The last few characters, so that the owner can recognise which key this is without anything being decrypted. Deliberately the end of the key: the beginning is often a fixed prefix. Declared without a default, because XMLDB refuses an empty string as one."/>
         <FIELD NAME="timeverified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the key was last tested against the provider. Zero means never."/>
         <FIELD NAME="verifystatus" TYPE="char" LENGTH="20" NOTNULL="false" SEQUENCE="false" COMMENT="What that test said."/>
+        <FIELD NAME="capamount" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="A limit the owner has set on their own spending at this key, in the site currency. Null means they have set none. Estimated from the site rate table, not from what the provider actually billed."/>
+        <FIELD NAME="capperiod" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="month" SEQUENCE="false" COMMENT="How the limit is counted: a calendar month, or a rolling number of days."/>
+        <FIELD NAME="capdays" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="How many days a rolling limit counts. Ignored for a calendar month."/>
         <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Who registered it. For a course key this is the only personal data in the row, and it is what a deletion request clears."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>

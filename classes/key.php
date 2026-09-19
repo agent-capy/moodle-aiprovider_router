@@ -85,7 +85,95 @@ class key extends \core\persistent {
                 'null' => NULL_ALLOWED,
                 'default' => null,
             ],
+            // What the owner has decided to spend here at most. Theirs to set, and
+            // nobody else's: an administrator limiting this would be limiting somebody
+            // else's money.
+            'capamount' => [
+                'type' => PARAM_FLOAT,
+                'null' => NULL_ALLOWED,
+                'default' => null,
+            ],
+            'capperiod' => [
+                'type' => PARAM_ALPHA,
+                'default' => spend_ledger::PERIOD_MONTH,
+            ],
+            'capdays' => [
+                'type' => PARAM_INT,
+                'default' => 30,
+            ],
         ];
+    }
+
+    /**
+     * Whether the owner has put a limit on this key.
+     *
+     * @return bool True when there is one.
+     */
+    public function has_cap(): bool {
+        return $this->get_cap_amount() > 0;
+    }
+
+    /**
+     * What the owner is willing to spend here.
+     *
+     * @return float The limit, or zero when there is none.
+     */
+    public function get_cap_amount(): float {
+        return (float) ($this->get('capamount') ?? 0);
+    }
+
+    /**
+     * How the limit is counted.
+     *
+     * @return string One of the ledger's periods.
+     */
+    public function get_cap_period(): string {
+        return (string) $this->get('capperiod') === spend_ledger::PERIOD_ROLLING
+            ? spend_ledger::PERIOD_ROLLING
+            : spend_ledger::PERIOD_MONTH;
+    }
+
+    /**
+     * How many days a rolling limit counts.
+     *
+     * @return int The number of days.
+     */
+    public function get_cap_days(): int {
+        return max(1, (int) $this->get('capdays'));
+    }
+
+    /**
+     * What has been spent against this key's limit, and whether it has been reached.
+     *
+     * ⚠ The figure is what the site's rate table says the requests would have cost,
+     * not what the owner's provider actually billed them. Anywhere it is shown has to
+     * say so.
+     *
+     * @param spend_ledger $ledger The ledger to measure with.
+     * @param int $now The moment the period ends at.
+     * @return spend The spending over the period the limit is counted in.
+     */
+    public function get_cap_spend(spend_ledger $ledger, int $now): spend {
+        return $ledger->get_key_spend($this, $this->get_cap_period(), $this->get_cap_days(), $now);
+    }
+
+    /**
+     * Whether this key has spent what its owner allowed it to.
+     *
+     * ⚠ Unknown spending does not reach a limit. The direction is the opposite of a
+     * budget condition's on purpose: this is somebody's own key, and a site that has
+     * entered no rates would otherwise silently stop every brought key it holds.
+     *
+     * @param spend_ledger $ledger The ledger to measure with.
+     * @param int $now The moment the period ends at.
+     * @return bool True when the key should be left out of routing.
+     */
+    public function is_spent(spend_ledger $ledger, int $now): bool {
+        if (!$this->has_cap()) {
+            return false;
+        }
+
+        return $this->get_cap_spend($ledger, $now)->has_reached($this->get_cap_amount()) === true;
     }
 
     /**

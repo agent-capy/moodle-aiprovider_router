@@ -34,14 +34,23 @@ class key_formatter {
      * @param key[] $keys The keys, keyed by target id.
      * @param string[] $targets Target names keyed by id.
      * @param \moodle_url $url The page the actions return to.
+     * @param spend_ledger|null $ledger The ledger, for what each key has spent.
+     * @param string $currency The site currency.
      * @return \html_table The table.
      */
-    public static function table(array $keys, array $targets, \moodle_url $url): \html_table {
+    public static function table(
+        array $keys,
+        array $targets,
+        \moodle_url $url,
+        ?spend_ledger $ledger = null,
+        string $currency = '',
+    ): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('keys:target', 'aiprovider_router'),
             get_string('keys:hint', 'aiprovider_router'),
             get_string('keys:tested', 'aiprovider_router'),
+            get_string('keys:cap', 'aiprovider_router'),
             get_string('actions'),
         ];
         $table->attributes['class'] = 'admintable generaltable';
@@ -51,11 +60,69 @@ class key_formatter {
                 $targets[$targetid] ?? get_string('keys:target:gone', 'aiprovider_router', $targetid),
                 self::hint($key),
                 self::tested($key),
+                self::cap($key, $ledger, $currency),
                 self::actions($url, $key),
             ];
         }
 
         return $table;
+    }
+
+    /**
+     * The limit the owner set, and how much of it is gone.
+     *
+     * ⚠ A key that has reached its limit stops being used and nothing else happens: no
+     * error, no message at the time. So it is said here, plainly, because the owner's
+     * other reading of a key that stopped working is that the key is broken.
+     *
+     * @param key $key The key.
+     * @param spend_ledger|null $ledger The ledger, for what the key has spent.
+     * @param string $currency The site currency.
+     * @return string HTML.
+     */
+    public static function cap(key $key, ?spend_ledger $ledger, string $currency): string {
+        if (!$key->has_cap()) {
+            return \html_writer::span(get_string('keys:cap:none', 'aiprovider_router'), 'text-muted');
+        }
+
+        $limit = format_float($key->get_cap_amount(), 2, true) . ' ' . $currency;
+        $period = $key->get_cap_period() === spend_ledger::PERIOD_MONTH
+            ? get_string('keys:cap:month', 'aiprovider_router')
+            : get_string('keys:cap:rolling:days', 'aiprovider_router', $key->get_cap_days());
+        $output = \html_writer::div(get_string(
+            'keys:cap:limit',
+            'aiprovider_router',
+            ['amount' => $limit, 'period' => $period],
+        ));
+
+        if ($ledger === null) {
+            return $output;
+        }
+        $spend = $key->get_cap_spend($ledger, time());
+        if (!$spend->is_known()) {
+            // This site prices nothing, so nothing can be measured against the limit.
+            // The key keeps working, which is the direction that does not punish
+            // somebody for setting themselves one.
+            return $output . \html_writer::div(
+                get_string('keys:cap:unmeasured', 'aiprovider_router'),
+                'text-muted small',
+            );
+        }
+
+        $output .= \html_writer::div(
+            get_string('keys:cap:spent', 'aiprovider_router', [
+                'amount' => format_float($spend->get_amount(), 2, true) . ' ' . $currency,
+            ]),
+            'text-muted small',
+        );
+        if ($spend->has_reached($key->get_cap_amount())) {
+            $output .= \html_writer::div(
+                get_string('keys:cap:reached', 'aiprovider_router'),
+                'text-warning',
+            );
+        }
+
+        return $output;
     }
 
     /**
@@ -100,8 +167,8 @@ class key_formatter {
     /**
      * What can be done with a key once it is stored.
      *
-     * Replacing one is done by registering it again for the same provider, so the only
-     * actions here are testing it and removing it.
+     * Replacing one is done by registering it again for the same provider, so what is
+     * left is testing it, setting a limit on it, and removing it.
      *
      * @param \moodle_url $url The page the actions return to.
      * @param key $key The key.
@@ -113,6 +180,10 @@ class key_formatter {
             \html_writer::link(
                 new \moodle_url($url, ['action' => 'test', 'keyid' => $id, 'sesskey' => sesskey()]),
                 get_string('keys:test', 'aiprovider_router'),
+            ),
+            \html_writer::link(
+                new \moodle_url($url, ['action' => 'cap', 'keyid' => $id]),
+                get_string('keys:cap:set', 'aiprovider_router'),
             ),
             \html_writer::link(
                 new \moodle_url($url, ['action' => 'delete', 'keyid' => $id]),

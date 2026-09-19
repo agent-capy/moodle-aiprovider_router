@@ -247,5 +247,23 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026091903, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026092000) {
+        // A limit the owner puts on their own key. Null means none, which is what
+        // every key registered before this existed had, and what most will keep.
+        $table = new xmldb_table('aiprovider_router_key');
+        $fields = [
+            new xmldb_field('capamount', XMLDB_TYPE_NUMBER, '12, 6', null, null, null, null, 'verifystatus'),
+            new xmldb_field('capperiod', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'month', 'capamount'),
+            new xmldb_field('capdays', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '30', 'capperiod'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026092000, 'aiprovider', 'router');
+    }
+
     return true;
 }

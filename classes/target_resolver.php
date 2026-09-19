@@ -235,6 +235,13 @@ class target_resolver {
         if (!$injection->is_usable()) {
             return null;
         }
+        if ($this->is_spent($injection->key)) {
+            // The owner said how much they were willing to spend here and it has been
+            // spent. Treated exactly as a key that was never registered: the rule does
+            // not apply and the next one is tried. It is not a fault, and stopping the
+            // request would punish somebody for setting themselves a limit.
+            return null;
+        }
 
         return $this->with_key_fallback($injection, $scope, $scopeid, $instances, $action);
     }
@@ -292,7 +299,7 @@ class target_resolver {
                 continue;
             }
             $injection = $this->get_injector()->inject($instance, $key);
-            if ($injection->is_usable()) {
+            if ($injection->is_usable() && !$this->is_spent($injection->key)) {
                 $candidates[] = new candidate($injection->target, $scope, $key);
             }
         }
@@ -448,6 +455,27 @@ class target_resolver {
         // rather than at the provider, so that a request the site would have paid for
         // moves on to the next rule instead of spending a round trip finding out.
         return $brought || !in_array((int) $instance->id, $this->get_byok_only(), true);
+    }
+
+    /**
+     * Whether a key has spent what its owner allowed it to.
+     *
+     * ⚠ Not the same kind of answer as a budget condition's. A budget guards the
+     * site's money and refuses to route when it cannot be measured; this guards
+     * somebody's own money, and a site with no rates entered must not silently stop
+     * every key it holds. Unknown spending leaves the key in play.
+     *
+     * @param key|null $brought The key the request would carry.
+     * @return bool True when the key should be passed over.
+     */
+    protected function is_spent(?key $brought): bool {
+        global $DB;
+
+        if ($brought === null || !$brought->has_cap()) {
+            return false;
+        }
+
+        return $brought->is_spent(new spend_ledger($DB), time());
     }
 
     /**

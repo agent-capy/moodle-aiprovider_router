@@ -66,6 +66,30 @@ class key_repository {
     }
 
     /**
+     * Record the limit an owner has put on their own key.
+     *
+     * Kept apart from save(), so that changing a limit does not mean typing the key in
+     * again, and so that replacing a key does not quietly clear the limit. Replacing a
+     * key is not a new month: the provider goes on billing the same account.
+     *
+     * @param key $record The key.
+     * @param float|null $amount The limit, or null for none.
+     * @param string $period One of the ledger's periods.
+     * @param int $days How many days a rolling period counts.
+     * @return key The saved key.
+     */
+    public function set_cap(key $record, ?float $amount, string $period, int $days): key {
+        $record->set('capamount', $amount !== null && $amount > 0 ? $amount : null);
+        $record->set('capperiod', $period === spend_ledger::PERIOD_ROLLING
+            ? spend_ledger::PERIOD_ROLLING
+            : spend_ledger::PERIOD_MONTH);
+        $record->set('capdays', max(1, $days));
+        $record->save();
+
+        return $record;
+    }
+
+    /**
      * The key for one subject and target, if there is one.
      *
      * @param string $scope One of the key scopes.

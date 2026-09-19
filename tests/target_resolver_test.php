@@ -510,6 +510,118 @@ final class target_resolver_test extends \advanced_testcase {
         $this->assertSame([9], $this->candidates($resolver, $this->action()));
     }
 
+    /**
+     * Write one recorded request paid for with somebody's own key.
+     *
+     * @param int $userid Whose key paid.
+     * @param int $targetid Where it went.
+     * @param float|null $cost What it cost, or null when no rate covered it.
+     */
+    protected function spent(int $userid, int $targetid, ?float $cost): void {
+        global $DB;
+
+        $DB->insert_record(usage_logger::TABLE, (object) [
+            'timecreated' => time() - HOURSECS,
+            'userid' => $userid,
+            'contextid' => 0,
+            'courseid' => null,
+            'actionname' => 'generate_text',
+            'targetid' => $targetid,
+            'targetname' => 'Provider ' . $targetid,
+            'targetprovider' => 'aiprovider_openai',
+            'model' => 'gpt-4o',
+            'currency' => 'USD',
+            'success' => 1,
+            'attempts' => 1,
+            'cost' => $cost,
+            'keysource' => rule::KEYSOURCE_USER,
+        ]);
+        \core_cache\helper::purge_by_definition('aiprovider_router', spend_ledger::CACHE_AREA);
+    }
+
+    public function test_a_key_that_has_spent_its_owners_limit_hands_on_to_the_next_rule(): void {
+        global $DB;
+        $user = $this->key_holder(8);
+        $repository = new key_repository($DB);
+        $repository->set_cap(
+            $repository->find(key::SCOPE_USER, (int) $user->id, 8),
+            10.0,
+            spend_ledger::PERIOD_MONTH,
+            30,
+        );
+        $this->spent((int) $user->id, 8, 10.0);
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $this->add('the site pays', 9);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        // Hole 1, not hole 4. The owner set themselves a limit and reached it, which is
+        // not a fault: stopping the request would punish them for being careful.
+        $this->assertSame([9, 7], $this->candidates($resolver, $this->action((int) $user->id)));
+        $this->assertNull($resolver->get_unreadable_key());
+    }
+
+    public function test_a_key_under_its_limit_is_used_as_usual(): void {
+        global $DB;
+        $user = $this->key_holder(8);
+        $repository = new key_repository($DB);
+        $repository->set_cap(
+            $repository->find(key::SCOPE_USER, (int) $user->id, 8),
+            10.0,
+            spend_ledger::PERIOD_MONTH,
+            30,
+        );
+        $this->spent((int) $user->id, 8, 4.0);
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8)]);
+
+        $candidates = $resolver->get_candidates($this->action((int) $user->id));
+
+        $this->assertSame('their-own-key', $candidates[0]->target->config['apikey']);
+    }
+
+    public function test_a_limit_nobody_can_measure_leaves_the_key_in_play(): void {
+        global $DB;
+        $user = $this->key_holder(8);
+        $repository = new key_repository($DB);
+        $repository->set_cap(
+            $repository->find(key::SCOPE_USER, (int) $user->id, 8),
+            10.0,
+            spend_ledger::PERIOD_MONTH,
+            30,
+        );
+        // A site with no rates entered. The opposite direction to a budget condition,
+        // and deliberately so: this is somebody's own key, and a site that prices
+        // nothing must not silently stop every key it holds.
+        $this->spent((int) $user->id, 8, null);
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8)]);
+
+        $candidates = $resolver->get_candidates($this->action((int) $user->id));
+
+        $this->assertSame('their-own-key', $candidates[0]->target->config['apikey']);
+    }
+
+    public function test_a_spent_key_is_left_out_of_the_fallback_chain_too(): void {
+        global $DB;
+        $user = $this->key_holder(8);
+        $repository = new key_repository($DB);
+        (new target_settings($DB))->set_key_field(9, 'apikey');
+        $repository->save(key::SCOPE_USER, (int) $user->id, 9, 'their-second-key');
+        $repository->set_cap(
+            $repository->find(key::SCOPE_USER, (int) $user->id, 9),
+            10.0,
+            spend_ledger::PERIOD_MONTH,
+            30,
+        );
+        $this->spent((int) $user->id, 9, 20.0);
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $resolver = $this->resolver([$this->instance(7), $this->instance(8), $this->instance(9)]);
+
+        // Instance 9 would otherwise stand behind 8, because the same person holds a
+        // key for it. Their limit there has gone, so it is not a place to fall back to.
+        $this->assertSame([8], $this->candidates($resolver, $this->action((int) $user->id)));
+    }
+
     public function test_a_router_with_neither_rules_nor_a_target_is_not_configured(): void {
         $router = new provider(enabled: true, name: 'Router', config: '{}', id: 1);
 

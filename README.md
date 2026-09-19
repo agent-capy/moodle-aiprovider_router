@@ -29,10 +29,11 @@ Developed as part of a 2026 domestic research and development project funded by 
   request with somebody's own key instead of the site's
 - **Budget conditions** — route by how much has been spent already, by the site, by a
   course or by a person, over a rolling period or a calendar month
+- **Key owner limits** — whoever brought a key can cap what it spends, for a calendar
+  month or a rolling period
 
 Still to come, and not in this version:
 
-- **Key owner limits** — a cap somebody can set on the key they brought
 - **Notifications** when spending passes a threshold
 
 ## Settings
@@ -455,6 +456,7 @@ discovered one failed request at a time.
 | No key is registered for the person, or for the course | The rule does not claim the request. This is an ordinary state, not a failure, and the next rule is considered |
 | The rule asks for a course key and the request came from outside any course | The same: there is no course to charge |
 | The person may no longer bring a key | The same. Their key is not deleted; it stops being used |
+| The key has reached the limit its owner set on it | The same. Not a failure either: somebody set themselves a limit and reached it, and refusing the request would punish them for being careful |
 | Nobody has said which field this provider's key goes in | The same. Delegating without putting the key anywhere would charge the site while the person believed they were paying |
 | The key is registered and cannot be decrypted | **Stops the request** and says so. This is a fault in the site, and carrying on to the next rule would quietly move the cost onto the site |
 | The provider refuses the key (401 or 403) | **Stops the request** and tells the person whose key it was. Nobody else's key would change the answer, and they are the only one who can put it right |
@@ -466,6 +468,33 @@ a request somebody asked to pay for themselves.
 
 Requests are recorded with who paid and which key, and the dashboard shows one payer at a
 time, so what the site spent stays separate from what people spent themselves.
+
+### Limiting your own key
+
+Whoever brought a key can put a limit on it, on the same page, either for the calendar
+month or for a rolling number of days. It is theirs to set: an administrator limiting it
+would be limiting somebody else's money, and the site limits its own spending with budget
+conditions instead.
+
+When the limit is reached the key simply stops being used, and requests follow the site's
+rules to wherever they go next. Nothing is refused and nothing is reported as broken,
+which is why the key page says so plainly — the other way to read a key that quietly
+stopped working is that the key is broken.
+
+Two things behave the way they do on purpose.
+
+**Replacing a key does not start the period again.** The spending is counted by who
+brought the key and what it is for, not by the row in the database, because the provider
+carries on billing the same account either way.
+
+**A limit nobody can measure does not stop anything.** Spending is estimated from the
+rates the site has entered, so a site that has entered none measures nothing; a budget
+condition treats that as a reason not to route, but a limit on somebody's own key treats
+it as a reason to carry on. The opposite would let a site's missing rates silently
+disable every key it holds.
+
+⚠ The figures are what the site's rates say the requests would have cost, not what the
+provider actually billed. The real figure is on the provider's own bill.
 
 ### Testing a key
 

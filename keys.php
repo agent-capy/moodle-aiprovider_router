@@ -31,12 +31,15 @@ require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
 use aiprovider_router\eligibility_policy;
+use aiprovider_router\form\key_cap_form;
 use aiprovider_router\form\key_form;
 use aiprovider_router\key;
 use aiprovider_router\key_formatter;
 use aiprovider_router\key_repository;
 use aiprovider_router\key_tester;
+use aiprovider_router\price_book;
 use aiprovider_router\provider;
+use aiprovider_router\spend_ledger;
 use aiprovider_router\target_settings;
 
 $courseid = optional_param('courseid', 0, PARAM_INT);
@@ -117,6 +120,47 @@ if ($allowed && $action === 'test') {
     );
 }
 
+$currency = price_book::get_currency();
+// Not cached: somebody looking at their own limit is asking what it is now, and the
+// figure is being shown rather than weighed on the path of a request.
+$ledger = new spend_ledger($DB, null, false);
+
+$capform = null;
+if ($allowed && $action === 'cap') {
+    $capkey = $repository->get_for($keyid, $scope, $scopeid);
+    if ($capkey === null) {
+        redirect($url);
+    }
+    $capform = new key_cap_form(
+        new moodle_url($url),
+        ['currency' => $currency] + ($courseid > 0 ? ['courseid' => $courseid] : []),
+    );
+    if ($capform->is_cancelled()) {
+        redirect($url);
+    }
+    if ($capdata = $capform->get_data()) {
+        $repository->set_cap(
+            $capkey,
+            key_cap_form::read_amount($capdata),
+            (string) ($capdata->capperiod ?? spend_ledger::PERIOD_MONTH),
+            (int) ($capdata->capdays ?? 30),
+        );
+        redirect(
+            $url,
+            get_string('keys:cap:saved', 'aiprovider_router'),
+            null,
+            \core\output\notification::NOTIFY_SUCCESS,
+        );
+    }
+    $capform->set_data([
+        'keyid' => $keyid,
+        'courseid' => $courseid,
+        'capamount' => $capkey->has_cap() ? (string) $capkey->get_cap_amount() : '',
+        'capperiod' => $capkey->get_cap_period(),
+        'capdays' => $capkey->get_cap_days(),
+    ]);
+}
+
 if ($allowed && $data = $form->get_data()) {
     if (isset($targets[(int) $data->targetid])) {
         $repository->save($scope, $scopeid, (int) $data->targetid, (string) $data->secret);
@@ -149,9 +193,19 @@ if ($action === 'delete' && !$confirm) {
     die;
 }
 
+if ($capform !== null) {
+    echo $OUTPUT->heading(get_string('keys:cap:heading', 'aiprovider_router'), 3);
+    // Said here as well as in the table, because this is where somebody decides the
+    // number, and a limit read as a bill would be the wrong thing to decide against.
+    echo html_writer::div(get_string('keys:cap:estimate', 'aiprovider_router'), 'text-muted');
+    $capform->display();
+    echo $OUTPUT->footer();
+    die;
+}
+
 $keys = $repository->get_all($scope, $scopeid);
 if ($keys) {
-    echo html_writer::table(key_formatter::table($keys, $names, $url));
+    echo html_writer::table(key_formatter::table($keys, $names, $url, $ledger, $currency));
     echo html_writer::div(get_string('keys:testcost', 'aiprovider_router'), 'text-muted');
 } else {
     echo $OUTPUT->notification(get_string('keys:none', 'aiprovider_router'), 'info');

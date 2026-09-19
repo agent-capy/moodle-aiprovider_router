@@ -100,6 +100,7 @@ class provider implements
                 'targetid' => 'privacy:metadata:key:targetid',
                 'secret' => 'privacy:metadata:key:secret',
                 'hint' => 'privacy:metadata:key:hint',
+                'capamount' => 'privacy:metadata:key:capamount',
                 'usermodified' => 'privacy:metadata:key:usermodified',
                 'timecreated' => 'privacy:metadata:key:timecreated',
             ],
