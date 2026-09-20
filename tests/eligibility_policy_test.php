@@ -331,4 +331,79 @@ final class eligibility_policy_test extends \advanced_testcase {
         $this->assertCount(1, $descriptions);
         $this->assertStringContainsString('Teacher', $descriptions[0]);
     }
+
+    /**
+     * A custom profile field with the visibility settings given.
+     *
+     * @param string $shortname Its short name.
+     * @param array $settings visible / locked / signup, over the defaults.
+     */
+    protected function profile_field(string $shortname, array $settings = []): void {
+        global $DB;
+
+        $this->getDataGenerator()->create_custom_profile_field([
+            'datatype' => 'text',
+            'shortname' => $shortname,
+            'name' => ucfirst($shortname),
+        ]);
+        foreach ($settings as $name => $value) {
+            $DB->set_field('user_info_field', $name, $value, ['shortname' => $shortname]);
+        }
+    }
+
+    public function test_a_field_people_can_edit_on_their_own_profile_is_named_as_such(): void {
+        // The whole of the point: a policy written on such a field asks the person
+        // whether they qualify, and they answer.
+        $this->profile_field('selfsaid', ['visible' => 1, 'locked' => 0, 'signup' => 0]);
+
+        $this->assertArrayHasKey('selfsaid', profilefield::get_self_settable_fields());
+    }
+
+    public function test_a_locked_field_is_not_one_people_set_themselves(): void {
+        $this->profile_field('checked', ['visible' => 1, 'locked' => 1, 'signup' => 0]);
+
+        $this->assertArrayNotHasKey('checked', profilefield::get_self_settable_fields());
+    }
+
+    public function test_a_field_nobody_can_see_is_not_one_people_set_themselves(): void {
+        $this->profile_field('internal', ['visible' => 0, 'locked' => 0, 'signup' => 0]);
+
+        $this->assertArrayNotHasKey('internal', profilefield::get_self_settable_fields());
+    }
+
+    public function test_a_locked_field_on_the_registration_form_is_still_typed_in_by_the_person(): void {
+        global $CFG;
+
+        // The route that is easy to miss. profile_signup_fields() calls edit_field(),
+        // which does not call edit_field_set_locked(), so the lock is not applied on
+        // the signup form. It only matters where people can register themselves.
+        $CFG->registerauth = 'email';
+        $this->profile_field('atsignup', ['visible' => 1, 'locked' => 1, 'signup' => 1]);
+
+        $this->assertArrayHasKey('atsignup', profilefield::get_self_settable_fields());
+
+        $CFG->registerauth = '';
+        $this->assertArrayNotHasKey('atsignup', profilefield::get_self_settable_fields());
+    }
+
+    public function test_the_chooser_says_which_fields_people_can_set_about_themselves(): void {
+        $this->profile_field('selfsaid', ['visible' => 1, 'locked' => 0, 'signup' => 0]);
+        $this->profile_field('checked', ['visible' => 1, 'locked' => 1, 'signup' => 0]);
+
+        $options = profilefield::get_field_options();
+
+        $this->assertStringContainsString(
+            get_string('eligibility:profilefield:selfset', 'aiprovider_router', 'Selfsaid'),
+            $options['selfsaid'],
+        );
+        $this->assertSame('Checked', $options['checked']);
+    }
+
+    public function test_a_condition_knows_whether_its_field_is_self_declared(): void {
+        $this->profile_field('selfsaid', ['visible' => 1, 'locked' => 0, 'signup' => 0]);
+        $this->profile_field('checked', ['visible' => 1, 'locked' => 1, 'signup' => 0]);
+
+        $this->assertTrue((new profilefield(['field' => 'selfsaid', 'values' => ['yes']]))->is_self_declared());
+        $this->assertFalse((new profilefield(['field' => 'checked', 'values' => ['yes']]))->is_self_declared());
+    }
 }

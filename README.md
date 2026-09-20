@@ -71,6 +71,7 @@ The plugin reports this on *Site administration → Reports → System status*:
 | AI Router position in the provider order | The router is not tried first. An error in *Router only* mode; in *Alongside other providers* mode this may be deliberate, so it is reported for information only. |
 | Providers ahead of the AI Router | A provider that comes earlier handles the same actions and will answer first. |
 | What happens when the AI Router says no | Which providers come after the router and could answer a request it turned down. A warning where *Make refusals final* is off, because a budget or a brought key would then be bypassed; otherwise a statement of what is behind the router. |
+| How people qualify to bring a key | The eligibility policy rests on a profile field the person it describes can fill in, so they can admit themselves. Reported for information where every condition is required, and as a warning where any one will do. |
 | Leftover entries in the provider order | The order still names instances that have been deleted. Moving providers up and down works on positions in that list, so leftovers can make reordering appear to do nothing. |
 | Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
 | Actions the router instance can carry | An action the router offers is not configured on its instance, so requests for it never reach the router. This happens when a plugin defining an action is installed after the router instance was made: the action list is read fresh every time, the instance's configuration is written once. ⚠ The provider settings screen cannot put it right for an action outside core, so recreating the instance is the fix. |
@@ -522,6 +523,19 @@ of them, and "teachers who are also in that cohort" needs all of them.
 The policy is checked when a key is registered **and again on every request that would use
 one**, so tightening it stops the keys it no longer allows from being used. Those keys are
 not deleted; they stop being used and remain their owners' to remove.
+
+**A policy is only as good as the field it rests on.** Where a profile field is one the
+person it describes can fill in — editable on their own profile, or asked for on the
+registration form — the condition asks them whether they qualify and they answer. That is
+right for something meant as a declaration, such as agreeing to pay for your own use, and
+wrong for something meant as a fact about them, such as being staff.
+
+Such fields are marked *(people can set this themselves)* in the chooser, and the *How
+people qualify to bring a key* status check reports a policy that rests on one. For a
+fact rather than a declaration, use a cohort, or a field only an administrator can
+change: clear its "Who is this field visible to" setting, or lock it **and** keep it off
+the registration form — a locked field is still typed in freely at registration, because
+the signup form does not apply the lock.
 
 ### Where a key goes
 

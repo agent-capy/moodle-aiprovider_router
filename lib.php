@@ -44,6 +44,7 @@ function aiprovider_router_status_checks(): array {
         new \aiprovider_router\check\ruletargets($inspector),
         new \aiprovider_router\check\staleactions($inspector),
         new \aiprovider_router\check\byokkeys($inspector),
+        new \aiprovider_router\check\byokeligibility($inspector),
         new \aiprovider_router\check\budgetrates($inspector),
     ];
 }

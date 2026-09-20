@@ -70,11 +70,11 @@ is a beta. Please try it on a test site, and say what does not work.
 
 ### Checks and safety
 
-- Ten entries in Moodle's checks report, covering configuration that looks
+- Eleven entries in Moodle's checks report, covering configuration that looks
   right but cannot work: an empty delegation target, a rule that can never
   match, rates that are missing, a provider instance that cannot carry an action
-  it offers, which providers would answer a request the router turned down, and
-  others.
+  it offers, which providers would answer a request the router turned down, an
+  eligibility policy people can admit themselves to, and others.
 - Errors shown to a user never name a provider, a rule or an instance.
 - Logging a request never causes an AI request to fail.
 

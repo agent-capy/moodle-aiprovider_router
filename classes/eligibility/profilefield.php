@@ -115,16 +115,70 @@ class profilefield extends base {
     /**
      * The custom profile fields a policy may name.
      *
+     * A field somebody can fill in about themselves is marked as such, because a
+     * policy resting on one is a policy people admit themselves to. That is
+     * sometimes exactly what is wanted -- a box saying "I understand what this
+     * costs" is a self declaration on purpose -- so the choice is not taken away.
+     * It is only said out loud, at the moment it is being made.
+     *
      * @return string[] Field names keyed by short name.
      */
     public static function get_field_options(): array {
         global $DB;
 
+        $selfset = self::get_self_settable_fields();
         $options = [];
         foreach ($DB->get_records('user_info_field', null, 'name ASC', 'id, shortname, name') as $field) {
-            $options[$field->shortname] = format_string($field->name);
+            $name = format_string($field->name);
+            if (isset($selfset[$field->shortname])) {
+                $name = get_string('eligibility:profilefield:selfset', 'aiprovider_router', $name);
+            }
+            $options[$field->shortname] = $name;
         }
 
         return $options;
+    }
+
+    /**
+     * Profile fields the person they describe can put a value into.
+     *
+     * Two separate routes, and the second is easy to miss:
+     *
+     * - An unlocked field that the person can see is editable on their own profile,
+     *   which is what profile_field_base::is_editable() and edit_field_set_locked()
+     *   between them decide.
+     * - A field marked for the signup form is filled in by whoever is registering.
+     *   profile_signup_fields() calls edit_field(), which does not call
+     *   edit_field_set_locked(), so a locked field is still typed in freely there.
+     *   This only matters where the site lets people register themselves.
+     *
+     * @return string[] Why each one, keyed by short name. Empty where none.
+     */
+    public static function get_self_settable_fields(): array {
+        global $CFG, $DB;
+
+        $selfregistration = !empty($CFG->registerauth);
+        $reasons = [];
+        $fields = $DB->get_records('user_info_field', null, 'name ASC', 'id, shortname, name, visible, locked, signup');
+        foreach ($fields as $field) {
+            if ((int) $field->visible !== 0 && (int) $field->locked === 0) {
+                $reasons[$field->shortname] = 'ownprofile';
+            } else if ($selfregistration && (int) $field->signup === 1) {
+                $reasons[$field->shortname] = 'signup';
+            }
+        }
+
+        return $reasons;
+    }
+
+    /**
+     * Whether this condition rests on a field its subject can fill in.
+     *
+     * @return bool True when the person decides their own answer.
+     */
+    public function is_self_declared(): bool {
+        $field = trim((string) ($this->config['field'] ?? ''));
+
+        return $field !== '' && isset(self::get_self_settable_fields()[$field]);
     }
 }

@@ -17,6 +17,7 @@
 namespace aiprovider_router\check;
 
 use aiprovider_router\fixture_text_provider;
+use aiprovider_router\eligibility_policy;
 use aiprovider_router\key;
 use aiprovider_router\rule;
 use aiprovider_router\rule_repository;
@@ -51,6 +52,7 @@ require_once(__DIR__ . '/../fixtures/fixture_unconfigured_provider.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(declinereach::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(singleinstance::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(byokkeys::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(byokeligibility::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(budgetrates::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(staleactions::class)]
 final class check_test extends \advanced_testcase {
@@ -402,5 +404,68 @@ final class check_test extends \advanced_testcase {
             $this->assertNotEmpty($check->get_name(), $class);
             $this->assertNotNull($check->get_action_link(), $class);
         }
+    }
+
+    /**
+     * A custom profile field with the visibility settings given.
+     *
+     * @param string $shortname Its short name.
+     * @param array $settings visible / locked / signup, over the defaults.
+     */
+    protected function profile_field(string $shortname, array $settings): void {
+        global $DB;
+
+        $this->getDataGenerator()->create_custom_profile_field([
+            'datatype' => 'text',
+            'shortname' => $shortname,
+            'name' => ucfirst($shortname),
+        ]);
+        foreach ($settings as $name => $value) {
+            $DB->set_field('user_info_field', $name, $value, ['shortname' => $shortname]);
+        }
+    }
+
+    public function test_a_site_deciding_by_no_conditions_has_no_eligibility_to_report_on(): void {
+        $check = new byokeligibility($this->inspector([5 => $this->router(5)], ',5'));
+
+        $this->assertSame(result::NA, $check->get_result()->get_status());
+    }
+
+    public function test_a_policy_on_a_field_only_staff_can_change_is_fine(): void {
+        $this->profile_field('checked', ['visible' => 1, 'locked' => 1, 'signup' => 0]);
+        (new eligibility_policy())->save(eligibility_policy::ACCESS_CONDITIONS, [
+            'profilefield' => ['field' => 'checked', 'values' => ['staff']],
+        ]);
+
+        $check = new byokeligibility($this->inspector([5 => $this->router(5)], ',5'));
+
+        $this->assertSame(result::OK, $check->get_result()->get_status());
+    }
+
+    public function test_a_policy_people_can_admit_themselves_to_is_a_warning(): void {
+        $this->profile_field('selfsaid', ['visible' => 1, 'locked' => 0, 'signup' => 0]);
+        (new eligibility_policy())->save(eligibility_policy::ACCESS_CONDITIONS, [
+            'profilefield' => ['field' => 'selfsaid', 'values' => ['staff']],
+        ]);
+
+        $result = (new byokeligibility($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::WARNING, $result->get_status());
+        $this->assertStringContainsString('selfsaid', $result->get_details());
+    }
+
+    public function test_requiring_every_condition_makes_a_self_declared_field_worth_less(): void {
+        // With every condition required, the self declared one narrows the policy
+        // rather than opening it: somebody still has to satisfy the others.
+        $this->profile_field('selfsaid', ['visible' => 1, 'locked' => 0, 'signup' => 0]);
+        (new eligibility_policy())->save(
+            eligibility_policy::ACCESS_CONDITIONS,
+            ['profilefield' => ['field' => 'selfsaid', 'values' => ['staff']]],
+            eligibility_policy::MATCH_ALL,
+        );
+
+        $result = (new byokeligibility($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::INFO, $result->get_status());
     }
 }
