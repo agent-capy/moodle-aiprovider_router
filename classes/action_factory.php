@@ -50,14 +50,25 @@ class action_factory {
             throw new \coding_exception('Unknown action class: ' . $class);
         }
 
-        if ($class === 'local_aiaudio\\aiactions\\transcript_audio') {
+        if ($class === 'local_aimedia\\aiactions\\transcript_audio') {
             // This action carries a recording, and the rule tester has none: it is
             // asking which rule would claim the request, and no condition looks at
-            // the audio. A silent placeholder stands in for it.
+            // the audio. An empty placeholder stands in for it.
             return new $class(
                 contextid: $contextid,
                 userid: $userid,
-                file: self::placeholder_recording($contextid),
+                file: self::placeholder_file($contextid),
+            );
+        }
+
+        if ($class === 'local_aimedia\\aiactions\\describe_image') {
+            // The same, with the typed prompt kept: asking about a picture does
+            // carry a question, so a prompt length condition means something here.
+            return new $class(
+                contextid: $contextid,
+                userid: $userid,
+                file: self::placeholder_file($contextid),
+                prompttext: $prompt,
             );
         }
 
@@ -79,7 +90,7 @@ class action_factory {
     }
 
     /**
-     * An empty recording, for testing rules about actions that carry one.
+     * An empty file, for testing rules about actions that carry one.
      *
      * Nothing is sent anywhere by the rule tester, so the contents do not matter;
      * what matters is that the action can be built at all. The same empty file is
@@ -88,14 +99,14 @@ class action_factory {
      * @param int $contextid Where the test is being run.
      * @return \stored_file The placeholder.
      */
-    protected static function placeholder_recording(int $contextid): \stored_file {
+    protected static function placeholder_file(int $contextid): \stored_file {
         $record = [
             'contextid' => $contextid,
             'component' => 'aiprovider_router',
             'filearea' => 'ruletest',
             'itemid' => 0,
             'filepath' => '/',
-            'filename' => 'silence.bin',
+            'filename' => 'placeholder.bin',
         ];
 
         $storage = get_file_storage();

@@ -34,7 +34,7 @@ use core_ai\aiactions\generate_text;
 #[\PHPUnit\Framework\Attributes\CoversClass(process_transcript_audio::class)]
 final class extra_action_test extends \advanced_testcase {
     /** @var string The action defined outside core. */
-    protected const TRANSCRIBE = 'local_aiaudio\\aiactions\\transcript_audio';
+    protected const TRANSCRIBE = 'local_aimedia\\aiactions\\transcript_audio';
 
     #[\Override]
     public function setUp(): void {
@@ -86,7 +86,7 @@ final class extra_action_test extends \advanced_testcase {
         // target failed and the next candidate should be tried, exactly as for
         // an empty generation.
         if (!class_exists(self::TRANSCRIBE)) {
-            $this->markTestSkipped('local_aiaudio is not installed');
+            $this->markTestSkipped('local_aimedia is not installed');
         }
 
         $processor = new \ReflectionClass(process_transcript_audio::class);

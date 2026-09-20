@@ -60,7 +60,8 @@ class provider extends \core_ai\provider {
      * does not require the plugin defining it to be installed.
      */
     protected const EXTRA_ACTIONS = [
-        'local_aiaudio\\aiactions\\transcript_audio',
+        'local_aimedia\\aiactions\\transcript_audio',
+        'local_aimedia\\aiactions\\describe_image',
     ];
 
     /** @var string Delegate everything, and expect to be first in the provider order. */
