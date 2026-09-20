@@ -16,6 +16,7 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\exception\declined_request;
 use core_ai\aiactions\responses\response_base;
 
 /**
@@ -50,6 +51,9 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var string Reason recorded when the router turned the request down on purpose. */
     public const REASON_DECLINED = 'no_rule_matched';
 
+    /** @var string Reason recorded when a rule fitted in every respect but its budget. */
+    public const REASON_BUDGET_SPENT = 'budget_exhausted';
+
     /** @var string Reason recorded when a registered key could not be decrypted. */
     public const REASON_KEY_UNREADABLE = 'byok_decrypt_failed';
 
@@ -58,6 +62,30 @@ abstract class abstract_processor extends \core_ai\process_base {
 
     /** @var string Reason recorded when every instance the payer has a key for failed. */
     public const REASON_NO_KEY_LEFT = 'byok_no_key_left';
+
+    /**
+     * @var string[] Reasons that mean the site decided, rather than something breaking.
+     *
+     * These are the failures that must not be retried by anybody else: a spending limit
+     * that has been reached, a site with nowhere configured to send the request, and a
+     * key somebody brought so that the request would be charged to them. A second
+     * attempt on the site's own key would undo each of those rather than recover from
+     * it. Everything not listed is a target that did not work, which is exactly what
+     * core's fallback is for, and those keep returning an ordinary failed response.
+     *
+     * REASON_DECLINED is deliberately absent. "No rule claimed this request" is how the
+     * router says the request was not its business, which is the whole point of running
+     * it alongside other providers, and core carrying on is then correct. A budget that
+     * has run out reads as the same absence of a match and is not the same thing at
+     * all, which is why the resolver reports it separately.
+     */
+    protected const FINAL_REASONS = [
+        self::REASON_BUDGET_SPENT,
+        self::REASON_NO_TARGET,
+        self::REASON_KEY_UNREADABLE,
+        self::REASON_KEY_REJECTED,
+        self::REASON_NO_KEY_LEFT,
+    ];
 
     /** @var string Config names whose values are secrets, whatever the provider calls them. */
     protected const SECRET_FIELDS = '/key|secret|token|password/i';
@@ -73,6 +101,9 @@ abstract class abstract_processor extends \core_ai\process_base {
 
     /** @var int|null Status code of the last failure, for the monitor. */
     protected ?int $failurecode = null;
+
+    /** @var string|null Language string chosen for the last failure. */
+    protected ?string $failurestring = null;
 
     /**
      * The response field carrying the generated content, if the action has one.
@@ -104,17 +135,20 @@ abstract class abstract_processor extends \core_ai\process_base {
         $resolver = $this->get_resolver();
         $candidates = $resolver->get_candidates($this->action);
         if (!$candidates) {
-            // Three quite different things leave nothing to delegate to, and an
-            // administrator reading the monitor needs to tell them apart: the site doing
-            // what it was told, a site waiting to be fixed, and a key that is registered
-            // and cannot be read. The last of those must not be quietly retried
-            // elsewhere: somebody asked to pay for this request themselves.
+            // Four quite different things leave nothing to delegate to, and an
+            // administrator reading the monitor needs to tell them apart: a key that is
+            // registered and cannot be read, a budget that has been spent, the site
+            // doing what it was told, and a site waiting to be fixed. Only the third of
+            // those may be picked up by another provider; the rest are answered already,
+            // whether by somebody's money running out or by their key being unusable.
             if ($resolver->get_unreadable_key() !== null) {
                 $outcome = $this->fail(
                     500,
                     'byokdecryptfailed:' . $resolver->get_keysource(),
                     self::REASON_KEY_UNREADABLE,
                 );
+            } else if ($resolver->was_budget_spent()) {
+                $outcome = $this->fail(503, 'budgetexhausted', self::REASON_BUDGET_SPENT);
             } else if ($resolver->was_declined()) {
                 $outcome = $this->fail(503, 'norulematched', self::REASON_DECLINED);
             } else {
@@ -122,7 +156,7 @@ abstract class abstract_processor extends \core_ai\process_base {
             }
             $this->record_usage($resolver, null, null, 0);
 
-            return $outcome;
+            return $this->finalise($outcome);
         }
 
         $delegator = $this->get_delegator();
@@ -159,7 +193,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                     );
                     $this->record_usage($resolver, $candidate, null, $attempts);
 
-                    return $outcome;
+                    return $this->finalise($outcome);
                 }
                 $last = $response;
                 continue;
@@ -182,7 +216,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                 // recorded even though the user got nothing readable.
                 $this->record_usage($resolver, $candidate, $data, $attempts);
 
-                return $outcome;
+                return $this->finalise($outcome);
             }
             $last = $response;
         }
@@ -201,7 +235,53 @@ abstract class abstract_processor extends \core_ai\process_base {
         }
         $this->record_usage($resolver, null, null, $attempts);
 
-        return $outcome;
+        return $this->finalise($outcome);
+    }
+
+    /**
+     * Let a decision the site made be the end of the matter.
+     *
+     * core_ai\manager::process_action() walks the provider order and stops at the first
+     * success. It has no way of being told that a failure is final, so a request the
+     * router declined is offered to the next provider, which answers it on the site's
+     * own key. The rule, the budget and the choice of who pays are all bypassed that
+     * way, and nothing in the monitor says it happened.
+     *
+     * Throwing stops that, because neither the loop nor call_action_provider() catches
+     * anything. It is a heavy way to say something simple and the cost is real: the
+     * placement shows an error rather than a quiet failure, and core does not get to
+     * write its own row in ai_action_register. The usage entry is therefore already
+     * written by the time this runs -- every caller records before it returns -- and
+     * only the reasons that mean the site decided are treated this way.
+     *
+     * Administrators who would rather keep core's behaviour can turn this off, in which
+     * case the failure is returned as before and the next provider may well answer it.
+     *
+     * @param array $outcome The failure payload built by fail().
+     * @return array The same payload, when the failure is not a final one.
+     */
+    protected function finalise(array $outcome): array {
+        if (!in_array($this->reason, self::FINAL_REASONS, true)) {
+            return $outcome;
+        }
+        if (!$this->is_strict_decline()) {
+            return $outcome;
+        }
+
+        throw new declined_request(
+            (string) $this->reason,
+            (string) $this->failurestring,
+            (int) ($this->failurecode ?? 503),
+        );
+    }
+
+    /**
+     * Whether this router makes its refusals final.
+     *
+     * @return bool True when a policy refusal should stop core trying anybody else.
+     */
+    protected function is_strict_decline(): bool {
+        return $this->provider instanceof provider && $this->provider->is_strict_decline();
     }
 
     /**
@@ -428,12 +508,13 @@ abstract class abstract_processor extends \core_ai\process_base {
     protected function fail(int $errorcode, string $stringid, string $reason): array {
         $this->reason = $reason;
         $this->failurecode = $errorcode;
+        $this->failurestring = 'error:' . $stringid;
 
         return [
             'success' => false,
             'errorcode' => $errorcode,
             'error' => $reason,
-            'errormessage' => get_string('error:' . $stringid, 'aiprovider_router'),
+            'errormessage' => get_string($this->failurestring, 'aiprovider_router'),
         ];
     }
 

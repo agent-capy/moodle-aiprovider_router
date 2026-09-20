@@ -74,6 +74,19 @@ class hook_listener {
         $mform->setDefault('nomatch', provider::NOMATCH_DELEGATE);
         $mform->addHelpButton('nomatch', 'nomatch', 'aiprovider_router');
 
+        // Whether a refusal is allowed to be the last word. Core has no way of being
+        // told that a failure is final, so saying so means throwing, and throwing is
+        // visible to the person who made the request. That is a trade worth stating
+        // rather than burying, so it is a setting with the consequence in its help.
+        $mform->addElement(
+            'advcheckbox',
+            'strictdecline',
+            get_string('strictdecline', 'aiprovider_router'),
+            get_string('strictdecline:label', 'aiprovider_router'),
+        );
+        $mform->setDefault('strictdecline', 1);
+        $mform->addHelpButton('strictdecline', 'strictdecline', 'aiprovider_router');
+
         // The rules are a separate page because core never reads an aiprovider plugin's
         // settings.php, so there is no admin tree entry to reach them from. This form is
         // where an administrator configuring the router already is.

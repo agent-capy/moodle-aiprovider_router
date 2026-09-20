@@ -53,6 +53,11 @@ $string['check:byokkeys:nokeys'] = '持ち込まれた鍵はありません。';
 $string['check:byokkeys:ok'] = '持ち込み鍵{$a}件はすべて読み出せます。';
 $string['check:byokkeys:unreadable'] = '持ち込み鍵{$a->total}件のうち{$a->unreadable}件が読み出せません。';
 $string['check:byokkeys:unreadable_details'] = '鍵はデータベースの外、サイトのデータディレクトリにあるファイルで暗号化されています。そのファイルを含めずにデータベースだけをリストアしたサイトは、鍵をすべて保持したまま1件も読めません。ファイルの控えが残っていればリストアで復旧します。無ければ、持ち主に登録し直してもらうほかありません。';
+$string['check:declinereach'] = 'AIルータが拒否したあとに起きること';
+$string['check:declinereach:alone'] = 'AIルータのあとに試されるものがないため、拒否した要求はそこで止まります。';
+$string['check:declinereach:bypassable'] = 'AIルータのあとに並ぶ {$a} 件のプロバイダインスタンスが、ルータの拒否した要求に答えてしまいます。';
+$string['check:declinereach:details'] = 'Moodleはサイトの順序でプロバイダを試し、どれかが成功した時点で止まります。拒否は「そのプロバイダでは無理だった」としか受け取られません。次に試されるのは、サイト自身の鍵を使う次のインスタンスです: {$a}。';
+$string['check:declinereach:strict'] = 'AIルータのあとに {$a} 件のプロバイダインスタンスが並んでいますが、ルータは拒否を最終のものとする設定になっています。';
 $string['check:norouter'] = 'AIルータのインスタンスがまだ作成されていないため、検査する対象がありません。';
 $string['check:routerfirst'] = 'プロバイダ順序におけるAIルータの位置';
 $string['check:routerfirst:coexist'] = 'AIルータは最初に試行されるプロバイダではありません。「他のプロバイダと併用」モードでは意図した構成である可能性があります。';
@@ -162,6 +167,7 @@ $string['eligibility:teaching:described'] = 'コースツリーのどこかで�
 $string['eligibility:teaching_help'] = 'コースツリーのどこでも該当します（カテゴリで付与されたロールも含みます。配下の全コースで教えるという意味になるためです）。ロールを1つも選ばないうちは誰も該当しません。';
 $string['eligibility:unknown'] = 'このポリシーには、このバージョンが理解できない条件（{$a}）も含まれており、無視されています。それによって許可・拒否がどちらに動くかは条件の組み合わせ方によります。運用する前にポリシーが意図どおりか確認してください。このフォームを保存すると、それらは削除されます。';
 $string['error:alltargetsfailed'] = 'AIサービスに接続できませんでした。しばらく待ってからもう一度お試しください。';
+$string['error:budgetexhausted'] = 'この要求に使えるAIの予算を使い切ったため、送信されませんでした。サイト管理者にお問い合わせください。';
 $string['error:byokdecryptfailed:course'] = 'このコースに登録された鍵を読み取れないため、要求は送信されませんでした。サイト管理者にご確認ください。';
 $string['error:byokdecryptfailed:user'] = 'あなたの鍵を読み取れないため、要求は送信されませんでした。登録し直すと置き換わります。';
 $string['error:byokkeyrejected:course'] = 'このコースに登録された鍵が拒否されました。コースの担当者にご確認ください。';
@@ -458,6 +464,13 @@ $string['ruletest:user'] = 'ユーザー';
 $string['ruletest:user:none'] = 'なし';
 $string['ruletest:user_help'] = 'ユーザ名またはメールアドレスを入力します。指定したコースでそのユーザーが持つロール（上位から継承したものを含む）が、ロール条件の判定対象になります。空欄にすると、ユーザーのない要求として試せます。';
 $string['ruletest:wouldgo'] = 'ルール「{$a->rule}」がこの要求を受け持ち、{$a->target} に送られます。';
+$string['strictdecline'] = '拒否を最終のものにする';
+$string['strictdecline:label'] = 'ルータが要求を拒否したとき、Moodleに他のプロバイダを試させない';
+$string['strictdecline_help'] = 'MoodleはサイトのAIプロバイダを順に試し、最初に成功したところで止まります。「この失敗は意図したものだ」と伝える手段がないため、ルールや予算、あるいは誰かの持ち込み鍵を理由にルータが拒否した要求も、次のプロバイダに回されて、サイト自身の鍵で答えられてしまいます。ルールも予算も、誰が払うかの指定も、そこで迂回されます。
+
+これを有効にすると、その種の拒否はエラーとして送出され、Moodleはそこから先へ進みません。要求した人には、静かな失敗ではなくエラーメッセージが表示されます。またMoodle自身のAIログには記録されません（ルータ側の記録はどちらの設定でも残るため、ここの利用状況レポートには影響しません）。
+
+対象は、サイトの方針として断った場合だけです。委譲先に届かなかった場合や委譲先が壊れていた場合は、これまでどおり次の候補に進みます。フォールバックはそのためのものです。';
 $string['task:notifybudgets'] = 'AIルータの予算を通知する';
 $string['task:notifybudgets:done'] = '{$a->checked}件のしきい値を確認し、{$a->sent}件を通知、{$a->cleared}件を解除しました。';
 $string['task:summariseusage'] = 'AIルータの利用状況を集計する';
@@ -497,6 +510,7 @@ $string['usage:passthrough:value'] = 'このサイトのAI要求{$a->total}件�
 $string['usage:period'] = '期間';
 $string['usage:period:days'] = '直近{$a}日';
 $string['usage:reason:all_targets_failed'] = '試したプロバイダがすべて失敗した';
+$string['usage:reason:budget_exhausted'] = 'ルールは要求に一致したが、その予算を使い切っていた';
 $string['usage:reason:delegation_unavailable'] = 'ルータが使う委譲点が Moodle から失われた';
 $string['usage:reason:empty_response_token_exhausted'] = 'プロバイダがトークンを使い切って何も返さなかった';
 $string['usage:reason:no_default_target'] = 'ルールが一致せず、既定の委譲先も設定されていない';

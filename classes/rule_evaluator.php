@@ -35,6 +35,12 @@ use aiprovider_router\condition\registry;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class rule_evaluator {
+    /** @var string The condition that spends rather than describes. */
+    protected const BUDGET = 'budget';
+
+    /** @var rule[] Rules the last evaluation turned away on their budget alone. */
+    protected array $budgetblocked = [];
+
     /**
      * Constructor.
      *
@@ -57,12 +63,35 @@ class rule_evaluator {
         $now ??= $this->now();
         $rules = $this->repository->get_active($now);
         $conditions = $this->repository->get_conditions_for(array_keys($rules));
+        $this->budgetblocked = [];
 
         foreach ($rules as $id => $rule) {
-            if (!$this->unmet_conditions($conditions[$id] ?? [], $context)) {
+            $unmet = $this->unmet_conditions($conditions[$id] ?? [], $context);
+            if (!$unmet) {
                 yield $id => $rule;
+
+                continue;
+            }
+            if ($unmet === [self::BUDGET]) {
+                // Everything else about this rule fitted the request. Worth remembering,
+                // because "this rule is not for you" and "this rule is for you and the
+                // money has run out" are the same absence of a match and mean opposite
+                // things to a site that set a budget.
+                $this->budgetblocked[$id] = $rule;
             }
         }
+    }
+
+    /**
+     * Rules the last evaluation turned away on their budget and nothing else.
+     *
+     * Only meaningful once matches() has been read to the end, which is what the
+     * resolver does whenever it finds nothing it can use.
+     *
+     * @return rule[] The rules, keyed by id, in priority order.
+     */
+    public function get_budget_blocked(): array {
+        return $this->budgetblocked;
     }
 
     /**

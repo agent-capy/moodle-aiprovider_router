@@ -198,4 +198,89 @@ final class rule_evaluator_test extends \advanced_testcase {
         // rule not fire" is very often answered by that.
         $this->assertCount(1, $this->evaluator->trace($this->request(), time()));
     }
+
+    /**
+     * A budget of one request over the whole site, in the direction given.
+     *
+     * Counted in requests rather than money so that the figure is always known: a site
+     * with no rates entered has spent nothing however much it has used.
+     *
+     * @param string $direction Which side of the limit the rule wants.
+     * @return array The condition configuration.
+     */
+    protected function onerequest(string $direction = condition\budget::DIRECTION_UNDER): array {
+        return [
+            'scope' => spend_ledger::SCOPE_SITE,
+            'direction' => $direction,
+            'amount' => 1,
+            'metric' => spend_ledger::METRIC_REQUESTS,
+            'period' => spend_ledger::PERIOD_ROLLING,
+            'days' => 30,
+        ];
+    }
+
+    /**
+     * Record one request already made.
+     */
+    protected function spend_one(): void {
+        global $DB;
+
+        $DB->insert_record(usage_logger::TABLE, (object) [
+            'timecreated' => time() - HOURSECS,
+            'userid' => 5,
+            'contextid' => \context_system::instance()->id,
+            'actionname' => 'generate_text',
+            'targetid' => 1,
+            'targetname' => 'Target',
+            'targetprovider' => 'aiprovider_openai',
+            'success' => 1,
+            'attempts' => 1,
+            'keysource' => usage_logger::KEY_SITE,
+        ]);
+        \core_cache\helper::purge_by_definition('aiprovider_router', spend_ledger::CACHE_AREA);
+    }
+
+    public function test_a_rule_stopped_only_by_its_budget_is_remembered_as_such(): void {
+        // The difference the router has to be able to see: this rule was about this
+        // request in every other respect, and the money is what stopped it.
+        $rule = $this->add('metered', 7, ['budget' => $this->onerequest()]);
+        $this->spend_one();
+
+        $this->assertSame([], $this->matched($this->request()));
+        $this->assertSame([(int) $rule->get('id')], array_keys($this->evaluator->get_budget_blocked()));
+    }
+
+    public function test_a_rule_that_was_never_about_this_request_is_not_a_spent_budget(): void {
+        // Wrong action as well as no money left. Reporting this as a budget having run
+        // out would stop a request the rule had nothing to do with.
+        $this->add('metered elsewhere', 7, [
+            'action' => ['actions' => [summarise_text::class]],
+            'budget' => $this->onerequest(),
+        ]);
+        $this->spend_one();
+
+        $this->assertSame([], $this->matched($this->request()));
+        $this->assertSame([], $this->evaluator->get_budget_blocked());
+    }
+
+    public function test_a_budget_with_room_left_leaves_nothing_to_report(): void {
+        $this->add('metered', 7, ['budget' => $this->onerequest()]);
+
+        $this->assertSame(['metered'], $this->matched($this->request()));
+        $this->assertSame([], $this->evaluator->get_budget_blocked());
+    }
+
+    public function test_what_the_last_walk_found_replaces_what_the_one_before_found(): void {
+        $rule = $this->add('metered', 7, ['budget' => $this->onerequest()]);
+        $this->spend_one();
+        $this->matched($this->request());
+        $this->assertNotEmpty($this->evaluator->get_budget_blocked());
+
+        // An evaluator is reused for the life of a request, and a verdict left over
+        // from the walk before would stop a request nothing had decided anything about.
+        $this->repository->delete((int) $rule->get('id'));
+        $this->matched($this->request());
+
+        $this->assertSame([], $this->evaluator->get_budget_blocked());
+    }
 }

@@ -53,6 +53,11 @@ $string['check:byokkeys:nokeys'] = 'Nobody has brought a key, so there is nothin
 $string['check:byokkeys:ok'] = 'All {$a} brought keys can be read.';
 $string['check:byokkeys:unreadable'] = '{$a->unreadable} of {$a->total} brought keys cannot be read.';
 $string['check:byokkeys:unreadable_details'] = 'Keys are encrypted with a file that lives outside the database, under the site data directory. A site restored from a database backup without that file keeps every key and can read none of them. If a copy of the file still exists, restoring it recovers the keys; otherwise the only way forward is for their owners to register them again.';
+$string['check:declinereach'] = 'What happens when the AI Router says no';
+$string['check:declinereach:alone'] = 'Nothing is tried after the AI Router, so a request it turns down stops there.';
+$string['check:declinereach:bypassable'] = '{$a} provider instance(s) after the AI Router would answer a request it turned down.';
+$string['check:declinereach:details'] = 'Moodle tries providers in the site order until one of them succeeds, and a refusal looks to it like a provider that could not help. These instances are tried next, on the site\'s own key: {$a}.';
+$string['check:declinereach:strict'] = '{$a} provider instance(s) come after the AI Router, and the router is set to make its refusals final.';
 $string['check:norouter'] = 'No AI Router instance has been created yet, so there is nothing to check.';
 $string['check:routerfirst'] = 'AI Router position in the provider order';
 $string['check:routerfirst:coexist'] = 'The AI Router is not the first provider Moodle tries. In "Alongside other providers" mode this may be intended.';
@@ -162,6 +167,7 @@ $string['eligibility:teaching:described'] = 'they hold one of these roles somewh
 $string['eligibility:teaching_help'] = 'Anywhere in the course tree counts, including a role held on a category, which is how a site says somebody teaches every course under it. Nobody matches until at least one role is chosen.';
 $string['eligibility:unknown'] = 'This policy also holds conditions this version does not understand ({$a}), which are being ignored. Who that admits or refuses depends on how the conditions are combined, so check the policy still says what you mean before relying on it. Saving this form will remove them.';
 $string['error:alltargetsfailed'] = 'The AI service could not be reached. Please try again shortly.';
+$string['error:budgetexhausted'] = 'The AI budget for this request has been used up, so it was not sent. Please contact your site administrator.';
 $string['error:byokdecryptfailed:course'] = 'The key registered for this course cannot be read, so the request was not sent. Please ask your site administrator to look at it.';
 $string['error:byokdecryptfailed:user'] = 'Your own key cannot be read, so the request was not sent. Registering it again will replace it.';
 $string['error:byokkeyrejected:course'] = 'The key registered for this course was refused. Please ask whoever looks after this course to check it.';
@@ -458,6 +464,13 @@ $string['ruletest:user'] = 'User';
 $string['ruletest:user:none'] = 'None';
 $string['ruletest:user_help'] = 'A username or an email address. Their roles in the chosen course, including any inherited from above it, are what role conditions are tested against. Leave empty to test a request with no user attached.';
 $string['ruletest:wouldgo'] = 'The rule "{$a->rule}" would claim this request, and it would go to {$a->target}.';
+$string['strictdecline'] = 'Make refusals final';
+$string['strictdecline:label'] = 'Stop Moodle trying another provider when the router turns a request down';
+$string['strictdecline_help'] = 'Moodle tries each AI provider in the site order and stops at the first one that succeeds. It cannot be told that a failure was deliberate, so a request the router turns down because of a rule, a budget or somebody\'s own key is offered to the next provider, which answers it on the site\'s own key. The rule, the budget and the choice of who pays are all bypassed that way.
+
+With this on, a refusal of that kind raises an error instead, which stops Moodle going any further. The person who made the request sees an error message rather than a quiet failure, and Moodle does not record the request in its own AI log; the router records it either way, so the usage reports here are unaffected.
+
+This applies only to refusals the site decided on. A target that was unreachable, or that broke, is still passed over so that another provider can try, which is what the fallback is for.';
 $string['task:notifybudgets'] = 'Notify about AI Router budgets';
 $string['task:notifybudgets:done'] = 'Weighed {$a->checked} threshold(s), sent {$a->sent} notice(s) and cleared {$a->cleared} that had eased off.';
 $string['task:summariseusage'] = 'Summarise AI Router usage';
@@ -497,6 +510,7 @@ $string['usage:passthrough:value'] = '{$a->routed} of {$a->total} AI requests on
 $string['usage:period'] = 'Period';
 $string['usage:period:days'] = 'Last {$a} days';
 $string['usage:reason:all_targets_failed'] = 'Every provider tried failed';
+$string['usage:reason:budget_exhausted'] = 'A rule fitted the request and its budget had been used up';
 $string['usage:reason:delegation_unavailable'] = 'Moodle no longer offers the delegation point the router uses';
 $string['usage:reason:empty_response_token_exhausted'] = 'The provider spent its token budget and returned nothing';
 $string['usage:reason:no_default_target'] = 'No rule matched and no default target is set';

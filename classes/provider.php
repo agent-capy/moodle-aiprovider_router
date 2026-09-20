@@ -114,6 +114,25 @@ class provider extends \core_ai\provider {
     }
 
     /**
+     * Whether a refusal by this router is the end of the matter.
+     *
+     * Core keeps trying providers until one succeeds, and reads a failed response as
+     * "that one could not do it". A refusal by the router means something else: a rule,
+     * a budget or somebody's own key decided, and letting the next provider answer on
+     * the site's key undoes the decision. The only way a provider can say "final" is to
+     * throw, which is what this setting turns on.
+     *
+     * It defaults to on, including for instances that were configured before the
+     * setting existed. A budget that silently does not hold is worse than an error
+     * message, and an administrator who prefers core's behaviour can say so.
+     *
+     * @return bool True when policy refusals should stop the fallback.
+     */
+    public function is_strict_decline(): bool {
+        return (bool) ($this->config['strictdecline'] ?? 1);
+    }
+
+    /**
      * The instance the router falls back to when no rule picks a target.
      *
      * @return int|null The provider instance id, or null when none is set.

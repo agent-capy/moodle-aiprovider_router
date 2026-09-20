@@ -16,6 +16,7 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\exception\declined_request;
 use core_ai\aiactions\generate_text;
 use core_ai\aiactions\responses\response_generate_text;
 
@@ -37,13 +38,14 @@ final class process_generate_text_test extends \advanced_testcase {
      *
      * @param array $responses Responses the fake targets return, in order.
      * @param bool $hastarget Whether the resolver finds any candidate at all.
+     * @param array $config Extra router instance configuration.
      * @return array The payload the router hands back to core.
      */
-    protected function run_processor(array $responses, bool $hastarget = true): array {
+    protected function run_processor(array $responses, bool $hastarget = true, array $config = []): array {
         $provider = new provider(
             enabled: true,
             name: 'router',
-            config: json_encode(['defaulttarget' => $hastarget ? 7 : 0]),
+            config: json_encode($config + ['defaulttarget' => $hastarget ? 7 : 0]),
         );
         $action = new generate_text(
             contextid: (\context_system::instance())->id,
@@ -157,11 +159,31 @@ final class process_generate_text_test extends \advanced_testcase {
     }
 
     /**
-     * Test that no candidate target produces a 503 rather than an exception.
+     * Test that a site with nowhere to send the request stops rather than drifting on.
      */
-    public function test_no_target_is_reported_not_thrown(): void {
+    public function test_no_target_stops_the_request_rather_than_passing_it_on(): void {
         $this->resetAfterTest();
-        $result = $this->run_processor([], hastarget: false);
+
+        // Core would otherwise offer the same request to the next provider, and a site
+        // that is half way through being configured would appear to work.
+        try {
+            $this->run_processor([], hastarget: false);
+            $this->fail('Expected a router with nowhere to send the request to stop it.');
+        } catch (declined_request $e) {
+            $this->assertSame(abstract_processor::REASON_NO_TARGET, $e->get_reason());
+            $this->assertSame(
+                get_string('error:nodefaulttarget', 'aiprovider_router'),
+                $e->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * Test that the same case is an ordinary failure once the setting is turned off.
+     */
+    public function test_no_target_is_an_ordinary_failure_when_refusals_are_not_final(): void {
+        $this->resetAfterTest();
+        $result = $this->run_processor([], hastarget: false, config: ['strictdecline' => 0]);
 
         $this->assertFalse($result['success']);
         $this->assertEquals(503, $result['errorcode']);
@@ -246,13 +268,14 @@ final class process_generate_text_test extends \advanced_testcase {
         // Moodle 5.2 throws a coding_exception when a failed response has no error
         // name, and 5.0 has no such field at all. Sending it always covers both.
         $cases = [
-            [[], false, abstract_processor::REASON_NO_TARGET],
-            [[$this->failure(500)], true,
-                abstract_processor::REASON_ALL_FAILED],
-            [[$this->success('', 'length')], true, abstract_processor::REASON_EMPTY],
+            // The first one is only ever returned where refusals are not made final,
+            // since otherwise it is thrown and never becomes a response at all.
+            [[], false, ['strictdecline' => 0], abstract_processor::REASON_NO_TARGET],
+            [[$this->failure(500)], true, [], abstract_processor::REASON_ALL_FAILED],
+            [[$this->success('', 'length')], true, [], abstract_processor::REASON_EMPTY],
         ];
-        foreach ($cases as [$responses, $hastarget, $expected]) {
-            $result = $this->run_processor($responses, $hastarget);
+        foreach ($cases as [$responses, $hastarget, $config, $expected]) {
+            $result = $this->run_processor($responses, $hastarget, $config);
 
             $this->assertFalse($result['success']);
             $this->assertArrayHasKey('error', $result);

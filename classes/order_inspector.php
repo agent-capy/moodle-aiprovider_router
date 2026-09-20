@@ -211,15 +211,54 @@ class order_inspector {
      * @return ai_provider[] The instances, in order.
      */
     public function get_intercepting_instances(): array {
-        $router = $this->get_primary_router();
         $position = $this->get_router_position();
-        if ($router === null || $position === null) {
+        if ($position === null) {
+            return [];
+        }
+
+        return $this->filter_capable(array_slice($this->get_sorted_instances(), 0, $position, true));
+    }
+
+    /**
+     * Instances core would try after the router had turned a request down.
+     *
+     * This is what decides whether a refusal by the router actually stops anything.
+     * Core walks its order until something succeeds and cannot be told that a failure
+     * was deliberate, so a provider listed behind the router will answer a declined
+     * request on the site's own key unless the router throws. Knowing whether such a
+     * provider exists is the difference between "the budget holds" and "the budget
+     * holds until somebody asks twice", which is not something an administrator should
+     * have to work out from the provider order by hand.
+     *
+     * @return ai_provider[] The instances, in order.
+     */
+    public function get_following_instances(): array {
+        $position = $this->get_router_position();
+        if ($position === null) {
+            return [];
+        }
+
+        return $this->filter_capable(array_slice($this->get_sorted_instances(), $position + 1, null, true));
+    }
+
+    /**
+     * The instances among these that could really answer something the router handles.
+     *
+     * Enabled, configured, not a router itself, and with an action in common with the
+     * router that is enabled on both sides.
+     *
+     * @param ai_provider[] $instances The instances to consider.
+     * @return ai_provider[] Those that could answer, in the order given.
+     */
+    protected function filter_capable(array $instances): array {
+        $router = $this->get_primary_router();
+        if ($router === null) {
             return [];
         }
 
         $routeractions = $router::get_action_list();
-        $intercepting = [];
-        foreach (array_slice($this->get_sorted_instances(), 0, $position, true) as $instance) {
+        $capable = [];
+        foreach ($instances as $instance) {
             if ($instance instanceof provider || !$instance->enabled || !$instance->is_provider_configured()) {
                 continue;
             }
@@ -228,13 +267,13 @@ class order_inspector {
                     continue;
                 }
                 if (!empty($instance->actionconfig[$action]['enabled'])) {
-                    $intercepting[] = $instance;
+                    $capable[] = $instance;
                     break;
                 }
             }
         }
 
-        return $intercepting;
+        return $capable;
     }
 
     /**

@@ -48,6 +48,7 @@ require_once(__DIR__ . '/../fixtures/fixture_unconfigured_provider.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(routerfirst::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(staleentries::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(actionconflict::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(declinereach::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(singleinstance::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(byokkeys::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(budgetrates::class)]
@@ -71,6 +72,7 @@ final class check_test extends \advanced_testcase {
             routerfirst::class,
             staleentries::class,
             actionconflict::class,
+            declinereach::class,
             singleinstance::class,
         ];
     }
@@ -97,11 +99,11 @@ final class check_test extends \advanced_testcase {
      * @param string $mode One of the provider MODE_ constants.
      * @return provider The router.
      */
-    protected function router(int $id, string $mode = provider::MODE_FULL): provider {
+    protected function router(int $id, string $mode = provider::MODE_FULL, array $extra = []): provider {
         return new provider(
             enabled: true,
             name: "Router {$id}",
-            config: json_encode(['mode' => $mode, 'defaulttarget' => 99]),
+            config: json_encode($extra + ['mode' => $mode, 'defaulttarget' => 99]),
             id: $id,
         );
     }
@@ -175,6 +177,44 @@ final class check_test extends \advanced_testcase {
 
         $this->assertSame(result::WARNING, $result->get_status());
         $this->assertStringContainsString('Provider 9', $result->get_details());
+    }
+
+    public function test_a_provider_behind_the_router_is_named_even_when_refusals_are_final(): void {
+        // Not a problem, but not nothing either: it is the answer to "if the router says
+        // no, does anything else say yes", and an administrator should be able to read it
+        // off the status report rather than reason about the provider order.
+        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',5,9');
+        $result = (new declinereach($inspector))->get_result();
+
+        $this->assertSame(result::OK, $result->get_status());
+        $this->assertStringContainsString('Provider 9', $result->get_details());
+    }
+
+    public function test_a_provider_behind_the_router_is_a_warning_once_refusals_are_not_final(): void {
+        $instances = [5 => $this->router(5, extra: ['strictdecline' => 0]), 9 => $this->other(9)];
+        $inspector = $this->inspector($instances, ',5,9');
+        $result = (new declinereach($inspector))->get_result();
+
+        $this->assertSame(result::WARNING, $result->get_status());
+        $this->assertStringContainsString('Provider 9', $result->get_details());
+    }
+
+    public function test_a_router_with_nobody_behind_it_has_nothing_to_report(): void {
+        $inspector = $this->inspector([5 => $this->router(5)], ',5');
+        $result = (new declinereach($inspector))->get_result();
+
+        $this->assertSame(result::OK, $result->get_status());
+        $this->assertSame('', $result->get_details());
+    }
+
+    public function test_a_provider_ahead_of_the_router_is_not_counted_as_being_behind_it(): void {
+        // It answers first and the router is never reached, which is a different
+        // complaint with a check of its own.
+        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',9,5');
+        $result = (new declinereach($inspector))->get_result();
+
+        $this->assertSame(result::OK, $result->get_status());
+        $this->assertSame('', $result->get_details());
     }
 
     public function test_a_second_router_is_an_error_that_says_which_one_to_delete(): void {

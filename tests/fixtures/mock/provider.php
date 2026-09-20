@@ -70,6 +70,14 @@ class provider extends \core_ai\provider {
         return true;
     }
 
+    #[\Override]
+    public function get_name(): string {
+        // Core resolves this from the class name and gets nothing for a fixture, which
+        // leaves a not null column empty when core writes its own record of the action.
+        // The name is only ever read back as a label.
+        return 'aiprovider_mock';
+    }
+
     /**
      * The behaviour this instance was built to exhibit.
      *

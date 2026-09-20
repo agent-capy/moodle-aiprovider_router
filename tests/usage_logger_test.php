@@ -16,6 +16,7 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\exception\declined_request;
 use core_ai\aiactions\generate_text;
 use core_ai\provider as ai_provider;
 
@@ -210,6 +211,27 @@ final class usage_logger_test extends \advanced_testcase {
     }
 
     /**
+     * Route a request the router is expected to refuse for good.
+     *
+     * A refusal the site decided on is thrown rather than returned, because core would
+     * otherwise carry on and let the next provider answer it. What was recorded on the
+     * way out is still the subject here, so the exception is caught and handed back.
+     *
+     * @param ai_provider[] $instances The provider instances the site has.
+     * @param array $config The router instance configuration.
+     * @return declined_request What the router threw.
+     */
+    protected function refused(array $instances, array $config = ['defaulttarget' => 7]): declined_request {
+        try {
+            $this->route($instances, $config);
+        } catch (declined_request $e) {
+            return $e;
+        }
+
+        $this->fail('Expected the router to stop the request rather than pass it on.');
+    }
+
+    /**
      * The single row the router recorded.
      *
      * @return \stdClass The row.
@@ -374,13 +396,14 @@ final class usage_logger_test extends \advanced_testcase {
         $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
         $this->add('the site pays', 8);
 
-        $response = $this->route([
+        $refusal = $this->refused([
             $this->target(7, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi']),
             $this->target(8, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi']),
         ]);
 
-        // Not an absent key, so not a rule that quietly hands on to the one below it.
-        $this->assertFalse($response->get_success());
+        // Not an absent key, so not a rule that quietly hands on to the one below it,
+        // and not something for the next provider in the site's order either.
+        $this->assertSame(abstract_processor::REASON_KEY_UNREADABLE, $refusal->get_reason());
         $row = $this->logged();
         $this->assertSame(abstract_processor::REASON_KEY_UNREADABLE, $row->reason);
         $this->assertSame(rule::KEYSOURCE_USER, $row->keysource);
@@ -394,7 +417,7 @@ final class usage_logger_test extends \advanced_testcase {
         $this->bring_key(8, 'their-other-key');
         $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
 
-        $response = $this->route([
+        $refusal = $this->refused([
             $this->target(7, \aiprovider_mock\provider::FAILURE, ['errorcode' => 401]),
             $this->target(8, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi']),
         ]);
@@ -402,8 +425,7 @@ final class usage_logger_test extends \advanced_testcase {
         // Their other key would have worked, and using it would have hidden the fact
         // that one of their keys has stopped being accepted. They are the only person
         // who can put that right, so they are told.
-        $this->assertFalse($response->get_success());
-        $this->assertSame(401, $response->get_errorcode());
+        $this->assertSame(401, $refusal->get_statuscode());
         $row = $this->logged();
         $this->assertSame(abstract_processor::REASON_KEY_REJECTED, $row->reason);
         $this->assertSame(1, (int) $row->attempts);
@@ -414,7 +436,7 @@ final class usage_logger_test extends \advanced_testcase {
         $this->bring_key(8, 'their-other-key');
         $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
 
-        $this->route([
+        $this->refused([
             $this->target(7, \aiprovider_mock\provider::FAILURE, ['errorcode' => 500]),
             $this->target(8, \aiprovider_mock\provider::FAILURE, ['errorcode' => 500]),
         ]);
@@ -431,7 +453,7 @@ final class usage_logger_test extends \advanced_testcase {
         $this->bring_key(7);
         $this->add_byok('their own key', 7, rule::KEYSOURCE_USER);
 
-        $this->route([
+        $this->refused([
             $this->target(7, \aiprovider_mock\provider::FAILURE, ['errorcode' => 500]),
             $this->target(9, \aiprovider_mock\provider::SUCCESS, ['content' => 'Hi']),
         ], ['defaulttarget' => 9]);

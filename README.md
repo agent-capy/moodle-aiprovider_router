@@ -43,13 +43,14 @@ reference).
 
 ## Settings
 
-A router instance has three settings, on the provider instance form.
+A router instance has four settings, on the provider instance form.
 
 | Setting | Description |
 | --- | --- |
 | Operating mode | *Router only* expects every AI request to come through the router, which needs to be first in the provider order. *Alongside other providers* leaves requests the router declines to whichever provider comes next. |
 | When no rule matches | *Send it to the default delegation target*, or *decline the request*. Declining hands the request back to Moodle, which tries the next AI provider in the site order: alongside other providers the site carries on as before, while in router only mode there is no next provider and the request stops. Declining is also how a site keeps AI spending to the cases its rules describe. The default follows the operating mode. |
 | Default delegation target | The provider instance that handles a request when no rule picks one, and the one a request falls back to if the target a rule chose fails. Not needed on a site that routes entirely by rule and declines the rest; otherwise the router reports itself as not configured, so core skips it rather than handing it requests it cannot serve. |
+| Make refusals final | On by default. Stops Moodle trying another provider when the router turns a request down because a budget has been reached, because a key somebody brought cannot be used, or because nothing is configured to handle the request. See *What a refusal is worth* below. |
 
 Only one router instance can exist on a site. The form refuses a second one, and if a
 second is created another way it stands down rather than competing with the first.
@@ -69,6 +70,7 @@ The plugin reports this on *Site administration → Reports → System status*:
 | AI Router in the provider order | The router is absent from the order, so it is tried only after every other provider has refused the request. |
 | AI Router position in the provider order | The router is not tried first. An error in *Router only* mode; in *Alongside other providers* mode this may be deliberate, so it is reported for information only. |
 | Providers ahead of the AI Router | A provider that comes earlier handles the same actions and will answer first. |
+| What happens when the AI Router says no | Which providers come after the router and could answer a request it turned down. A warning where *Make refusals final* is off, because a budget or a brought key would then be bypassed; otherwise a statement of what is behind the router. |
 | Leftover entries in the provider order | The order still names instances that have been deleted. Moving providers up and down works on positions in that list, so leftovers can make reordering appear to do nothing. |
 | Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
 | Actions the router instance can carry | An action the router offers is not configured on its instance, so requests for it never reach the router. This happens when a plugin defining an action is installed after the router instance was made: the action list is read fresh every time, the instance's configuration is written once. ⚠ The provider settings screen cannot put it right for an action outside core, so recreating the instance is the fix. |
@@ -158,6 +160,47 @@ condition, while "teacher, in this course" is two.
 | No rule matches | Follows the *When no rule matches* setting |
 | *When no rule matches* is set to decline | The default delegation target is not used as a fallback either. An administrator who keeps unclaimed requests away from a provider does not expect a failure to send one there |
 
+### What a refusal is worth
+
+Moodle tries each AI provider in the site order and stops at the first one that
+succeeds. A provider reports a failure, and Moodle reads every failure the same way: as
+that provider being unable to help. There is no way for a provider to say *this request
+has been answered and the answer is no*.
+
+That distinction is the whole of what this plugin does. A request the router turned down
+because a budget had been reached, or because the key somebody brought could not be
+used, would otherwise be offered to the next provider in the order and answered on the
+site's own key. The limit would hold only until somebody asked twice.
+
+**Make refusals final** closes that. Where it is on — the default — a refusal of that
+kind raises an error, which is the only thing that stops Moodle's loop. What it costs is
+worth knowing:
+
+- the person making the request sees an error message rather than a quiet failure;
+- Moodle does not write the request to its own AI log (`ai_action_register`). The
+  router's own usage records are written before the error is raised, so the reports in
+  this plugin, and the budgets that read them, are unaffected;
+- a placement that catches the error can show it however it likes. Moodle's own
+  placements do not, so the message appears as an error.
+
+Not every failure is treated this way, and the line matters:
+
+| The router says | Is it final? |
+| --- | --- |
+| A rule fitted this request and its budget has been reached | **Yes.** A spending limit that can be bypassed is not a limit |
+| A key somebody brought cannot be read, or was refused, or every instance they hold a key for has been tried | **Yes.** Carrying on would move the cost onto the site, which is the opposite of what was asked |
+| Nothing is configured to handle this request | **Yes.** A half configured site should be visibly half configured rather than quietly answered by something else |
+| No rule claimed this request | **No.** This is the router saying the request was not its business, which is exactly the point of running it alongside other providers. Moodle carrying on is correct |
+| A target was unreachable, broke, or returned nothing usable | **No.** That is what the fallback is for |
+
+Turning the setting off restores Moodle's ordinary behaviour throughout.
+
+**This is not a complete answer, and the plugin does not pretend otherwise.** It stops
+a refusal from being mistaken for a fault; it cannot remove the other providers from
+Moodle's list. The *What happens when the AI Router says no* status check reports which
+providers sit behind the router, so that a site owner can see what would happen if the
+setting were off. A request for a proper way to say this has been raised with Moodle.
+
 Conditions that depend on something the request does not carry — a course, when the
 request came from outside any course; a placement, when it cannot be identified — are not
 met, so the request falls out of narrow rules rather than into them.
@@ -184,7 +227,8 @@ runs out" setting, because the order of the rules already says it:
 ```
 
 Delete the second rule, on a site that declines requests matching nothing, and the same
-pair blocks instead of switching.
+pair blocks instead of switching. A request stopped that way is stopped for good, and
+not handed to the next provider in the site order — see *What a refusal is worth*.
 
 **Counting requests is the measure for everything that has no bill.** A model you run
 yourself costs nothing to price and something to queue; a provider's free allowance is

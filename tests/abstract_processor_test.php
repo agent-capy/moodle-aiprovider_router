@@ -16,6 +16,9 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\exception\declined_request;
+use core_ai\aiactions\generate_text;
+
 /**
  * Tests for what the processor is willing to believe and willing to write down.
  *
@@ -27,6 +30,7 @@ namespace aiprovider_router;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(abstract_processor::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(declined_request::class)]
 final class abstract_processor_test extends \advanced_testcase {
     #[\Override]
     public function setUp(): void {
@@ -69,6 +73,137 @@ final class abstract_processor_test extends \advanced_testcase {
         $redacted = abstract_processor::redact_for(str_repeat('x', 4000), $this->target());
 
         $this->assertLessThanOrEqual(500, \core_text::strlen($redacted));
+    }
+
+    /**
+     * A processor over a router instance, with nothing else replaced.
+     *
+     * @param array $config The router instance configuration.
+     * @return process_generate_text The processor.
+     */
+    protected function processor(array $config = []): process_generate_text {
+        return new process_generate_text(
+            new provider(
+                enabled: true,
+                name: 'Router',
+                config: json_encode($config + ['defaulttarget' => 7]),
+            ),
+            new generate_text(
+                contextid: \context_system::instance()->id,
+                userid: get_admin()->id,
+                prompttext: 'hello',
+            ),
+        );
+    }
+
+    /**
+     * Turn a failure payload into whatever the processor decides it really is.
+     *
+     * @param process_generate_text $processor The processor.
+     * @param int $errorcode The status code.
+     * @param string $stringid The language string, without its error: prefix.
+     * @param string $reason The reason code.
+     * @return array The payload, where one comes back.
+     */
+    protected function conclude(
+        process_generate_text $processor,
+        int $errorcode,
+        string $stringid,
+        string $reason,
+    ): array {
+        $outcome = (new \ReflectionMethod($processor, 'fail'))
+            ->invoke($processor, $errorcode, $stringid, $reason);
+
+        return (new \ReflectionMethod($processor, 'finalise'))->invoke($processor, $outcome);
+    }
+
+    /**
+     * Every reason the router records, and whether it is the end of the matter.
+     *
+     * The distinction is the whole of the design. A spending limit that has been
+     * reached, and a key somebody brought so the request would be charged to them, must
+     * not be retried by the next provider on the site's own key. A target that merely
+     * broke is exactly what core's fallback is for. And "no rule claimed this" is the
+     * router saying the request was not its business, which in a site running the
+     * router alongside other providers is precisely an invitation to try the next one.
+     *
+     * @return array<string, array{string, string, bool}> Reason, language string, and
+     *                                                    whether the request stops there.
+     */
+    public static function reasons(): array {
+        return [
+            'a rule fitted but its budget was spent' =>
+                [abstract_processor::REASON_BUDGET_SPENT, 'budgetexhausted', true],
+            'nowhere to send it' => [abstract_processor::REASON_NO_TARGET, 'nodefaulttarget', true],
+            'a brought key that cannot be read' =>
+                [abstract_processor::REASON_KEY_UNREADABLE, 'byokdecryptfailed:user', true],
+            'a brought key the provider refused' =>
+                [abstract_processor::REASON_KEY_REJECTED, 'byokkeyrejected:user', true],
+            'nothing left that the payer holds a key for' =>
+                [abstract_processor::REASON_NO_KEY_LEFT, 'byoknokeyleft:user', true],
+            'core no longer offers the delegation point' =>
+                [abstract_processor::REASON_UNAVAILABLE, 'delegationunavailable', false],
+            'the target answered with nothing' => [abstract_processor::REASON_EMPTY, 'emptyresponse', false],
+            'the target threw' => [abstract_processor::REASON_TARGET_THREW, 'alltargetsfailed', false],
+            'every target failed' => [abstract_processor::REASON_ALL_FAILED, 'alltargetsfailed', false],
+            // Not final on purpose: this is how the router says the request was never
+            // its business, and the next provider taking it is the point.
+            'no rule claimed it' => [abstract_processor::REASON_DECLINED, 'norulematched', false],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('reasons')]
+    public function test_only_a_decision_the_site_made_ends_the_request(
+        string $reason,
+        string $stringid,
+        bool $final,
+    ): void {
+        $processor = $this->processor();
+
+        if (!$final) {
+            $outcome = $this->conclude($processor, 503, $stringid, $reason);
+
+            $this->assertFalse($outcome['success']);
+            $this->assertSame($reason, $outcome['error']);
+
+            return;
+        }
+
+        try {
+            $this->conclude($processor, 503, $stringid, $reason);
+            $this->fail("Expected {$reason} to stop the request.");
+        } catch (declined_request $e) {
+            $this->assertSame($reason, $e->get_reason());
+            $this->assertSame(get_string('error:' . $stringid, 'aiprovider_router'), $e->getMessage());
+        }
+    }
+
+    public function test_a_site_can_ask_for_the_behaviour_core_gives_everybody_else(): void {
+        $outcome = $this->conclude(
+            $this->processor(['strictdecline' => 0]),
+            503,
+            'budgetexhausted',
+            abstract_processor::REASON_BUDGET_SPENT,
+        );
+
+        $this->assertFalse($outcome['success']);
+        $this->assertSame(abstract_processor::REASON_BUDGET_SPENT, $outcome['error']);
+    }
+
+    public function test_the_status_the_failure_carried_survives_being_thrown(): void {
+        // A refusal by the provider that holds somebody's key is a 401 and should still
+        // read as one wherever it is caught.
+        try {
+            $this->conclude(
+                $this->processor(),
+                401,
+                'byokkeyrejected:user',
+                abstract_processor::REASON_KEY_REJECTED,
+            );
+            $this->fail('Expected a refused key to stop the request.');
+        } catch (declined_request $e) {
+            $this->assertSame(401, $e->get_statuscode());
+        }
     }
 
     /**

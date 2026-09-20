@@ -16,6 +16,7 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\exception\declined_request;
 use core_ai\aiactions\generate_text;
 use core_ai\provider as ai_provider;
 
@@ -263,16 +264,25 @@ final class rule_routing_test extends \advanced_testcase {
             [$this->target(7, \aiprovider_mock\provider::SUCCESS)],
             ['defaulttarget' => 7, 'nomatch' => provider::NOMATCH_DECLINE],
         );
-        $misconfigured = $this->route(
-            [$this->target(7, \aiprovider_mock\provider::SUCCESS, [], enabled: false)],
-            ['defaulttarget' => 7, 'nomatch' => provider::NOMATCH_DELEGATE],
+
+        // One is the site working as configured, and the request may well be somebody
+        // else's, so it is handed back as an ordinary failure. The other is a site
+        // waiting to be fixed, where carrying on would make the gap invisible.
+        $this->assertFalse($declined->get_success());
+        $this->assertSame(
+            get_string('error:norulematched', 'aiprovider_router'),
+            $declined->get_errormessage(),
         );
 
-        $this->assertFalse($declined->get_success());
-        $this->assertFalse($misconfigured->get_success());
-        // One is the site working as configured and the other is waiting to be fixed,
-        // so the monitor has to be able to separate them.
-        $this->assertNotSame($declined->get_errormessage(), $misconfigured->get_errormessage());
+        try {
+            $this->route(
+                [$this->target(7, \aiprovider_mock\provider::SUCCESS, [], enabled: false)],
+                ['defaulttarget' => 7, 'nomatch' => provider::NOMATCH_DELEGATE],
+            );
+            $this->fail('Expected a router with nowhere to send the request to stop it.');
+        } catch (declined_request $e) {
+            $this->assertSame(abstract_processor::REASON_NO_TARGET, $e->get_reason());
+        }
     }
 
     public function test_a_condition_decides_which_target_answers(): void {

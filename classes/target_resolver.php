@@ -63,6 +63,12 @@ class target_resolver {
     /** @var key|null A key that is registered and cannot be decrypted. */
     protected ?key $unreadable = null;
 
+    /** @var bool Whether a budget, and nothing else, is why there is nowhere to go. */
+    protected bool $budgetspent = false;
+
+    /** @var rule_evaluator|null The evaluator, kept so its findings can be read back. */
+    protected ?rule_evaluator $evaluator = null;
+
     /**
      * Constructor.
      *
@@ -85,6 +91,7 @@ class target_resolver {
         $this->declined = false;
         $this->keysource = rule::KEYSOURCE_SITE;
         $this->unreadable = null;
+        $this->budgetspent = false;
         $this->byokonly = null;
         $instances = $this->get_instances_by_id();
 
@@ -176,6 +183,22 @@ class target_resolver {
     }
 
     /**
+     * Whether the last request had nowhere to go because a budget had been spent.
+     *
+     * A budget is written as a condition, so a request that has run past one simply
+     * stops matching the rule that carried it. That makes it indistinguishable from a
+     * request no rule was ever about, which will not do: the first is the site's
+     * spending limit doing its work and has to be the end of the matter, while the
+     * second is a request the router was never asked to handle and may perfectly well
+     * be somebody else's. They are separated here, at the only point that can tell.
+     *
+     * @return bool True when a rule fitted in every respect but its budget.
+     */
+    public function was_budget_spent(): bool {
+        return $this->budgetspent;
+    }
+
+    /**
      * Where a request goes when no rule claimed it.
      *
      * @param ai_provider[] $instances Every provider instance, keyed by id.
@@ -185,13 +208,20 @@ class target_resolver {
     protected function get_unmatched_candidates(array $instances, action_base $action): array {
         if ($this->router->get_nomatch_behaviour() === provider::NOMATCH_DECLINE) {
             $this->declined = true;
+            $this->budgetspent = (bool) $this->get_evaluator()->get_budget_blocked();
 
             return [];
         }
 
         $target = $this->get_default_target($instances, $action);
+        if ($target !== null) {
+            // A budget that sends the request to the default target instead is the
+            // administrator's arrangement working, not a refusal.
+            return [new candidate($target)];
+        }
+        $this->budgetspent = (bool) $this->get_evaluator()->get_budget_blocked();
 
-        return $target === null ? [] : [new candidate($target)];
+        return [];
     }
 
     /**
@@ -390,7 +420,9 @@ class target_resolver {
     protected function get_evaluator(): rule_evaluator {
         global $DB;
 
-        return new rule_evaluator(new rule_repository($DB));
+        // One per resolver: what it noticed while walking the rules is read back after
+        // the walk, so a fresh instance each time would have nothing to report.
+        return $this->evaluator ??= new rule_evaluator(new rule_repository($DB));
     }
 
     /**
