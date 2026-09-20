@@ -91,6 +91,9 @@ $options = [];
 foreach ($periods as $period) {
     $options[$period] = get_string('usage:period:days', 'aiprovider_router', $period);
 }
+// Spaced the same way as the other two report screens. A single_select carries no
+// margin of its own, so without this it touches whatever follows it.
+echo html_writer::start_div('d-flex flex-wrap align-items-center gap-3 mb-3 aiprovider-router-filters');
 echo $OUTPUT->single_select(
     new moodle_url($url, $userid ? ['userid' => $userid] : []),
     'days',
@@ -100,6 +103,7 @@ echo $OUTPUT->single_select(
     null,
     ['label' => get_string('usage:period', 'aiprovider_router')],
 );
+echo html_writer::end_div();
 
 if ($userid > 0) {
     // One person. Their name is the heading, so there is no doubt whose figures these

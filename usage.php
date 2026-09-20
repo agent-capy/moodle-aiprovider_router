@@ -115,6 +115,12 @@ $bykeysource = $report->get_breakdown(usage_report::BY_KEYSOURCE, $from, $now);
 echo $OUTPUT->header();
 echo $OUTPUT->box(get_string('usage:intro', 'aiprovider_router'));
 
+// The filters sit in one row with a gap between them. A single_select carries no
+// margin of its own, so two of them rendered one after another end up separated by
+// a single space, and the last one touches whatever follows. These are the utility
+// classes the single_select template itself uses for the label and the menu inside.
+echo html_writer::start_div('d-flex flex-wrap align-items-center gap-3 mb-3 aiprovider-router-filters');
+
 $options = [];
 foreach ($periods as $period) {
     $options[$period] = get_string('usage:period:days', 'aiprovider_router', $period);
@@ -142,6 +148,8 @@ echo $OUTPUT->single_select(
     null,
     ['label' => get_string('usage:keysource', 'aiprovider_router')],
 );
+
+echo html_writer::end_div();
 
 if ((int) $totals->requests === 0) {
     echo $OUTPUT->notification(get_string('usage:none', 'aiprovider_router'), 'info');

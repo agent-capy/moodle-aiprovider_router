@@ -1,0 +1,11 @@
+/* Spacing for the filter row on the report screens.
+ *
+ * Moodle 5.0.0 ships a single_select template whose inner form is
+ * "d-flex flex-wrap align-items-center" with no gap, so a visible label sits
+ * hard against its menu. A later 5.0.x release added "gap-2". This plugin
+ * supports 5.0 as its floor, so it sets the same value itself: on a core that
+ * already sets it, this changes nothing.
+ */
+.aiprovider-router-filters .singleselect form {
+    gap: 0.5rem;
+}

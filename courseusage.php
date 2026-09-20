@@ -73,9 +73,13 @@ $options = [];
 foreach ($periods as $period) {
     $options[$period] = get_string('usage:period:days', 'aiprovider_router', $period);
 }
+// Spaced the same way as the other two report screens. A single_select carries no
+// margin of its own, so without this it touches whatever follows it.
+echo html_writer::start_div('d-flex flex-wrap align-items-center gap-3 mb-3 aiprovider-router-filters');
 echo $OUTPUT->single_select($url, 'days', $options, $days, null, null, [
     'label' => get_string('usage:period', 'aiprovider_router'),
 ]);
+echo html_writer::end_div();
 
 // How close this course is to a budget the site has set on it. ⚠ A share and not a
 // figure: what the site spends is not a teacher's business, but how near the course is
