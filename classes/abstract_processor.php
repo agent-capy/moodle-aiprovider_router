@@ -130,6 +130,18 @@ abstract class abstract_processor extends \core_ai\process_base {
     protected bool $routed = false;
 
     /**
+     * @var array{prompttokens: int, completiontokens: int, cost: float|null} What the
+     *      attempts before this one already used.
+     *
+     * A target can answer successfully, report the tokens it charged for, and return
+     * nothing anybody can be shown. The request moves on to the next target, and what
+     * the first one spent is spent all the same. It is carried here rather than written
+     * as a row of its own, because one row is one request everywhere else in the
+     * reports and a budget counted in requests would start counting fallbacks.
+     */
+    protected array $spilled = ['prompttokens' => 0, 'completiontokens' => 0, 'cost' => 0.0];
+
+    /**
      * The response field carrying the generated content, if the action has one.
      *
      * Actions that return content define this so that an empty generation can be told
@@ -189,6 +201,7 @@ abstract class abstract_processor extends \core_ai\process_base {
     #[\Override]
     protected function query_ai_api(): array {
         $this->routed = true;
+        $this->spilled = ['prompttokens' => 0, 'completiontokens' => 0, 'cost' => 0.0];
         if (!delegator::is_available()) {
             return $this->fail(503, 'delegationunavailable', self::REASON_UNAVAILABLE);
         }
@@ -272,17 +285,24 @@ abstract class abstract_processor extends \core_ai\process_base {
 
             // A success carrying no content must never reach the placement: the user
             // would be shown an empty result as though it had worked.
-            if ($this->is_truncated($data)) {
-                // Deliberately not a fallback. Another target would burn its budget the
-                // same way, and shortening the input is something the user can act on.
-                $outcome = $this->fail(502, 'emptyresponse', self::REASON_EMPTY);
-                // The target still charged for the thinking it did, so the tokens are
-                // recorded even though the user got nothing readable.
-                $this->record_usage($resolver, $candidate, $data, $attempts);
+            if (!$this->is_truncated($data)) {
+                // Nothing to show and no reason given, so another target is tried. What
+                // this one charged for is not undone by that.
+                $this->remember_spill($candidate, $data);
+                $last = $response;
 
-                return $this->finalise($outcome);
+                continue;
             }
-            $last = $response;
+
+            // The token budget ran out. Deliberately not a fallback: another target
+            // would burn its budget the same way, and shortening the input is something
+            // the user can act on.
+            $outcome = $this->fail(502, 'emptyresponse', self::REASON_EMPTY);
+            // The target still charged for the thinking it did, so the tokens are
+            // recorded even though the user got nothing readable.
+            $this->record_usage($resolver, $candidate, $data, $attempts);
+
+            return $this->finalise($outcome);
         }
 
         // Pass the target's status code through so that a 429 stays a 429.
@@ -411,8 +431,47 @@ abstract class abstract_processor extends \core_ai\process_base {
             'completiontokens' => self::counted($data['completiontokens'] ?? null),
         ];
 
-        $this->get_logger()->record($entry, $this->get_image_count($success));
+        // One row is one request everywhere in these reports, and a budget counted in
+        // requests counts rows. So a target that answered with nothing does not get a
+        // row of its own; what it used is added to the row the request does get, with
+        // its own rate applied to its own tokens rather than the answering target's.
+        $this->get_logger()->record($entry, $this->get_image_count($success), $this->spilled);
     }
+
+    /**
+     * Keep what a target used when its answer is not the one being returned.
+     *
+     * @param candidate $candidate The target that produced it.
+     * @param array $data Its response data.
+     */
+    protected function remember_spill(candidate $candidate, array $data): void {
+        $prompt = self::counted($data['prompttokens'] ?? null);
+        $completion = self::counted($data['completiontokens'] ?? null);
+        if ($prompt === null && $completion === null) {
+            // Nothing reported, so nothing known to have been used.
+            return;
+        }
+
+        $this->spilled['prompttokens'] += (int) $prompt;
+        $this->spilled['completiontokens'] += (int) $completion;
+
+        if ($this->spilled['cost'] === null) {
+            return;
+        }
+        $cost = $this->get_logger()->attempt_cost(
+            self::component_of($candidate->target),
+            isset($data['model']) ? (string) $data['model'] : null,
+            time(),
+            $prompt,
+            $completion,
+        );
+        // Unknown wins, as it does everywhere else here: a total that quietly dropped
+        // the part it could not price would read as a smaller bill rather than an
+        // unmeasured one.
+        $this->spilled['cost'] = $cost === null ? null : $this->spilled['cost'] + $cost;
+    }
+
+
 
     /**
      * Which plugin an instance belongs to, which is what rates are looked up by.

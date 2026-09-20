@@ -188,6 +188,13 @@ class evaluation_context {
     /**
      * The roles the user holds in this context, including those inherited from above.
      *
+     * The special ones are included. Moodle gives every logged in account the
+     * authenticated user role, and everybody on the front page the front page role,
+     * without ever writing a role assignment for either. A rule condition offers those
+     * roles in its list -- they are roles, and an administrator has every reason to
+     * pick one -- so leaving them out here meant a condition that could be chosen on
+     * the screen and could never be satisfied by anybody.
+     *
      * @return int[] The role ids.
      */
     public function get_roleids(): array {
@@ -196,7 +203,7 @@ class evaluation_context {
             $context = $this->get_context();
             $userid = $this->get_userid();
             if ($context !== null && $userid > 0) {
-                foreach (get_user_roles($context, $userid, true) as $assignment) {
+                foreach (get_user_roles_with_special($context, $userid) as $assignment) {
                     $this->roleids[(int) $assignment->roleid] = (int) $assignment->roleid;
                 }
                 $this->roleids = array_values($this->roleids);

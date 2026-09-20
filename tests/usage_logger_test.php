@@ -465,6 +465,100 @@ final class usage_logger_test extends \advanced_testcase {
         $this->assertSame(abstract_processor::REASON_NO_KEY_LEFT, $row->reason);
     }
 
+    public function test_what_a_target_used_before_answering_with_nothing_is_not_lost(): void {
+        $this->add('to seven', 7);
+        // The first target succeeds, says what it charged for, and returns nothing
+        // anybody can be shown. The request moves on; the money does not come back.
+        $this->route(config: ['defaulttarget' => 8], instances: [
+            $this->target(7, \aiprovider_mock\provider::EMPTY_CONTENT, [
+                'prompttokens' => 1000,
+                'completiontokens' => 200,
+            ]),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS, [
+                'content' => 'The second one answered',
+                'prompttokens' => 10,
+                'completiontokens' => 20,
+            ]),
+        ]);
+
+        $row = $this->logged();
+        $this->assertSame(2, (int) $row->attempts);
+        $this->assertSame(1010, (int) $row->prompttokens);
+        $this->assertSame(220, (int) $row->completiontokens);
+    }
+
+    public function test_it_is_still_one_request(): void {
+        global $DB;
+
+        $this->add('to seven', 7);
+        // One row is one request everywhere in these reports, and a budget counted in
+        // requests counts rows. A fallback must not start counting as a second request.
+        $this->route(config: ['defaulttarget' => 8], instances: [
+            $this->target(7, \aiprovider_mock\provider::EMPTY_CONTENT, ['prompttokens' => 1000]),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS, ['content' => 'Answered']),
+        ]);
+
+        $this->assertSame(1, $DB->count_records(usage_logger::TABLE));
+    }
+
+    public function test_each_attempt_is_priced_at_its_own_rate(): void {
+        $this->add('to seven', 7);
+        $rate = new price();
+        $rate->set('provider', 'aiprovider_mock');
+        $rate->set('model', 'expensive');
+        $rate->set('promptrate', 10.0);
+        $rate->create();
+
+        $cheap = new price();
+        $cheap->set('provider', 'aiprovider_mock');
+        $cheap->set('model', 'cheap');
+        $cheap->set('promptrate', 1.0);
+        $cheap->create();
+
+        $this->route(config: ['defaulttarget' => 8], instances: [
+            $this->target(7, \aiprovider_mock\provider::EMPTY_CONTENT, [
+                'model' => 'expensive',
+                'prompttokens' => 1000000,
+                'completiontokens' => 0,
+            ]),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS, [
+                'model' => 'cheap',
+                'content' => 'Answered',
+                'prompttokens' => 1000000,
+                'completiontokens' => 0,
+            ]),
+        ]);
+
+        // A fallback chain crosses providers and models, so the attempt that produced
+        // nothing is priced against what produced it, not against what answered.
+        $this->assertEqualsWithDelta(11.0, (float) $this->logged()->cost, 0.000001);
+    }
+
+    public function test_a_cost_nobody_can_work_out_stays_unknown(): void {
+        $this->add('to seven', 7);
+        $cheap = new price();
+        $cheap->set('provider', 'aiprovider_mock');
+        $cheap->set('model', 'cheap');
+        $cheap->set('promptrate', 1.0);
+        $cheap->create();
+
+        $this->route(config: ['defaulttarget' => 8], instances: [
+            $this->target(7, \aiprovider_mock\provider::EMPTY_CONTENT, [
+                'model' => 'unpriced',
+                'prompttokens' => 1000000,
+            ]),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS, [
+                'model' => 'cheap',
+                'content' => 'Answered',
+                'prompttokens' => 1000000,
+            ]),
+        ]);
+
+        // Not 1.0. A total that quietly dropped the part it could not price would read
+        // as a smaller bill rather than an unmeasured one, and a budget reads these.
+        $this->assertNull($this->logged()->cost);
+    }
+
     public function test_a_history_that_cannot_be_written_does_not_stop_the_request(): void {
         // A monitor is a tool for running a site, not an obstacle on the path of every
         // AI request. Losing the history is bad; losing the answer is worse.

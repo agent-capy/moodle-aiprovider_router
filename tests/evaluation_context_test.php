@@ -113,7 +113,7 @@ final class evaluation_context_test extends \advanced_testcase {
     }
 
     public function test_roles_include_those_inherited_from_further_up(): void {
-        global $DB;
+        global $CFG, $DB;
         $category = $this->getDataGenerator()->create_category();
         $course = $this->getDataGenerator()->create_course(['category' => $category->id]);
         $user = $this->getDataGenerator()->create_user();
@@ -125,7 +125,10 @@ final class evaluation_context_test extends \advanced_testcase {
         $roles = $this->context(\context_course::instance($course->id), (int) $user->id)->get_roleids();
 
         sort($roles);
-        $expected = [$managerid, $studentid];
+        // The authenticated user role is here too, because Moodle gives it to every
+        // logged in account without writing an assignment for it. The point of this
+        // test is the manager role, which is held two levels above the course.
+        $expected = [$managerid, $studentid, (int) $CFG->defaultuserroleid];
         sort($expected);
         $this->assertSame($expected, $roles);
     }
@@ -173,6 +176,33 @@ final class evaluation_context_test extends \advanced_testcase {
         $context = $this->context(\context_system::instance());
 
         $this->assertNull($context->get_placement());
+    }
+
+    public function test_the_role_moodle_gives_everybody_counts_as_a_role(): void {
+        global $CFG;
+
+        $user = $this->getDataGenerator()->create_user();
+        $course = $this->getDataGenerator()->create_course();
+        $context = $this->context(\context_course::instance((int) $course->id), (int) $user->id);
+
+        // Moodle gives every logged in account the authenticated user role without ever
+        // writing a role assignment for it. The role condition offers it in its list --
+        // it is a role, and "anybody with an account" is an ordinary thing to mean --
+        // so a condition that could be chosen and never satisfied was a trap.
+        $this->assertContains((int) $CFG->defaultuserroleid, $context->get_roleids());
+    }
+
+    public function test_a_role_somebody_was_actually_given_still_counts(): void {
+        global $DB;
+
+        // The other half: adding the special roles must not lose the ordinary ones.
+        $course = $this->getDataGenerator()->create_course();
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $editing = (int) $DB->get_field('role', 'id', ['shortname' => 'editingteacher']);
+
+        $context = $this->context(\context_course::instance((int) $course->id), (int) $teacher->id);
+
+        $this->assertContains($editing, $context->get_roleids());
     }
 
     public function test_the_action_class_is_reported_without_a_leading_separator(): void {

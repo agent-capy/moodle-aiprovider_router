@@ -46,6 +46,17 @@ Fixes from a second independent review of the same code.
   that context is searched for users; the record that a spending limit was
   announced is declared, found, exported and removed; and a deletion request
   clears who registered a course key only in the course it approved.
+- A role condition matches the roles Moodle gives people without assigning
+  them. Every logged in account holds the authenticated user role and nobody
+  holds an assignment for it, so a condition naming it could be chosen on the
+  screen and satisfied by nobody.
+- What a target used before answering with nothing is no longer lost. A target
+  can succeed, report the tokens it charged for, and return nothing usable; the
+  request moves on to the next target and the money does not come back. It is
+  added to the row the request gets rather than written as a row of its own,
+  because one row is one request everywhere in these reports. Each attempt is
+  priced against the provider that ran it, and a total with an unpriceable part
+  in it stays unknown rather than becoming a smaller number.
 
 ## 0.1.0 — 2026-09-20
 
