@@ -28,7 +28,7 @@ use core\check\result;
  * later, because a plugin defining it was installed, is offered by the provider and
  * refused by core, which finds no entry for it and reads that as switched off.
  *
- * ⚠ It cannot be switched on from the provider settings screen either. That switch
+ * It cannot be switched on from the provider settings screen either. That switch
  * writes to core_ai's own namespace, so for an action defined anywhere else it
  * writes a key nothing reads. Nothing about the screen shows this: the action is
  * listed, its switch looks right, and requests for it go elsewhere.

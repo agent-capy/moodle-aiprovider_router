@@ -25,7 +25,7 @@ namespace aiprovider_router;
  * is the point of routing being written against actions rather than against the
  * four core happens to ship.
  *
- * ⚠ A transcription carries no token counts, so its cost cannot be worked out
+ * A transcription carries no token counts, so its cost cannot be worked out
  * from the rate table and shows as unknown. A budget counted in requests is the
  * measure that still works on it, which is also what a free allowance written in
  * requests per month wants.

@@ -39,7 +39,7 @@ namespace aiprovider_router;
  * carries on billing the same account. So the reading follows the subject and the
  * target, which is also what the summaries still hold once the detail has been purged.
  *
- * ⚠ Figures are cached for a short time on the routing path, because otherwise every AI
+ * Figures are cached for a short time on the routing path, because otherwise every AI
  * request would run a sum over the history. That is deliberate and it has a consequence
  * worth stating plainly: a burst of requests can carry spending past a limit by whatever
  * can be spent while one cached figure lives. A limit here is a limit to within a

@@ -145,7 +145,7 @@ class key extends \core\persistent {
     /**
      * What has been spent against this key's limit, and whether it has been reached.
      *
-     * ⚠ The figure is what the site's rate table says the requests would have cost,
+     * The figure is what the site's rate table says the requests would have cost,
      * not what the owner's provider actually billed them. Anywhere it is shown has to
      * say so.
      *
@@ -160,7 +160,7 @@ class key extends \core\persistent {
     /**
      * Whether this key has spent what its owner allowed it to.
      *
-     * ⚠ Unknown spending does not reach a limit. The direction is the opposite of a
+     * Unknown spending does not reach a limit. The direction is the opposite of a
      * budget condition's on purpose: this is somebody's own key, and a site that has
      * entered no rates would otherwise silently stop every brought key it holds.
      *

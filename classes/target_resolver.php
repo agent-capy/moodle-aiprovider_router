@@ -504,7 +504,7 @@ class target_resolver {
     /**
      * Whether a key has spent what its owner allowed it to.
      *
-     * ⚠ Not the same kind of answer as a budget condition's. A budget guards the
+     * Not the same kind of answer as a budget condition's. A budget guards the
      * site's money and refuses to route when it cannot be measured; this guards
      * somebody's own money, and a site with no rates entered must not silently stop
      * every key it holds. Unknown spending leaves the key in play.

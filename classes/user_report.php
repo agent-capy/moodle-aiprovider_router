@@ -29,7 +29,7 @@ namespace aiprovider_router;
  * as everything else here: the summaries as far as the scheduled task has reached, the
  * detail beyond it.
  *
- * ⚠ Costs are what the site's own rate table says, including for requests somebody paid
+ * Costs are what the site's own rate table says, including for requests somebody paid
  * for with a key they brought. That figure is an estimate of what their provider would
  * have charged, not what it did. Anything shown from here has to say so.
  *
@@ -119,7 +119,7 @@ class user_report extends usage_report {
     /**
      * One person's individual requests, as far back as the detail still goes.
      *
-     * ⚠ This is the only thing here that cannot outlive the detail retention period.
+     * This is the only thing here that cannot outlive the detail retention period.
      * Everything else falls back on the summaries, which say how much was used on a day
      * but not at what time; a listing of separate requests has nowhere to fall back to.
      *
@@ -144,7 +144,7 @@ class user_report extends usage_report {
     /**
      * Everybody who has registered a key, and every course one has been registered for.
      *
-     * ⚠ Nothing about the key itself is here, not even the hint. The hint exists so that
+     * Nothing about the key itself is here, not even the hint. The hint exists so that
      * an owner can tell their own keys apart; an administrator asking who brings keys
      * does not need to know which one, and showing it would spread a fragment of
      * somebody's credential across a screen that has no use for it.

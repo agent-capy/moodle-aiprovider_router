@@ -81,7 +81,7 @@ echo $OUTPUT->single_select($url, 'days', $options, $days, null, null, [
 ]);
 echo html_writer::end_div();
 
-// How close this course is to a budget the site has set on it. ⚠ A share and not a
+// How close this course is to a budget the site has set on it. A share and not a
 // figure: what the site spends is not a teacher's business, but how near the course is
 // to the point where its AI starts behaving differently certainly is.
 $ledger = new spend_ledger($DB, $aggregator, false);

@@ -41,7 +41,7 @@ class provider extends \core_ai\provider {
         ];
 
         // Actions that are not core's are routed too, where something defines them.
-        // ⚠ Offered only while the class is installed: an action named in this list
+        // Offered only while the class is installed: an action named in this list
         // and absent from the site makes the provider settings screen fatal, because
         // that screen asks each action for its own name.
         foreach (self::EXTRA_ACTIONS as $class) {

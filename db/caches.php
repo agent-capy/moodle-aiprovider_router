@@ -46,7 +46,7 @@ $definitions = [
     // request a budget applies to, and answering it means summing the history, which is
     // not a query to repeat per request either.
     //
-    // ⚠ The lifetime is what a limit is accurate to. Requests arriving while a figure
+    // The lifetime is what a limit is accurate to. Requests arriving while a figure
     // is held see the spending as it was when it was measured, so a burst can carry a
     // site past its limit by whatever it can spend in that time. A minute is short
     // enough for that to stay small and long enough to be worth having; making it

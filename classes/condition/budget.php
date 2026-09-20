@@ -36,12 +36,12 @@ use aiprovider_router\spend_ledger;
  * because the order of the rules already says it, and a second place to say it could
  * disagree with the first.
  *
- * ⚠ What is measured is what the site pays for. Requests covered by a key somebody
+ * What is measured is what the site pays for. Requests covered by a key somebody
  * brought are left out entirely, however expensive they were: a site's budget is not
  * touched by money the site did not spend. An owner limiting their own key does it on
  * the key itself.
  *
- * ⚠ Spending that cannot be worked out does not satisfy this condition either way
+ * Spending that cannot be worked out does not satisfy this condition either way
  * round. Costs come from the site's own rate table, so a site with no rates entered
  * spends nothing however much it uses, and reading that as room in the budget would
  * make every limit here meaningless. The status report says so where a rule routes by

@@ -226,7 +226,7 @@ class budget_notifier {
 
             if ($reached && $remembered === false) {
                 if (!$this->announce($kind, $subjectid, $spend, $limit, $metric, $threshold)) {
-                    // Nobody to tell. ⚠ Not remembered as said, because it was not:
+                    // Nobody to tell. Not remembered as said, because it was not:
                     // recording it would mean that giving somebody the role tomorrow
                     // would still leave them hearing nothing.
                     continue;
@@ -365,7 +365,7 @@ class budget_notifier {
     /**
      * The people who watch what the site spends.
      *
-     * ⚠ The administrators are included by hand. get_users_by_capability() does not
+     * The administrators are included by hand. get_users_by_capability() does not
      * return them - they pass every capability without holding any - so on a site
      * that has given the role to nobody in particular, which is most sites, a notice
      * built from that list alone would go nowhere at all.

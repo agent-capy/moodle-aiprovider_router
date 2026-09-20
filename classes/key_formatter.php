@@ -74,7 +74,7 @@ class key_formatter {
     /**
      * The limit the owner set, and how much of it is gone.
      *
-     * ⚠ A key that has reached its limit stops being used and nothing else happens: no
+     * A key that has reached its limit stops being used and nothing else happens: no
      * error, no message at the time. So it is said here, plainly, because the owner's
      * other reading of a key that stopped working is that the key is broken.
      *
