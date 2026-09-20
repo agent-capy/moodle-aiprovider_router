@@ -16,6 +16,7 @@
 
 namespace aiprovider_router\privacy;
 
+use aiprovider_router\budget_notifier;
 use aiprovider_router\key;
 use aiprovider_router\key_repository;
 use aiprovider_router\usage_aggregator;
@@ -107,6 +108,19 @@ class provider implements
             'privacy:metadata:key',
         );
 
+        $collection->add_database_table(
+            budget_notifier::TABLE,
+            [
+                'kind' => 'privacy:metadata:notice:kind',
+                'subjectid' => 'privacy:metadata:notice:subjectid',
+                'metric' => 'privacy:metadata:notice:metric',
+                'limitamount' => 'privacy:metadata:notice:limitamount',
+                'threshold' => 'privacy:metadata:notice:threshold',
+                'timenotified' => 'privacy:metadata:notice:timenotified',
+            ],
+            'privacy:metadata:notice',
+        );
+
         return $collection;
     }
 
@@ -127,6 +141,18 @@ class provider implements
               WHERE ctx.contextlevel = :level AND ctx.instanceid = :userid
                 AND EXISTS (SELECT 1 FROM {' . usage_aggregator::TABLE . '} d WHERE d.userid = :duserid)',
             ['level' => CONTEXT_USER, 'userid' => $userid, 'duserid' => $userid],
+        );
+
+        // Being told that a limit on one's own spending has been reached is a fact
+        // about that person, kept until the limit eases off. Like the summaries it has
+        // no context of its own, so it lives in theirs.
+        $contextlist->add_from_sql(
+            'SELECT ctx.id
+               FROM {context} ctx
+               JOIN {' . budget_notifier::TABLE . '} n
+                 ON n.subjectid = ctx.instanceid AND n.kind = :kind
+              WHERE ctx.contextlevel = :level AND ctx.instanceid = :userid',
+            ['kind' => budget_notifier::KIND_USER, 'level' => CONTEXT_USER, 'userid' => $userid],
         );
 
         // A person's own keys are theirs, and belong in their user context.
@@ -154,6 +180,16 @@ class provider implements
     public static function get_users_in_context(userlist $userlist): void {
         $context = $userlist->get_context();
 
+        // Asked of every context, including a user's. A request made outside any course
+        // is recorded against the asker's own user context -- which is what the media
+        // web services produce when no context is given -- and looking only for keys
+        // and summaries there missed anybody whose usage had not been summarised yet.
+        $userlist->add_from_sql(
+            'userid',
+            'SELECT userid FROM {' . usage_logger::TABLE . '} WHERE contextid = :contextid',
+            ['contextid' => $context->id],
+        );
+
         if ($context instanceof \context_user) {
             $userlist->add_from_sql(
                 'scopeid',
@@ -165,15 +201,15 @@ class provider implements
                 'SELECT DISTINCT userid FROM {' . usage_aggregator::TABLE . '} WHERE userid = :userid',
                 ['userid' => $context->instanceid],
             );
+            $userlist->add_from_sql(
+                'subjectid',
+                'SELECT subjectid FROM {' . budget_notifier::TABLE . '}
+                  WHERE kind = :kind AND subjectid = :userid',
+                ['kind' => budget_notifier::KIND_USER, 'userid' => $context->instanceid],
+            );
 
             return;
         }
-
-        $userlist->add_from_sql(
-            'userid',
-            'SELECT userid FROM {' . usage_logger::TABLE . '} WHERE contextid = :contextid',
-            ['contextid' => $context->id],
-        );
 
         if ($context instanceof \context_course) {
             $userlist->add_from_sql(
@@ -195,6 +231,7 @@ class provider implements
         $userid = $contextlist->get_user()->id;
         self::export_requests($contextlist, $userid);
         self::export_summaries($contextlist, (int) $userid);
+        self::export_notices($contextlist, (int) $userid);
 
         foreach ($contextlist->get_contexts() as $context) {
             if ($context instanceof \context_user && (int) $context->instanceid === (int) $userid) {
@@ -228,6 +265,7 @@ class provider implements
         $repository = new key_repository($DB);
         if ($context instanceof \context_user) {
             $DB->delete_records(usage_aggregator::TABLE, ['userid' => (int) $context->instanceid]);
+            self::forget_notices((int) $context->instanceid, self::key_ids_of((int) $context->instanceid));
             $repository->delete_for_user((int) $context->instanceid);
         } else if ($context instanceof \context_course) {
             // The course itself is being cleared, so the key it held goes with it.
@@ -356,13 +394,108 @@ class provider implements
         $repository = new key_repository($DB);
         foreach ($contexts as $context) {
             if ($context instanceof \context_user && (int) $context->instanceid === $userid) {
+                // Anything said about a limit on one of these keys goes with them.
+                self::forget_notices($userid, self::key_ids_of($userid));
                 $repository->delete_for_user($userid);
             } else if ($context instanceof \context_course) {
                 // Not a deletion. The key belongs to the course, and only the record of
-                // who entered it is this person's to have removed.
-                $repository->forget_registrar($userid);
+                // who entered it is this person's to have removed -- and only in the
+                // course that was approved. The same person may have entered a key in
+                // another course, and that course was not part of this request.
+                $repository->forget_registrar($userid, (int) $context->instanceid);
             }
         }
+    }
+
+    /**
+     * The keys somebody holds for themselves.
+     *
+     * Read before they are deleted, so that what was said about their limits can be
+     * removed with them rather than left pointing at a row that has gone.
+     *
+     * @param int $userid The user.
+     * @return int[] The key ids.
+     */
+    protected static function key_ids_of(int $userid): array {
+        global $DB;
+
+        return $DB->get_fieldset_select(
+            key::TABLE,
+            'id',
+            'scope = :scope AND scopeid = :userid',
+            ['scope' => key::SCOPE_USER, 'userid' => $userid],
+        );
+    }
+
+    /**
+     * Remove what has been said to somebody about a limit being reached.
+     *
+     * These rows exist so that a limit is announced once per crossing rather than once
+     * per day. A person's own budget names them outright, and a limit somebody put on
+     * their own key names the key, so both go when they do.
+     *
+     * @param int $userid The user.
+     * @param int[] $keyids Keys of theirs whose notices should go too.
+     */
+    protected static function forget_notices(int $userid, array $keyids = []): void {
+        global $DB;
+
+        $DB->delete_records(budget_notifier::TABLE, [
+            'kind' => budget_notifier::KIND_USER,
+            'subjectid' => $userid,
+        ]);
+        if (!$keyids) {
+            return;
+        }
+        [$insql, $params] = $DB->get_in_or_equal($keyids, SQL_PARAMS_NAMED);
+        $params['kind'] = budget_notifier::KIND_KEY;
+        $DB->delete_records_select(
+            budget_notifier::TABLE,
+            "kind = :kind AND subjectid {$insql}",
+            $params,
+        );
+    }
+
+    /**
+     * Export what has been said to somebody about their own spending.
+     *
+     * @param approved_contextlist $contextlist The approved contexts.
+     * @param int $userid The user.
+     */
+    protected static function export_notices(approved_contextlist $contextlist, int $userid): void {
+        global $DB;
+
+        $usercontext = null;
+        foreach ($contextlist->get_contexts() as $context) {
+            if ($context instanceof \context_user && (int) $context->instanceid === $userid) {
+                $usercontext = $context;
+                break;
+            }
+        }
+        if ($usercontext === null) {
+            return;
+        }
+
+        $notices = $DB->get_records(budget_notifier::TABLE, [
+            'kind' => budget_notifier::KIND_USER,
+            'subjectid' => $userid,
+        ], 'timenotified ASC');
+        if (!$notices) {
+            return;
+        }
+
+        writer::with_context($usercontext)->export_data(
+            [get_string('privacy:path:notices', 'aiprovider_router')],
+            (object) ['notices' => array_values(array_map(
+                static fn($notice) => (object) [
+                    'metric' => $notice->metric,
+                    'limitamount' => $notice->limitamount,
+                    'threshold' => $notice->threshold,
+                    'timenotified' => transform::datetime((int) $notice->timenotified),
+                ],
+                $notices,
+            ))],
+        );
     }
 
     /**

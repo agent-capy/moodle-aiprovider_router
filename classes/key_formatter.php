@@ -36,6 +36,8 @@ class key_formatter {
      * @param \moodle_url $url The page the actions return to.
      * @param spend_ledger|null $ledger The ledger, for what each key has spent.
      * @param string $currency The site currency.
+     * @param bool $mayuse Whether the owner may still use these keys, as opposed to
+     *                     only remove them.
      * @return \html_table The table.
      */
     public static function table(
@@ -44,6 +46,7 @@ class key_formatter {
         \moodle_url $url,
         ?spend_ledger $ledger = null,
         string $currency = '',
+        bool $mayuse = true,
     ): \html_table {
         $table = new \html_table();
         $table->head = [
@@ -61,7 +64,7 @@ class key_formatter {
                 self::hint($key),
                 self::tested($key),
                 self::cap($key, $ledger, $currency),
-                self::actions($url, $key),
+                self::actions($url, $key, $mayuse),
             ];
         }
 
@@ -174,24 +177,34 @@ class key_formatter {
      *
      * @param \moodle_url $url The page the actions return to.
      * @param key $key The key.
+     * @param bool $mayuse Whether the owner may still use the key. Removing it is
+     *                     offered either way: the key is theirs, and a policy tightened
+     *                     after they registered it must not leave them unable to take
+     *                     back a secret the site is holding for them.
      * @return string HTML.
      */
-    public static function actions(\moodle_url $url, key $key): string {
+    public static function actions(\moodle_url $url, key $key, bool $mayuse = true): string {
         $id = (int) $key->get('id');
-        $links = [
-            \html_writer::link(
+        $links = [];
+        if ($mayuse) {
+            // Testing a key spends money on it and capping it says how much more it
+            // may spend. Neither makes sense for somebody the site no longer allows
+            // to bring one.
+            $links[] = \html_writer::link(
                 new \moodle_url($url, ['action' => 'test', 'keyid' => $id, 'sesskey' => sesskey()]),
                 get_string('keys:test', 'aiprovider_router'),
-            ),
-            \html_writer::link(
+            );
+            $links[] = \html_writer::link(
                 new \moodle_url($url, ['action' => 'cap', 'keyid' => $id]),
                 get_string('keys:cap:set', 'aiprovider_router'),
-            ),
-            \html_writer::link(
-                new \moodle_url($url, ['action' => 'delete', 'keyid' => $id]),
-                get_string('delete'),
-            ),
-        ];
+            );
+        }
+        // Always offered. A key is a secret its owner handed over, and taking it back
+        // cannot depend on a policy somebody else changed afterwards.
+        $links[] = \html_writer::link(
+            new \moodle_url($url, ['action' => 'delete', 'keyid' => $id]),
+            get_string('delete'),
+        );
 
         return implode(' ', $links);
     }

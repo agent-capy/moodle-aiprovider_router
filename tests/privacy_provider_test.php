@@ -18,6 +18,8 @@ namespace aiprovider_router;
 
 use aiprovider_router\privacy\provider;
 use core_privacy\local\request\approved_contextlist;
+use core_privacy\local\request\approved_userlist;
+use core_privacy\local\request\userlist;
 use core_privacy\local\request\writer;
 
 /**
@@ -214,6 +216,166 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
         $this->assertSame('sk-course-efgh', $this->keys->reveal(
             $this->keys->get((int) $saved->get('id')),
         ));
+    }
+
+    /**
+     * Record one request against a context.
+     *
+     * @param int $userid Who made it.
+     * @param int $contextid Where it was made.
+     */
+    protected function log(int $userid, int $contextid): void {
+        global $DB;
+
+        $DB->insert_record(usage_logger::TABLE, (object) [
+            'timecreated' => time(),
+            'userid' => $userid,
+            'contextid' => $contextid,
+            'actionname' => 'generate_text',
+            'targetid' => 1,
+            'targetname' => 'Target one',
+            'targetprovider' => 'aiprovider_openai',
+            'success' => 1,
+            'attempts' => 1,
+            'keysource' => usage_logger::KEY_SITE,
+        ]);
+    }
+
+    /**
+     * Record that somebody has been told their own limit was reached.
+     *
+     * @param int $userid Whose limit.
+     */
+    protected function notify(int $userid): void {
+        global $DB;
+
+        $DB->insert_record(budget_notifier::TABLE, (object) [
+            'kind' => budget_notifier::KIND_USER,
+            'subjectid' => $userid,
+            'metric' => spend_ledger::METRIC_COST,
+            'limitamount' => 100.0,
+            'threshold' => 100,
+            'timenotified' => time(),
+        ]);
+    }
+
+    public function test_a_request_made_in_somebodys_own_context_still_names_them(): void {
+        // A request made outside any course is recorded against the asker's own user
+        // context, which is what the media web services produce when no context is
+        // given. Looking there only for keys and summaries missed anybody whose usage
+        // had not been summarised yet -- which is everybody, until the task first runs.
+        $user = $this->getDataGenerator()->create_user();
+        $usercontext = \context_user::instance((int) $user->id);
+        $this->log((int) $user->id, (int) $usercontext->id);
+
+        $userlist = new userlist($usercontext, 'aiprovider_router');
+        provider::get_users_in_context($userlist);
+
+        $this->assertSame([(int) $user->id], $userlist->get_userids());
+    }
+
+    public function test_being_told_a_limit_was_reached_is_found_in_the_persons_own_context(): void {
+        $user = $this->getDataGenerator()->create_user();
+        $this->notify((int) $user->id);
+
+        $contexts = provider::get_contexts_for_userid((int) $user->id)->get_contextids();
+
+        $this->assertContainsEquals(\context_user::instance((int) $user->id)->id, $contexts);
+    }
+
+    public function test_a_deletion_request_takes_away_what_was_said_about_their_limit(): void {
+        global $DB;
+
+        $user = $this->getDataGenerator()->create_user();
+        $usercontext = \context_user::instance((int) $user->id);
+        $this->log((int) $user->id, (int) $usercontext->id);
+        $this->notify((int) $user->id);
+
+        provider::delete_data_for_user(new approved_contextlist(
+            $user,
+            'aiprovider_router',
+            [(int) $usercontext->id],
+        ));
+
+        // Left behind, the row is personal data nothing can find again: the person has
+        // no other data, so they no longer appear in any context.
+        $this->assertSame(0, $DB->count_records(budget_notifier::TABLE));
+        $this->assertCount(0, provider::get_contexts_for_userid((int) $user->id)->get_contextids());
+    }
+
+    public function test_a_limit_somebody_put_on_their_own_key_goes_with_the_key(): void {
+        global $DB;
+
+        $user = $this->getDataGenerator()->create_user();
+        $this->setUser($user);
+        $saved = $this->keys->save(key::SCOPE_USER, (int) $user->id, 3, 'sk-their-own-ab');
+        $DB->insert_record(budget_notifier::TABLE, (object) [
+            'kind' => budget_notifier::KIND_KEY,
+            'subjectid' => (int) $saved->get('id'),
+            'metric' => spend_ledger::METRIC_COST,
+            'limitamount' => 20.0,
+            'threshold' => 100,
+            'timenotified' => time(),
+        ]);
+
+        provider::delete_data_for_user(new approved_contextlist(
+            $user,
+            'aiprovider_router',
+            [\context_user::instance((int) $user->id)->id],
+        ));
+
+        $this->assertSame(0, $DB->count_records(budget_notifier::TABLE));
+    }
+
+    public function test_only_the_course_that_was_approved_forgets_who_entered_its_key(): void {
+        global $DB;
+
+        $approved = $this->getDataGenerator()->create_course();
+        $other = $this->getDataGenerator()->create_course();
+        $teacher = $this->getDataGenerator()->create_user();
+        $this->setUser($teacher);
+        $first = $this->keys->save(key::SCOPE_COURSE, (int) $approved->id, 3, 'sk-course-one-a');
+        $second = $this->keys->save(key::SCOPE_COURSE, (int) $other->id, 3, 'sk-course-two-b');
+        $DB->set_field(key::TABLE, 'usermodified', $teacher->id, ['id' => $first->get('id')]);
+        $DB->set_field(key::TABLE, 'usermodified', $teacher->id, ['id' => $second->get('id')]);
+
+        provider::delete_data_for_user(new approved_contextlist(
+            $teacher,
+            'aiprovider_router',
+            [\context_course::instance((int) $approved->id)->id],
+        ));
+
+        // A deletion request approves particular contexts. The other course was not
+        // among them, and its record of who entered its key was not this request's to
+        // take away.
+        $this->assertSame(0, (int) $DB->get_field(key::TABLE, 'usermodified', ['id' => $first->get('id')]));
+        $this->assertSame(
+            (int) $teacher->id,
+            (int) $DB->get_field(key::TABLE, 'usermodified', ['id' => $second->get('id')]),
+        );
+    }
+
+    public function test_the_same_holds_when_several_users_are_removed_at_once(): void {
+        global $DB;
+
+        $approved = $this->getDataGenerator()->create_course();
+        $other = $this->getDataGenerator()->create_course();
+        $teacher = $this->getDataGenerator()->create_user();
+        $this->setUser($teacher);
+        $elsewhere = $this->keys->save(key::SCOPE_COURSE, (int) $other->id, 3, 'sk-course-two-b');
+        $DB->set_field(key::TABLE, 'usermodified', $teacher->id, ['id' => $elsewhere->get('id')]);
+
+        $userlist = new approved_userlist(
+            \context_course::instance((int) $approved->id),
+            'aiprovider_router',
+            [(int) $teacher->id],
+        );
+        provider::delete_data_for_users($userlist);
+
+        $this->assertSame(
+            (int) $teacher->id,
+            (int) $DB->get_field(key::TABLE, 'usermodified', ['id' => $elsewhere->get('id')]),
+        );
     }
 
     public function test_emptying_a_course_takes_its_key(): void {

@@ -93,7 +93,11 @@ $names = array_map(fn($instance) => format_string($instance->name), $targets);
 
 $form = new key_form($url, ['targets' => $names]);
 
-if ($allowed && $action === 'delete' && $confirm) {
+// Removing a key is not gated on the policy. The key is a secret its owner handed over,
+// and a site that tightens who may bring one must not thereby leave somebody holding a
+// key they can no longer take back. The profile link is offered to anybody who has one
+// for exactly this reason, and it would go nowhere if this screen refused them.
+if ($action === 'delete' && $confirm) {
     require_sesskey();
     $key = $repository->get_for($keyid, $scope, $scopeid);
     if ($key !== null) {
@@ -172,11 +176,18 @@ echo $OUTPUT->header();
 echo $OUTPUT->heading($heading);
 echo $OUTPUT->box($intro);
 
+$keys = $repository->get_all($scope, $scopeid);
+
 if (!$allowed) {
-    // Not an error. The site has simply not said this person may bring one.
+    // Not an error. The site has simply not said this person may bring one. If they
+    // registered one before it said so, the key is still here and still theirs, so the
+    // screen goes on to list it -- with nothing offered but removing it.
     echo $OUTPUT->notification(get_string('keys:notallowed', 'aiprovider_router'), 'info');
-    echo $OUTPUT->footer();
-    die;
+    if (!$keys) {
+        echo $OUTPUT->footer();
+        die;
+    }
+    echo $OUTPUT->notification(get_string('keys:notallowed:held', 'aiprovider_router'), 'warning');
 }
 
 if ($action === 'delete' && !$confirm) {
@@ -203,12 +214,19 @@ if ($capform !== null) {
     die;
 }
 
-$keys = $repository->get_all($scope, $scopeid);
 if ($keys) {
-    echo html_writer::table(key_formatter::table($keys, $names, $url, $ledger, $currency));
-    echo html_writer::div(get_string('keys:testcost', 'aiprovider_router'), 'text-muted');
+    echo html_writer::table(key_formatter::table($keys, $names, $url, $ledger, $currency, $allowed));
+    if ($allowed) {
+        echo html_writer::div(get_string('keys:testcost', 'aiprovider_router'), 'text-muted');
+    }
 } else {
     echo $OUTPUT->notification(get_string('keys:none', 'aiprovider_router'), 'info');
+}
+
+if (!$allowed) {
+    // Nothing further: registering one is what they may not do.
+    echo $OUTPUT->footer();
+    die;
 }
 
 if (!$targets) {

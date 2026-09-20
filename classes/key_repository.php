@@ -279,15 +279,19 @@ class key_repository {
      * the row is who entered it, so that is what goes.
      *
      * @param int $userid The user to forget.
+     * @param int|null $courseid Only the key of this course, or null for all of theirs.
+     *                           A deletion request approves particular contexts, and a
+     *                           course that was not among them is not part of it.
      */
-    public function forget_registrar(int $userid): void {
-        $this->db->set_field_select(
-            key::TABLE,
-            'usermodified',
-            0,
-            'usermodified = :userid AND scope = :scope',
-            ['userid' => $userid, 'scope' => key::SCOPE_COURSE],
-        );
+    public function forget_registrar(int $userid, ?int $courseid = null): void {
+        $where = 'usermodified = :userid AND scope = :scope';
+        $params = ['userid' => $userid, 'scope' => key::SCOPE_COURSE];
+        if ($courseid !== null) {
+            $where .= ' AND scopeid = :courseid';
+            $params['courseid'] = $courseid;
+        }
+
+        $this->db->set_field_select(key::TABLE, 'usermodified', 0, $where, $params);
     }
 
     /**

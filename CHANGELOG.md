@@ -35,6 +35,17 @@ Fixes from a second independent review of the same code.
 - A request being charged to a key somebody brought is no longer finished on
   the site's money when the target answers with nothing. The same failure on
   the site's own key still falls through to the next provider, as before.
+- Somebody the site no longer allows to bring a key can still remove the key it
+  is holding for them. The screen offered nothing but a notice, while the link
+  to it was deliberately kept for exactly this case.
+- The rule tester reports where the request would really go. It decided from
+  the list of targets the rule form offers, which deliberately includes targets
+  that are switched off or cannot carry the action, so it could name one
+  provider while a real request went to another. It now asks the router.
+- Privacy: a request recorded against somebody's own user context is found when
+  that context is searched for users; the record that a spending limit was
+  announced is declared, found, exported and removed; and a deletion request
+  clears who registered a course key only in the course it approved.
 
 ## 0.1.0 — 2026-09-20
 

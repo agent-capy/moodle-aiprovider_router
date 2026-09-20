@@ -35,6 +35,7 @@ use aiprovider_router\admin_page;
 use aiprovider_router\condition\registry;
 use aiprovider_router\evaluation_context;
 use aiprovider_router\form\rule_test_form;
+use aiprovider_router\order_inspector;
 use aiprovider_router\rule_evaluator;
 use aiprovider_router\rule_repository;
 use aiprovider_router\target_resolver;
@@ -110,9 +111,27 @@ if ($data) {
     $trace = $evaluator->trace($evaluationcontext);
     $targets = target_resolver::get_delegation_targets();
 
+    // Where the request would actually go is asked of the router, not worked out again
+    // here. A rule naming a target is not a rule that can be carried out: the target
+    // may be switched off, may not offer this action, may be set aside for brought keys,
+    // or the person may hold no key for it. The list above is the one the rule form
+    // offers and deliberately includes targets in all of those states, so deciding from
+    // it produced a screen that named one provider while requests went to another.
+    $router = (new order_inspector())->get_primary_router();
+    $resolver = $router === null ? null : new target_resolver($router);
+    $candidates = $resolver?->get_candidates($action) ?? [];
+    $chosenrule = $resolver?->get_matched_rule();
+    $chosenid = $chosenrule === null ? null : (int) $chosenrule->get('id');
+    $chosentarget = $candidates[0]->target ?? null;
+
     echo $OUTPUT->heading(get_string('ruletest:result', 'aiprovider_router'), 3);
 
-    $winner = null;
+    if ($router === null) {
+        // Nothing to ask. The conditions below are still worth showing, but which
+        // target would carry the request is not a question this site can answer yet.
+        echo $OUTPUT->notification(get_string('ruletest:norouter', 'aiprovider_router'), 'warning');
+    }
+
     $table = new html_table();
     $table->head = [
         get_string('rules:priority', 'aiprovider_router'),
@@ -122,10 +141,10 @@ if ($data) {
     $table->attributes['class'] = 'admintable generaltable';
 
     $position = 0;
+    $past = false;
     foreach ($trace as $entry) {
         $rule = $entry['rule'];
         $targetid = (int) $rule->get('targetid');
-        $usable = isset($targets[$targetid]);
 
         if (!$entry['active']) {
             $outcome = get_string('ruletest:outcome:inactive', 'aiprovider_router');
@@ -137,14 +156,19 @@ if ($data) {
                     : $type;
             }
             $outcome = get_string('ruletest:outcome:unmet', 'aiprovider_router', s(implode(', ', $names)));
-        } else if (!$usable) {
-            // Matched, but there is nothing to carry it out with, so the search goes on.
-            $outcome = get_string('ruletest:outcome:unusable', 'aiprovider_router', $targetid);
-        } else if ($winner === null) {
-            $winner = $rule;
-            $outcome = get_string('ruletest:outcome:chosen', 'aiprovider_router', s($targets[$targetid]));
-        } else {
+        } else if ($chosenid !== null && (int) $rule->get('id') === $chosenid) {
+            $past = true;
+            $outcome = get_string(
+                'ruletest:outcome:chosen',
+                'aiprovider_router',
+                s($chosentarget?->name ?? ($targets[$targetid] ?? (string) $targetid)),
+            );
+        } else if ($past) {
             $outcome = get_string('ruletest:outcome:notreached', 'aiprovider_router');
+        } else {
+            // Matched, and the router passed over it anyway: whatever it names cannot
+            // carry this request, so the search went on to the rule below.
+            $outcome = get_string('ruletest:outcome:unusable', 'aiprovider_router', $targetid);
         }
 
         $table->data[] = [(string) (++$position), s($rule->get('name')), $outcome];
@@ -154,13 +178,24 @@ if ($data) {
         echo html_writer::table($table);
     }
 
-    if ($winner !== null) {
+    if ($chosenrule !== null) {
         echo $OUTPUT->notification(
             get_string('ruletest:wouldgo', 'aiprovider_router', [
-                'rule' => s($winner->get('name')),
-                'target' => s($targets[(int) $winner->get('targetid')]),
+                'rule' => s($chosenrule->get('name')),
+                'target' => s($chosentarget?->name ?? ''),
             ]),
             'success',
+        );
+    } else if ($resolver !== null && $resolver->was_budget_spent()) {
+        // Worth saying on its own. This is the one outcome that stops the request
+        // outright rather than handing it on, and it reads on the screen above as
+        // nothing more than a rule that did not match.
+        echo $OUTPUT->notification(get_string('ruletest:budgetspent', 'aiprovider_router'), 'warning');
+    } else if ($candidates) {
+        // No rule claimed it, and the router has somewhere to send it anyway.
+        echo $OUTPUT->notification(
+            get_string('ruletest:default', 'aiprovider_router', s($candidates[0]->target->name)),
+            'info',
         );
     } else {
         // No rule claimed it, which is the commonest outcome on most sites and is decided
