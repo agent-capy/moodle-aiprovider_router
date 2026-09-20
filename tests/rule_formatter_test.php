@@ -181,7 +181,14 @@ final class rule_formatter_test extends \advanced_testcase {
             $action = action_factory::make($class, \context_system::instance()->id, 0, 'Hello');
 
             $this->assertInstanceOf($class, $action);
-            $this->assertSame('Hello', $action->get_configuration('prompttext'));
+
+            // Not every action has a prompt. An action defined outside core can
+            // carry something else entirely, and transcribing audio carries a
+            // recording, so the tester's prompt has nowhere to go. Conditions
+            // read the prompt through evaluation_context, which checks first.
+            if (property_exists($action, 'prompttext')) {
+                $this->assertSame('Hello', $action->get_configuration('prompttext'));
+            }
         }
     }
 

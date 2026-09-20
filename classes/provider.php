@@ -33,13 +33,35 @@ namespace aiprovider_router;
 class provider extends \core_ai\provider {
     #[\Override]
     public static function get_action_list(): array {
-        return [
+        $actions = [
             \core_ai\aiactions\generate_text::class,
             \core_ai\aiactions\generate_image::class,
             \core_ai\aiactions\summarise_text::class,
             \core_ai\aiactions\explain_text::class,
         ];
+
+        // Actions that are not core's are routed too, where something defines them.
+        // ⚠ Offered only while the class is installed: an action named in this list
+        // and absent from the site makes the provider settings screen fatal, because
+        // that screen asks each action for its own name.
+        foreach (self::EXTRA_ACTIONS as $class) {
+            if (class_exists($class)) {
+                $actions[] = $class;
+            }
+        }
+
+        return $actions;
     }
+
+    /**
+     * @var string[] Actions defined outside core that this router can carry.
+     *
+     * Kept as strings rather than as ::class references, so that naming one here
+     * does not require the plugin defining it to be installed.
+     */
+    protected const EXTRA_ACTIONS = [
+        'local_aiaudio\\aiactions\\transcript_audio',
+    ];
 
     /** @var string Delegate everything, and expect to be first in the provider order. */
     public const MODE_FULL = 'full';

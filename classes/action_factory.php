@@ -50,6 +50,17 @@ class action_factory {
             throw new \coding_exception('Unknown action class: ' . $class);
         }
 
+        if ($class === 'local_aiaudio\\aiactions\\transcript_audio') {
+            // This action carries a recording, and the rule tester has none: it is
+            // asking which rule would claim the request, and no condition looks at
+            // the audio. A silent placeholder stands in for it.
+            return new $class(
+                contextid: $contextid,
+                userid: $userid,
+                file: self::placeholder_recording($contextid),
+            );
+        }
+
         if ($class === generate_image::class) {
             // The image parameters play no part in routing, and asking an administrator
             // for them would suggest otherwise.
@@ -65,5 +76,38 @@ class action_factory {
         }
 
         return new $class(contextid: $contextid, userid: $userid, prompttext: $prompt);
+    }
+
+    /**
+     * An empty recording, for testing rules about actions that carry one.
+     *
+     * Nothing is sent anywhere by the rule tester, so the contents do not matter;
+     * what matters is that the action can be built at all. The same empty file is
+     * reused rather than written afresh each time the screen is used.
+     *
+     * @param int $contextid Where the test is being run.
+     * @return \stored_file The placeholder.
+     */
+    protected static function placeholder_recording(int $contextid): \stored_file {
+        $record = [
+            'contextid' => $contextid,
+            'component' => 'aiprovider_router',
+            'filearea' => 'ruletest',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'silence.bin',
+        ];
+
+        $storage = get_file_storage();
+        $existing = $storage->get_file(
+            $record['contextid'],
+            $record['component'],
+            $record['filearea'],
+            $record['itemid'],
+            $record['filepath'],
+            $record['filename'],
+        );
+
+        return $existing ?: $storage->create_file_from_string($record, '');
     }
 }
