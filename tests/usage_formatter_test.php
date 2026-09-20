@@ -70,4 +70,48 @@ final class usage_formatter_test extends \advanced_testcase {
     public function test_an_empty_period_leaves_nothing_out(): void {
         $this->assertSame('', usage_formatter::elsewhere([], rule::KEYSOURCE_SITE));
     }
+
+    public function test_a_core_action_is_named_the_way_core_names_it(): void {
+        $this->resetAfterTest();
+
+        $name = usage_formatter::action_name((object) ['actionname' => 'generate_text']);
+
+        $this->assertSame(\core_ai\aiactions\generate_text::get_name(), $name);
+        $this->assertStringNotContainsString('generate_text', $name);
+    }
+
+    public function test_an_action_defined_outside_core_is_named_by_its_own_plugin(): void {
+        // A row records only the class basename, and core_ai has no string for an
+        // action it did not define. Asking core alone left "transcribe a recording"
+        // showing in a report as transcript_audio.
+        $this->resetAfterTest();
+        $class = 'local_aimedia\\aiactions\\transcript_audio';
+        if (!class_exists($class)) {
+            $this->markTestSkipped('local_aimedia is not installed on this site.');
+        }
+
+        $name = usage_formatter::action_name((object) ['actionname' => 'transcript_audio']);
+
+        $this->assertSame($class::get_name(), $name);
+        $this->assertNotSame('transcript_audio', $name);
+    }
+
+    public function test_an_action_nobody_can_name_any_more_still_shows_something(): void {
+        // A row left behind by an action whose plugin has been uninstalled.
+        $this->resetAfterTest();
+
+        $this->assertSame(
+            'an_action_that_is_gone',
+            usage_formatter::action_name((object) ['actionname' => 'an_action_that_is_gone']),
+        );
+    }
+
+    public function test_a_row_with_no_action_at_all_says_so(): void {
+        $this->resetAfterTest();
+
+        $this->assertSame(
+            get_string('usage:unknown', 'aiprovider_router'),
+            usage_formatter::action_name((object) ['actionname' => '']),
+        );
+    }
 }

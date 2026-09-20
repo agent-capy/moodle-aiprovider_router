@@ -330,7 +330,15 @@ class usage_formatter {
     /**
      * The name of the action a row belongs to.
      *
-     * Actions are named by core, so the name core uses is the one shown.
+     * A row records the action by its class basename, which is all core stores. The
+     * name belongs to the action, so the action is asked for it: one defined outside
+     * core names itself from its own plugin's language strings, and core_ai has
+     * nothing for it. Looking the name up in core_ai alone, which is what this did at
+     * first, left "transcribe a recording" showing as transcript_audio.
+     *
+     * Falling back to core_ai still matters for a row left behind by an action that
+     * has since been uninstalled, and falling back to the basename after that means a
+     * report never goes blank over a name.
      *
      * @param \stdClass $row The row.
      * @return string The name.
@@ -340,6 +348,13 @@ class usage_formatter {
         if ($action === '') {
             return get_string('usage:unknown', 'aiprovider_router');
         }
+
+        foreach (provider::get_action_list() as $class) {
+            if ($class::get_basename() === $action) {
+                return $class::get_name();
+            }
+        }
+
         $key = 'action_' . $action;
 
         return get_string_manager()->string_exists($key, 'core_ai')
