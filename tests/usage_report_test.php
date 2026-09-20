@@ -314,6 +314,85 @@ final class usage_report_test extends \advanced_testcase {
         $this->assertSame('byok_key_rejected', $reasons[0]->reason);
     }
 
+    public function test_a_summarised_day_survives_the_site_changing_timezone(): void {
+        // A summary is stamped with the midnight in force when the task ran. Change
+        // the site's timezone afterwards and that stamp is not a midnight any more, so
+        // looking rows up by it found nothing: the chart and the headline total read
+        // as an empty week while the breakdown beside them still counted everything.
+        $this->log($this->day(3) + HOURSECS);
+        $this->log($this->day(2) + HOURSECS);
+        $this->aggregator->run($this->now);
+
+        self::setTimezone('Pacific/Honolulu', 'Pacific/Honolulu');
+        $moved = new usage_aggregator($GLOBALS['DB']);
+        $report = new usage_report($GLOBALS['DB'], $moved);
+        $from = $moved->add_days($moved->day_of($this->now), -6);
+
+        $series = $report->get_series($from, $this->now);
+        $breakdown = $report->get_breakdown(usage_report::BY_TARGET, $from, $this->now);
+
+        // The two have to agree. Either figure on its own looks plausible; the pair
+        // disagreeing is the only thing that shows something is wrong.
+        $this->assertSame(2, (int) usage_report::total($series)->requests);
+        $this->assertSame(2, (int) usage_report::total($breakdown)->requests);
+    }
+
+    public function test_two_old_days_landing_on_one_new_day_are_added_up(): void {
+        // Moving the clock far enough can put two stored days inside one of the new
+        // ones. The later must not simply replace the earlier.
+        $this->log($this->day(3) + HOURSECS);
+        $this->log($this->day(3) + 2 * HOURSECS);
+        $this->aggregator->run($this->now);
+
+        self::setTimezone('Pacific/Kiritimati', 'Pacific/Kiritimati');
+        $moved = new usage_aggregator($GLOBALS['DB']);
+        $report = new usage_report($GLOBALS['DB'], $moved);
+        $from = $moved->add_days($moved->day_of($this->now), -6);
+
+        $series = $report->get_series($from, $this->now);
+
+        $this->assertSame(2, (int) usage_report::total($series)->requests);
+    }
+
+    public function test_a_period_in_one_currency_says_which(): void {
+        $this->log($this->day(1) + HOURSECS, ['currency' => 'JPY', 'cost' => 100.0]);
+
+        $this->assertSame(['JPY'], $this->report->get_currencies($this->week(), $this->now));
+    }
+
+    public function test_a_period_that_priced_nothing_names_no_currency(): void {
+        $this->log($this->day(1) + HOURSECS, ['currency' => 'JPY', 'cost' => null]);
+
+        // Not JPY. Nothing here was priced, so nothing here is in a currency.
+        $this->assertSame([], $this->report->get_currencies($this->week(), $this->now));
+    }
+
+    public function test_a_period_holding_two_currencies_says_both(): void {
+        // A site that changed its currency after it started using AI. Costs are worked
+        // out when a request happens and kept, and nothing is ever converted.
+        $this->log($this->day(3) + HOURSECS, ['currency' => 'JPY', 'cost' => 1000.0]);
+        $this->log($this->day(1) + HOURSECS, ['currency' => 'USD', 'cost' => 10.0]);
+
+        $found = $this->report->get_currencies($this->week(), $this->now);
+        sort($found);
+
+        $this->assertSame(['JPY', 'USD'], $found);
+    }
+
+    public function test_the_currencies_are_found_on_both_sides_of_the_seam(): void {
+        global $DB;
+
+        $this->log($this->day(3) + HOURSECS, ['currency' => 'JPY', 'cost' => 1000.0]);
+        $this->aggregator->run($this->now);
+        $DB->delete_records(usage_logger::TABLE);
+        $this->log($this->day(0) + HOURSECS, ['currency' => 'USD', 'cost' => 10.0]);
+
+        $found = $this->report->get_currencies($this->week(), $this->now);
+        sort($found);
+
+        $this->assertSame(['JPY', 'USD'], $found);
+    }
+
     public function test_an_unknown_breakdown_is_a_coding_error(): void {
         $this->expectException(\coding_exception::class);
 

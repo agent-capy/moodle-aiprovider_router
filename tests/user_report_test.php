@@ -285,4 +285,32 @@ final class user_report_test extends \advanced_testcase {
         $this->assertEqualsWithDelta(0.25, $rows[0][5], 0.000001);
         $this->assertEqualsWithDelta(9.0, $rows[0][6], 0.000001);
     }
+
+    public function test_a_request_is_shown_in_the_currency_it_was_recorded_in(): void {
+        // A site that changed its currency after it started using AI. Costs are worked
+        // out when a request happens and kept, so the old rows are still in the old
+        // currency and relabelling them is a different number, not the same one again.
+        $table = user_report_formatter::requests(
+            [(object) [
+                'timecreated' => $this->now,
+                'actionname' => 'generate_text',
+                'placement' => null,
+                'targetname' => 'Target one',
+                'targetprovider' => 'aiprovider_openai',
+                'model' => 'gpt-4o',
+                'keysource' => 'site',
+                'prompttokens' => 100,
+                'completiontokens' => 50,
+                'cost' => 1000.0,
+                'currency' => 'JPY',
+                'success' => 1,
+                'reason' => null,
+                'courseid' => null,
+            ]],
+            'USD',
+        );
+
+        $this->assertStringContainsString('JPY', $table->data[0]->cells[7]);
+        $this->assertStringNotContainsString('USD', $table->data[0]->cells[7]);
+    }
 }

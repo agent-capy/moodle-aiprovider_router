@@ -17,6 +17,8 @@
 namespace aiprovider_router\form;
 
 use aiprovider_router\budget_notifier;
+use aiprovider_router\rule_repository;
+use aiprovider_router\spend_ledger;
 use aiprovider_router\usage_aggregator;
 
 defined('MOODLE_INTERNAL') || die();
@@ -99,6 +101,40 @@ class usage_settings_form extends \moodleform {
             $errors['budgetnotifyshare'] = get_string('usage:error:notifyshare', 'aiprovider_router');
         }
 
+        // Budgets are worked out from what is still stored. Throwing away history the
+        // budgets still reach back into does not make the figure unknown, which is the
+        // one thing this plugin is careful about everywhere else -- it makes it a
+        // smaller number, so a limit that has been reached is under the limit again
+        // and the requests it was stopping start going through.
+        $reach = $this->longest_budget_days();
+        if ($reach > 0 && $summary > 0 && $summary < $reach) {
+            $errors['summaryretentiondays'] = get_string(
+                'usage:error:budgetretention',
+                'aiprovider_router',
+                $reach,
+            );
+        }
+
         return $errors;
+    }
+
+    /**
+     * How far back the longest budget on this site has to be able to see.
+     *
+     * A calendar month is counted as 31 days, which is the most one can be.
+     *
+     * @return int Days, or zero where no rule sets a budget.
+     */
+    protected function longest_budget_days(): int {
+        global $DB;
+
+        $days = 0;
+        foreach ((new rule_repository($DB))->get_budgets() as $budget) {
+            $days = max($days, $budget->period === spend_ledger::PERIOD_MONTH
+                ? 31
+                : max(1, (int) $budget->days));
+        }
+
+        return $days;
     }
 }

@@ -33,15 +33,23 @@ class usage_formatter {
      * The headline figures for the period.
      *
      * @param \stdClass $totals The totals.
-     * @param string $currency The site currency.
+     * @param string $currency The site currency, for a period that priced nothing.
+     * @param string[] $currencies The currencies the period's costs were recorded in.
      * @return string HTML.
      */
-    public static function totals(\stdClass $totals, string $currency): string {
+    public static function totals(\stdClass $totals, string $currency, array $currencies = []): string {
+        // More than one currency in the period means there is no total to give. The
+        // figures were worked out when the requests happened and nothing here converts
+        // between currencies, so adding them would produce a number in no currency at
+        // all -- and it would look exactly like a number in the site's own.
+        $mixed = count($currencies) > 1;
         $items = [
             'usage:total:requests' => number_format((int) $totals->requests),
             'usage:total:failures' => number_format((int) $totals->failures),
             'usage:total:tokens' => number_format((int) $totals->prompttokens + (int) $totals->completiontokens),
-            'usage:total:cost' => self::cost($totals->cost, $currency),
+            'usage:total:cost' => $mixed
+                ? get_string('usage:cost:mixed', 'aiprovider_router')
+                : self::cost($totals->cost, $currencies ? (string) reset($currencies) : $currency),
         ];
 
         $cells = '';

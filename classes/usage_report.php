@@ -132,10 +132,20 @@ class usage_report {
             $where = 'daystart >= :from AND daystart < :to';
             $params = ['from' => $from, 'to' => min($to, $boundary)];
             foreach ($this->summarised(['daystart'], $where, $params, $courseid, $keysource) as $row) {
-                $day = (int) $row->daystart;
-                if (isset($series[$day])) {
-                    $series[$day] = $this->normalise($row);
+                // Which day a stored figure belongs to is worked out again rather than
+                // taken as the key it was written under. A summary is stamped with the
+                // midnight in force when the task ran, and a site that changes its
+                // timezone afterwards has rows stamped to a midnight that no longer
+                // exists. Matching the stamp exactly dropped every one of them: the
+                // chart and the total read as nothing having happened while the
+                // breakdown beside them still counted it.
+                $day = $this->aggregator->day_of((int) $row->daystart);
+                if (!isset($series[$day])) {
+                    continue;
                 }
+                // Two old days can land in one new day, so they are added rather than
+                // the later one replacing the earlier.
+                $series[$day] = self::total([$series[$day], $this->normalise($row)]);
             }
         }
 
@@ -206,6 +216,54 @@ class usage_report {
         uasort($rows, fn($a, $b) => $b->requests <=> $a->requests);
 
         return array_values($rows);
+    }
+
+    /**
+     * The currencies the costs in a period were recorded in.
+     *
+     * Costs are worked out when a request happens and kept, and nothing is ever
+     * converted, so a site that changes its currency ends up holding both. Adding
+     * those together produces a number in no currency at all, which is worse than
+     * saying the total cannot be given: the figure looks right and is not.
+     *
+     * @param int $from The start of the period.
+     * @param int $to The end of the period.
+     * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to requests one payer covered, or null for all.
+     * @return string[] The currencies found, which is usually one and often none.
+     */
+    public function get_currencies(int $from, int $to, ?int $courseid = null, ?string $keysource = null): array {
+        $boundary = $this->get_boundary();
+        $rows = [];
+        if ($from < $boundary) {
+            $rows = array_merge($rows, $this->summarised(
+                ['currency'],
+                'daystart >= :from AND daystart < :to',
+                ['from' => $from, 'to' => min($to, $boundary)],
+                $courseid,
+                $keysource,
+            ));
+        }
+        if ($to > $boundary) {
+            $rows = array_merge($rows, $this->detailed(
+                ['currency'],
+                'timecreated >= :from AND timecreated < :to',
+                ['from' => max($from, $boundary), 'to' => $to],
+                $courseid,
+                $keysource,
+            ));
+        }
+
+        $found = [];
+        foreach ($rows as $row) {
+            if (($row->cost ?? null) === null || (string) ($row->currency ?? '') === '') {
+                // A period nothing priced says nothing about which currency it is in.
+                continue;
+            }
+            $found[(string) $row->currency] = true;
+        }
+
+        return array_keys($found);
     }
 
     /**

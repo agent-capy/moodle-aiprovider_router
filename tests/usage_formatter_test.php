@@ -71,6 +71,56 @@ final class usage_formatter_test extends \advanced_testcase {
         $this->assertSame('', usage_formatter::elsewhere([], rule::KEYSOURCE_SITE));
     }
 
+    /**
+     * A set of totals with a cost on it.
+     *
+     * @param float $cost What the period cost.
+     * @return \stdClass The totals.
+     */
+    protected function totals(float $cost): \stdClass {
+        return (object) [
+            'requests' => 5,
+            'failures' => 0,
+            'prompttokens' => 100,
+            'completiontokens' => 50,
+            'cost' => $cost,
+            'costedrequests' => 5,
+        ];
+    }
+
+    public function test_a_period_in_one_currency_shows_the_figure_in_it(): void {
+        $this->resetAfterTest();
+
+        $out = usage_formatter::totals($this->totals(1010.0), 'USD', ['JPY']);
+
+        // The currency the costs were recorded in, not the one the site uses today.
+        $this->assertStringContainsString('JPY', $out);
+        $this->assertStringNotContainsString('USD', $out);
+    }
+
+    public function test_a_period_holding_two_currencies_gives_no_total(): void {
+        $this->resetAfterTest();
+
+        $out = usage_formatter::totals($this->totals(1010.0), 'USD', ['JPY', 'USD']);
+
+        // 1000 JPY and 10 USD do not add up to 1010 of anything. Nothing here
+        // converts between currencies, and a figure that looks like money in the
+        // site's own currency is worse than saying there is no total to give.
+        $this->assertStringContainsString(
+            get_string('usage:cost:mixed', 'aiprovider_router'),
+            $out,
+        );
+        $this->assertStringNotContainsString('1,010', $out);
+    }
+
+    public function test_a_period_that_priced_nothing_falls_back_to_the_site_currency(): void {
+        $this->resetAfterTest();
+
+        $out = usage_formatter::totals($this->totals(0.0), 'USD', []);
+
+        $this->assertStringContainsString('USD', $out);
+    }
+
     public function test_a_core_action_is_named_the_way_core_names_it(): void {
         $this->resetAfterTest();
 

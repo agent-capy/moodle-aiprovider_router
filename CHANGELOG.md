@@ -46,6 +46,22 @@ Fixes from a second independent review of the same code.
   that context is searched for users; the record that a spending limit was
   announced is declared, found, exported and removed; and a deletion request
   clears who registered a course key only in the course it approved.
+- Costs are shown in the currency they were recorded in. A site that changes
+  its currency keeps both -- costs are worked out when a request happens and
+  nothing is ever converted -- and the old rows were being relabelled with the
+  new currency, which is a different number rather than the same one again.
+  Where a period holds two currencies the headline total says so instead of
+  adding them up.
+- A day's figures no longer vanish from the chart when the site changes
+  timezone. A summary is stamped with the midnight in force when the task ran,
+  and the chart was looking the stamps up exactly, so the totals read as an
+  empty week while the breakdown beside them still counted everything. Two old
+  days landing in one new day are added together rather than one replacing the
+  other.
+- Keeping summaries for less time than a budget reaches back is refused. That
+  setting did not make the figure unknown, which is what this plugin does
+  everywhere else it cannot measure something; it made it smaller, so a limit
+  that had been reached was under the limit again.
 - A role condition matches the roles Moodle gives people without assigning
   them. Every logged in account holds the authenticated user role and nobody
   holds an assignment for it, so a condition naming it could be chosen on the

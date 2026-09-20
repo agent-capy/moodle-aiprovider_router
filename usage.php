@@ -151,7 +151,7 @@ if ((int) $totals->requests === 0) {
     echo $OUTPUT->notification(get_string('usage:none', 'aiprovider_router'), 'info');
     echo usage_formatter::elsewhere($bykeysource, $keysource);
 } else {
-    echo usage_formatter::totals($totals, $currency);
+    echo usage_formatter::totals($totals, $currency, $report->get_currencies($from, $now, null, $keysource));
     echo usage_formatter::elsewhere($bykeysource, $keysource);
 
     echo $OUTPUT->heading(get_string('usage:chart:daily', 'aiprovider_router'), 3);

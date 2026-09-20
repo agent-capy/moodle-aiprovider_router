@@ -154,7 +154,7 @@ class user_report_formatter {
      * One person's individual requests.
      *
      * @param \stdClass[] $requests Rows from the report.
-     * @param string $currency The site currency.
+     * @param string $currency The site currency, for a row recorded before there was one.
      * @return \html_table The table.
      */
     public static function requests(array $requests, string $currency): \html_table {
@@ -181,7 +181,12 @@ class user_report_formatter {
                 usage_formatter::model_name($request),
                 self::keysource((string) $request->keysource),
                 number_format((int) $request->prompttokens + (int) $request->completiontokens),
-                usage_formatter::cost($request->cost, $currency),
+                // The currency the row was recorded in, not the one the site uses
+                // today. Costs are worked out when a request happens and kept, so a
+                // site that changed its currency afterwards has rows in both, and
+                // relabelling the old ones is a different number rather than the same
+                // one said again.
+                usage_formatter::cost($request->cost, (string) ($request->currency ?: $currency)),
             ];
             if (!$request->success) {
                 $row->attributes['class'] = 'dimmed_text';
