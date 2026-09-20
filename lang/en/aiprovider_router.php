@@ -24,6 +24,8 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+$string['backtoproviders'] = 'Back to AI providers';
+$string['backtosettings'] = 'Back to AI Router settings';
 $string['byok:error:onlywithoutfield'] = 'A provider reserved for brought keys cannot also be one that takes no key: nothing would be able to reach it. Say which field a key goes in, or allow the site\'s own key here.';
 $string['byok:heading'] = 'AI Router keys';
 $string['byok:held'] = 'This site is holding {$a} brought keys.';

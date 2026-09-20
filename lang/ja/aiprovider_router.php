@@ -24,6 +24,8 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+$string['backtoproviders'] = 'AIプロバイダの一覧に戻る';
+$string['backtosettings'] = 'AIルータの設定に戻る';
 $string['byok:error:onlywithoutfield'] = '「持ち込み鍵でのみ利用する」と「鍵を取らない」は同時に選べません。どこからも到達できなくなります。鍵を入れる項目を指定するか、サイトの鍵の利用を許可してください。';
 $string['byok:heading'] = 'AIルータの鍵';
 $string['byok:held'] = 'このサイトは{$a}件の持ち込み鍵を保管しています。';

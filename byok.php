@@ -101,6 +101,7 @@ foreach ($targets as $targetid => $target) {
 $form->set_data($defaults);
 
 echo $OUTPUT->header();
+echo admin_page::back_button($url);
 echo $OUTPUT->box(get_string('byok:intro', 'aiprovider_router'));
 
 echo $OUTPUT->heading(get_string('eligibility:heading', 'aiprovider_router'), 3);

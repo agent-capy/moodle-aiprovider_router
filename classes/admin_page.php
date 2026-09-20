@@ -66,6 +66,59 @@ class admin_page {
     }
 
     /**
+     * A button saying, in words, how to get back to the router's settings.
+     *
+     * The breadcrumb leads there too, but a breadcrumb is a thin thing to rest a
+     * whole way out on, and these pages have no other one: they are not in the
+     * administration tree, so there is no settings navigation down the side either.
+     * Somebody who followed a link here should be able to see how to leave.
+     *
+     * @param \moodle_url $here The page being shown, to come back to afterwards.
+     * @return string HTML.
+     */
+    public static function back_button(\moodle_url $here): string {
+        global $OUTPUT;
+
+        $settings = self::get_settings_url($here);
+        if ($settings === null) {
+            // Nothing configured yet, so the useful destination is the list where
+            // an instance is created.
+            return \html_writer::div(
+                $OUTPUT->single_button(
+                    new \moodle_url('/admin/settings.php', ['section' => 'aiprovider']),
+                    get_string('backtoproviders', 'aiprovider_router'),
+                    'get',
+                ),
+                'mb-3',
+            );
+        }
+
+        return \html_writer::div(
+            $OUTPUT->single_button($settings, get_string('backtosettings', 'aiprovider_router'), 'get'),
+            'mb-3',
+        );
+    }
+
+    /**
+     * Core's settings form for the router instance, told where to come back to.
+     *
+     * @param \moodle_url $here The page to return to.
+     * @return \moodle_url|null The form, or null when no instance exists yet.
+     */
+    protected static function get_settings_url(\moodle_url $here): ?\moodle_url {
+        $router = (new order_inspector())->get_primary_router();
+        if ($router === null || empty($router->id)) {
+            return null;
+        }
+
+        return new \moodle_url('/ai/configure.php', [
+            'id' => (int) $router->id,
+            // Core's own parameter, honoured on both save and cancel.
+            'returnurl' => $here->out_as_local_url(false),
+        ]);
+    }
+
+    /**
      * The step in the trail that is the router instance itself.
      *
      * A site that has not created one yet still reaches these pages from the status
@@ -76,21 +129,14 @@ class admin_page {
      * @param \moodle_url $url Where the administrator is, to come back to.
      */
     protected static function add_router(\moodle_page $page, \moodle_url $url): void {
-        $router = (new order_inspector())->get_primary_router();
-        if ($router === null || empty($router->id)) {
+        $settings = self::get_settings_url($url);
+        if ($settings === null) {
             $page->navbar->add(get_string('pluginname', 'aiprovider_router'));
 
             return;
         }
 
-        $page->navbar->add(
-            format_string($router->name),
-            new \moodle_url('/ai/configure.php', [
-                'id' => (int) $router->id,
-                // Core's own parameter. Saving or cancelling comes back here rather
-                // than dropping the administrator on the provider list.
-                'returnurl' => $url->out_as_local_url(false),
-            ]),
-        );
+        $router = (new order_inspector())->get_primary_router();
+        $page->navbar->add(format_string($router->name), $settings);
     }
 }

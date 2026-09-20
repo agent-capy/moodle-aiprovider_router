@@ -150,4 +150,45 @@ final class admin_page_test extends \advanced_testcase {
 
         $this->assertSame('/ai/provider/router/rules.php', $trail['Routing rules list']);
     }
+
+    public function test_a_page_says_in_words_how_to_get_back(): void {
+        // The breadcrumb leads there too, but it is a thin thing to rest the only
+        // way out on, and these pages have no settings navigation down the side.
+        $router = $this->add_router();
+        $this->build();
+
+        $html = admin_page::back_button(new \moodle_url('/ai/provider/router/rules.php'));
+
+        $this->assertStringContainsString(
+            get_string('backtosettings', 'aiprovider_router'),
+            $html,
+        );
+        $this->assertStringContainsString('/ai/configure.php', $html);
+        $this->assertStringContainsString((string) $router->id, $html);
+    }
+
+    public function test_the_button_brings_the_administrator_back_to_this_page(): void {
+        $this->add_router();
+        $this->build();
+
+        $html = admin_page::back_button(new \moodle_url('/ai/provider/router/usage.php'));
+
+        // A GET form, so the parameters are hidden inputs rather than a query string.
+        $this->assertStringContainsString('returnurl', $html);
+        $this->assertStringContainsString('/ai/provider/router/usage.php', $html);
+    }
+
+    public function test_a_site_with_no_router_is_sent_where_one_is_created(): void {
+        $this->build();
+
+        $html = admin_page::back_button(new \moodle_url('/ai/provider/router/rules.php'));
+
+        $this->assertStringContainsString(
+            get_string('backtoproviders', 'aiprovider_router'),
+            $html,
+        );
+        // A GET form, so the parameters are hidden inputs rather than a query string.
+        $this->assertStringContainsString('/admin/settings.php', $html);
+        $this->assertStringContainsString('value="aiprovider"', $html);
+    }
 }

@@ -53,6 +53,7 @@ admin_page::setup($PAGE, $url, get_string('ruletest:heading', 'aiprovider_router
 $form = new rule_test_form($url);
 
 echo $OUTPUT->header();
+echo admin_page::back_button($url);
 echo $OUTPUT->box(get_string('ruletest:intro', 'aiprovider_router'));
 $form->display();
 

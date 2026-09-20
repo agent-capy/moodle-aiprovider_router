@@ -126,6 +126,7 @@ if ($action === 'delete' && $priceid > 0) {
     die;
 }
 
+echo admin_page::back_button($url);
 echo $OUTPUT->box(get_string('rates:intro', 'aiprovider_router'));
 // Said here because the difference is invisible afterwards: a request with no rate and
 // a request that was free both show no money, and only one of them is a known figure.

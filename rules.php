@@ -102,6 +102,8 @@ if ($action === 'delete' && $ruleid > 0 && !$confirm) {
     die;
 }
 
+echo admin_page::back_button($url);
+
 $rules = $repository->get_all();
 $conditions = $repository->get_conditions_for(array_keys($rules));
 $targets = target_resolver::get_delegation_targets();

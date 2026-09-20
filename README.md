@@ -76,6 +76,16 @@ The plugin reports this on *Site administration → Reports → System status*:
 | Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
 | Actions the router instance can carry | An action the router offers is not configured on its instance, so requests for it never reach the router. This happens when a plugin defining an action is installed after the router instance was made: the action list is read fresh every time, the instance's configuration is written once. ⚠ The provider settings screen cannot put it right for an action outside core, so recreating the instance is the fix. |
 
+None of this plugin's own pages is in the administration tree, because core never
+reads an aiprovider plugin's `settings.php`. Each of them therefore carries a **Back
+to AI Router settings** button and a breadcrumb that leads there, and the settings
+form is told to return to the page you came from when you save or cancel.
+
+None of this plugin's own pages is in the administration tree, because core never reads
+an aiprovider plugin's `settings.php`. Each of them therefore carries a **Back to AI
+Router settings** button as well as a breadcrumb that leads there, and the settings form
+is told to return to the page you came from when you save or cancel.
+
 Each check links to **AI provider order** (`/ai/provider/router/order.php`), which is the
 only page that changes the order. It shows the current order entry by entry, and what the
 order would become, before anything is written. The change is made with your session key

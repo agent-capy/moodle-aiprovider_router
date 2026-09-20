@@ -126,6 +126,8 @@ if ($action !== '') {
     die;
 }
 
+echo admin_page::back_button($url);
+
 // Overview. Same columns as the site status report, so that an administrator arriving from
 // there is not asked to read a second, differently shaped table.
 echo $OUTPUT->heading(get_string('order:checks', 'aiprovider_router'), 3);
