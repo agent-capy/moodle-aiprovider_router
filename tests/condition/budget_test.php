@@ -398,7 +398,12 @@ final class budget_test extends \advanced_testcase {
         // not tell them apart would be the whole feature going unsaid on the screen
         // where somebody checks their rules.
         $this->assertNotSame($money, $requests);
-        $this->assertStringContainsString('3,000', $requests);
+
+        // Pinned in full, because a Behat scenario asserts on this wording and Behat
+        // runs only in CI. Getting it wrong here is six jobs and several minutes away
+        // from being found out; getting it wrong in a way this test can see is not.
+        $this->assertSame('The site has made fewer than 3,000 requests in the last 30 days', $requests);
+        $this->assertSame('The site has spent under 3000.00 USD in the last 30 days', $money);
     }
 
     public function test_the_registry_knows_the_type(): void {
