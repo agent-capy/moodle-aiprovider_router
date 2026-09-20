@@ -588,6 +588,25 @@ PHP 8.3 and 8.4.
 Moodle 5.3 is due in October 2026. It will be added to CI from November 2026 and the
 supported range extended once it has been verified.
 
+### Reaching a model you run yourself
+
+Nothing to do with this plugin, but it catches everybody who tries, so it is worth
+saying here: **Moodle refuses outgoing requests to private networks and to unusual ports
+by default.** Under *Site administration → Security → HTTP security*:
+
+- **Blocked hosts** ships with `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12` and
+  `192.168.0.0/16`, so a model on your own network is unreachable;
+- **Allowed ports** ships with `80` and `443` only, so Ollama's `11434` is refused even
+  once the address is allowed.
+
+Both have to be adjusted before any AI provider — this one, or Moodle's own Ollama
+provider — can reach a self-hosted model.
+
+⚠ The failure is unhelpful. A blocked request produces a developer coding error rather
+than a message saying the address is blocked, for every provider Moodle ships. Requests
+that go through the router are caught and reported as an ordinary failure; requests that
+do not go through it are not. This has been written up for a bug report.
+
 ## Installation
 
 Copy this directory to `ai/provider/router/` inside your Moodle installation, then visit
