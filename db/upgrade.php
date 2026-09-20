@@ -265,5 +265,28 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092000, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026092001) {
+        // What has already been said about a budget, so that the daily task does not
+        // say it again tomorrow.
+        $table = new xmldb_table('aiprovider_router_notice');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('kind', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('subjectid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('limitamount', XMLDB_TYPE_NUMBER, '12, 6', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('threshold', XMLDB_TYPE_INTEGER, '3', null, XMLDB_NOTNULL, null, '100');
+        $table->add_field('timenotified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index(
+            'kind-subjectid-limitamount-threshold',
+            XMLDB_INDEX_UNIQUE,
+            ['kind', 'subjectid', 'limitamount', 'threshold'],
+        );
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026092001, 'aiprovider', 'router');
+    }
+
     return true;
 }

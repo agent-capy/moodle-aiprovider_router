@@ -30,6 +30,8 @@
 require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
+use aiprovider_router\rule_repository;
+use aiprovider_router\spend_ledger;
 use aiprovider_router\usage_aggregator;
 use aiprovider_router\usage_formatter;
 use aiprovider_router\usage_report;
@@ -74,6 +76,38 @@ foreach ($periods as $period) {
 echo $OUTPUT->single_select($url, 'days', $options, $days, null, null, [
     'label' => get_string('usage:period', 'aiprovider_router'),
 ]);
+
+// How close this course is to a budget the site has set on it. ⚠ A share and not a
+// figure: what the site spends is not a teacher's business, but how near the course is
+// to the point where its AI starts behaving differently certainly is.
+$ledger = new spend_ledger($DB, $aggregator, false);
+$bars = [];
+foreach ((new rule_repository($DB))->get_budgets() as $budget) {
+    if ($budget->scope !== spend_ledger::SCOPE_COURSE) {
+        continue;
+    }
+    [$budgetfrom, $budgetto] = $ledger->get_window($budget->period, $budget->days, $now);
+    $spend = $ledger->measure(spend_ledger::SCOPE_COURSE, (int) $course->id, $budgetfrom, $budgetto);
+    if (!$spend->is_known()) {
+        // Nothing this site can price, so there is no share to show. Saying nothing is
+        // better than a bar at zero, which would read as plenty of room.
+        continue;
+    }
+    $bars[] = usage_formatter::progress(
+        $spend->get_amount() / $budget->amount,
+        get_string('usage:budget:label', 'aiprovider_router'),
+        get_string(
+            'courseusage:budget:' . ($budget->period === spend_ledger::PERIOD_MONTH ? 'month' : 'rolling'),
+            'aiprovider_router',
+            $budget->days,
+        ),
+    );
+}
+if ($bars) {
+    echo $OUTPUT->heading(get_string('courseusage:budget', 'aiprovider_router'), 3);
+    echo html_writer::div(get_string('courseusage:budget:intro', 'aiprovider_router'), 'text-muted');
+    echo implode('', $bars);
+}
 
 if ((int) $totals->requests === 0) {
     echo $OUTPUT->notification(get_string('usage:none', 'aiprovider_router'), 'info');

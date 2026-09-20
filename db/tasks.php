@@ -36,4 +36,16 @@ $tasks = [
         'dayofweek' => '*',
         'month' => '*',
     ],
+    [
+        // Runs after the summariser, so that a notice is weighed against figures the
+        // day's summarising has already settled. ⚠ Never from the path of a request:
+        // a slow mail server would become a slow AI.
+        'classname' => 'aiprovider_router\task\notify_budgets',
+        'blocking' => 0,
+        'minute' => 'R',
+        'hour' => '4',
+        'day' => '*',
+        'dayofweek' => '*',
+        'month' => '*',
+    ],
 ];

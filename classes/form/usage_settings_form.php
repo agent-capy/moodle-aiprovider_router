@@ -16,6 +16,7 @@
 
 namespace aiprovider_router\form;
 
+use aiprovider_router\budget_notifier;
 use aiprovider_router\usage_aggregator;
 
 defined('MOODLE_INTERNAL') || die();
@@ -54,6 +55,22 @@ class usage_settings_form extends \moodleform {
         $mform->setDefault('summaryretentiondays', usage_aggregator::DEFAULT_SUMMARY_RETENTION);
         $mform->addHelpButton('summaryretentiondays', 'usage:summaryretention', 'aiprovider_router');
 
+        $mform->addElement('advcheckbox', 'budgetnotify', get_string('usage:notify', 'aiprovider_router'));
+        $mform->setType('budgetnotify', PARAM_BOOL);
+        $mform->setDefault('budgetnotify', 1);
+        $mform->addHelpButton('budgetnotify', 'usage:notify', 'aiprovider_router');
+
+        $mform->addElement(
+            'text',
+            'budgetnotifyshare',
+            get_string('usage:notifyshare', 'aiprovider_router'),
+            ['size' => 8],
+        );
+        $mform->setType('budgetnotifyshare', PARAM_INT);
+        $mform->setDefault('budgetnotifyshare', budget_notifier::DEFAULT_SHARE);
+        $mform->addHelpButton('budgetnotifyshare', 'usage:notifyshare', 'aiprovider_router');
+        $mform->hideIf('budgetnotifyshare', 'budgetnotify');
+
         $this->add_action_buttons(false, get_string('savechanges'));
     }
 
@@ -74,6 +91,12 @@ class usage_settings_form extends \moodleform {
         $summary = (int) ($data['summaryretentiondays'] ?? 0);
         if ($detail > 0 && $summary > 0 && $summary < $detail) {
             $errors['summaryretentiondays'] = get_string('usage:error:summaryretention', 'aiprovider_router');
+        }
+
+        // A warning at or past the budget is the budget, said twice.
+        $share = (int) ($data['budgetnotifyshare'] ?? 0);
+        if ($share < 0 || $share > 99) {
+            $errors['budgetnotifyshare'] = get_string('usage:error:notifyshare', 'aiprovider_router');
         }
 
         return $errors;

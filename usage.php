@@ -30,6 +30,7 @@
 require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
+use aiprovider_router\budget_notifier;
 use aiprovider_router\form\usage_settings_form;
 use aiprovider_router\price_book;
 use aiprovider_router\rule;
@@ -74,6 +75,12 @@ if ($data = $form->get_data()) {
         max(0, (int) $data->summaryretentiondays),
         'aiprovider_router',
     );
+    set_config(budget_notifier::ENABLED_SETTING, empty($data->budgetnotify) ? 0 : 1, 'aiprovider_router');
+    set_config(
+        budget_notifier::SHARE_SETTING,
+        min(99, max(0, (int) $data->budgetnotifyshare)),
+        'aiprovider_router',
+    );
     redirect(
         new moodle_url($url, ['days' => $days]),
         get_string('usage:saved', 'aiprovider_router'),
@@ -86,6 +93,8 @@ $aggregator = new usage_aggregator($DB);
 $form->set_data([
     'logretentiondays' => $aggregator->get_retention_days(),
     'summaryretentiondays' => $aggregator->get_summary_retention_days(),
+    'budgetnotify' => budget_notifier::is_enabled() ? 1 : 0,
+    'budgetnotifyshare' => budget_notifier::get_share(),
 ]);
 
 $report = new usage_report($DB, $aggregator);

@@ -187,6 +187,66 @@ class spend_ledger extends usage_report {
     }
 
     /**
+     * What the site spent on behalf of every course, or of every person, in a period.
+     *
+     * For the daily task, which has to find the subjects that have gone over a budget
+     * without asking about every course on the site. Only subjects that used the AI in
+     * the period appear, which is the same set as the ones that could have gone over.
+     *
+     * @param string $scope SCOPE_COURSE or SCOPE_USER.
+     * @param int $from The first moment to count, which should be a midnight.
+     * @param int $to The first moment not to count.
+     * @return spend[] The spending, keyed by course or person.
+     */
+    public function measure_each(string $scope, int $from, int $to): array {
+        $field = match ($scope) {
+            self::SCOPE_COURSE => 'courseid',
+            self::SCOPE_USER => 'userid',
+            default => throw new \coding_exception('Cannot measure each of: ' . $scope),
+        };
+
+        $clause = ' AND keysource = :keysource';
+        $params = ['keysource' => rule::KEYSOURCE_SITE];
+        $fields = [$field, 'currency'];
+        $boundary = $this->get_boundary();
+        $rows = [];
+        if ($from < $boundary) {
+            $rows = array_merge($rows, $this->summarised(
+                $fields,
+                'daystart >= :from AND daystart < :to' . $clause,
+                ['from' => $from, 'to' => min($to, $boundary)] + $params,
+                null,
+            ));
+        }
+        if ($to > $boundary) {
+            $rows = array_merge($rows, $this->detailed(
+                $fields,
+                'timecreated >= :from AND timecreated < :to' . $clause,
+                ['from' => max($from, $boundary), 'to' => $to] + $params,
+                null,
+            ));
+        }
+
+        $gathered = [];
+        foreach ($rows as $row) {
+            $subject = $row->$field === null ? 0 : (int) $row->$field;
+            if ($subject <= 0) {
+                // Requests that belonged to no course, or whose person was not
+                // recorded. Nobody's budget, so nobody to tell.
+                continue;
+            }
+            $gathered[$subject][] = $row;
+        }
+
+        $spending = [];
+        foreach ($gathered as $subject => $subjectrows) {
+            $spending[$subject] = $this->total_of($subjectrows, $from, $to);
+        }
+
+        return $spending;
+    }
+
+    /**
      * Which rows belong to a subject.
      *
      * @param string $scope One of the SCOPE_ constants.
@@ -324,6 +384,18 @@ class spend_ledger extends usage_report {
             ));
         }
 
+        return $this->total_of($rows, $from, $to);
+    }
+
+    /**
+     * Add a set of grouped rows into one figure.
+     *
+     * @param \stdClass[] $rows Rows carrying a currency and the usual metrics.
+     * @param int $from The first moment counted.
+     * @param int $to The first moment not counted.
+     * @return spend The spending.
+     */
+    protected function total_of(array $rows, int $from, int $to): spend {
         $currencies = [];
         $counted = [];
         foreach ($rows as $row) {

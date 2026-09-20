@@ -32,9 +32,8 @@ Developed as part of a 2026 domestic research and development project funded by 
 - **Key owner limits** — whoever brought a key can cap what it spends, for a calendar
   month or a rolling period
 
-Still to come, and not in this version:
-
-- **Notifications** when spending passes a threshold
+- **Budget notices** — a daily task tells the people who watch the spending, and the
+  course or person a budget is about, when one has been reached
 
 ## Settings
 
@@ -200,6 +199,37 @@ and its rates do not cover what is being used.
 would be too much work for the path a request takes, so the figures are held briefly. A
 burst of requests can therefore carry spending a little past a limit. Making the window
 shorter would not fix it, because the request being weighed has not been paid for yet.
+
+### Being told about a budget
+
+A daily task looks at every budget the enabled rules set and at every limit somebody has
+put on a key, and sends a message when one has been reached. There is also a warning
+before it, at a share of the budget you choose — 80% by default, and nothing at all if
+you set it to zero. Both settings are on the monitor page.
+
+⚠ **Nothing is ever sent while a request is being handled.** A mail server having a bad
+afternoon would otherwise become an AI having a bad afternoon.
+
+Who hears what depends on what the budget is about:
+
+| The budget is about | Who is told | What they are told |
+| --- | --- | --- |
+| The site | Administrators, and anybody who can see the usage monitor site-wide | The figures |
+| A course | The same people | The figures, and which course |
+| A course | Also the people who can see that course's usage | That it has been reached, and what happens next — **no figures** |
+| A person | Administrators, and the person themselves | The figures to the administrators; to the person, that it has been reached |
+| A key somebody brought | Whoever brought it | The figures. It is their key and their money |
+
+The figure-free messages are not an oversight. What the site spends is not shown to
+teachers anywhere in this plugin, and a notification must not be the way round that. The
+share is shown instead, which is the part that is actually useful: a course page carries
+a bar showing how much of its budget has gone, so a teacher can see where the course
+stands without seeing what the site pays.
+
+**Each threshold is said once.** It is remembered while it is over and forgotten when
+the spending falls back below it, so a calendar budget speaks at most once a month
+without anything here having to know what a month is. A rolling budget speaks again only
+if it eases off and climbs back.
 
 ## Usage history
 

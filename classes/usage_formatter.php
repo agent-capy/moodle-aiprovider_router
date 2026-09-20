@@ -128,6 +128,52 @@ class usage_formatter {
     }
 
     /**
+     * How much of a limit has gone, as a bar.
+     *
+     * There are places where the share is the whole of what somebody may be told. A
+     * teacher whose course has a budget set on it has no business seeing what the site
+     * spends, but does need to know how close the course is to the point where its AI
+     * changes behaviour, and a proportion carries that without carrying a figure.
+     *
+     * Over the limit the bar stops at full and the text goes on, because a bar that
+     * could not be read past the end would say "finished" for every degree of over.
+     *
+     * @param float $share What has gone, where 1.0 is the whole limit.
+     * @param string $label What the bar is about, read out to screen readers.
+     * @param string|null $note A line to put under it, such as the figures, where the
+     *                          reader is allowed them.
+     * @return string HTML.
+     */
+    public static function progress(float $share, string $label, ?string $note = null): string {
+        $percent = max(0, (int) round($share * 100));
+        $width = min(100, $percent);
+        $level = match (true) {
+            $percent >= 100 => 'bg-danger',
+            $percent >= 80 => 'bg-warning',
+            default => '',
+        };
+
+        $bar = \html_writer::div('', trim('progress-bar ' . $level), [
+            'style' => 'width: ' . $width . '%',
+            'role' => 'progressbar',
+            'aria-valuenow' => $percent,
+            'aria-valuemin' => 0,
+            'aria-valuemax' => 100,
+            'aria-label' => $label,
+        ]);
+        $output = \html_writer::div($bar, 'progress', ['style' => 'max-width: 20rem;']);
+        $output .= \html_writer::div(
+            get_string('usage:budget:share', 'aiprovider_router', $percent),
+            $percent >= 100 ? 'text-danger small' : 'text-muted small',
+        );
+        if ($note !== null && $note !== '') {
+            $output .= \html_writer::div($note, 'text-muted small');
+        }
+
+        return $output;
+    }
+
+    /**
      * Requests and cost, day by day.
      *
      * Cost is on its own axis. The two are measured in different things, and a cost of a

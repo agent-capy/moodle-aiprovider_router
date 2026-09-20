@@ -170,5 +170,21 @@
         <INDEX NAME="scope-scopeid-targetid" UNIQUE="true" FIELDS="scope, scopeid, targetid"/>
       </INDEXES>
     </TABLE>
+    <TABLE NAME="aiprovider_router_notice" COMMENT="What has already been said about a budget or a key limit, so that a daily task does not say it again every day. A row exists while a threshold is over; it is removed once the spending falls back under it, which is what makes a new month start the count again without anything having to know about months.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="kind" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="What the limit is about: the site, a course, a person, or one brought key."/>
+        <FIELD NAME="subjectid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The course, person or key. Zero for the site, which has only one."/>
+        <FIELD NAME="limitamount" TYPE="number" LENGTH="12" NOTNULL="true" SEQUENCE="false" DECIMALS="6" COMMENT="The limit this was about. Part of the key, because one subject can have several budgets set on it by different rules."/>
+        <FIELD NAME="threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="100" SEQUENCE="false" COMMENT="Which share of the limit was crossed, as a percentage. An early warning and the limit itself are told apart by this."/>
+        <FIELD NAME="timenotified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="kind-subjectid-limitamount-threshold" UNIQUE="true" FIELDS="kind, subjectid, limitamount, threshold"/>
+      </INDEXES>
+    </TABLE>
   </TABLES>
 </XMLDB>

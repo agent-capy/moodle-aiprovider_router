@@ -16,6 +16,8 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\condition\budget;
+
 /**
  * Reads and writes routing rules.
  *
@@ -309,5 +311,44 @@ class rule_repository {
         $max = $this->db->get_field_sql('SELECT MAX(sortorder) FROM {' . rule::TABLE . '}');
 
         return $max === null || $max === false ? 0 : (int) $max + 1;
+    }
+    /**
+     * Every budget the enabled rules set, with duplicates removed.
+     *
+     * Two rules asking for the same budget describe one budget: somebody has one limit
+     * to think about, and should hear about it once. Read here rather than in the
+     * places that use it, so that the daily task and the screens showing how much of a
+     * budget is gone cannot come to disagree about what the budgets are.
+     *
+     * @return \stdClass[] Rows of scope, amount, period and days.
+     */
+    public function get_budgets(): array {
+        $budgets = [];
+        $records = $this->db->get_records_sql(
+            'SELECT c.id, c.configdata
+               FROM {' . self::CONDITION_TABLE . '} c
+               JOIN {' . rule::TABLE . '} r ON r.id = c.ruleid
+              WHERE c.type = :type AND r.enabled = 1',
+            ['type' => budget::get_type()],
+        );
+        foreach ($records as $record) {
+            $config = json_decode((string) $record->configdata, true);
+            if (!is_array($config)) {
+                continue;
+            }
+            $condition = new budget($config);
+            if ($condition->get_scope() === '' || $condition->get_amount() <= 0) {
+                continue;
+            }
+            $found = (object) [
+                'scope' => $condition->get_scope(),
+                'amount' => $condition->get_amount(),
+                'period' => $condition->get_period(),
+                'days' => $condition->get_days(),
+            ];
+            $budgets[implode('|', (array) $found)] = $found;
+        }
+
+        return array_values($budgets);
     }
 }

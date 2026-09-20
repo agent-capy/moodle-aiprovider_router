@@ -25,9 +25,6 @@
 defined('MOODLE_INTERNAL') || die();
 
 $capabilities = [
-    // Seeing how much AI a course used, and which provider answered. The figures are
-    // about the course rather than about the people in it: no prompt and no user is
-    // shown, which is why teaching a course is enough to be allowed it.
     // Registering and replacing the key a course pays with. Kept separate from bringing
     // a key of one's own, which is governed by the site's policy rather than by a
     // capability: a course key belongs to the course, so the question is who may act for
@@ -54,6 +51,11 @@ $capabilities = [
         ],
     ],
 
+    // Seeing how much AI a course used, and which provider answered. The figures are
+    // about the course rather than about the people in it: no prompt and no user is
+    // shown, which is why teaching a course is enough to be allowed it. It is also what
+    // decides who hears that a budget set on their course has been reached, and they
+    // are told the share rather than the money for the same reason.
     'aiprovider/router:viewusage' => [
         'captype' => 'read',
         'contextlevel' => CONTEXT_COURSE,

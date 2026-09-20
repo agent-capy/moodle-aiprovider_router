@@ -109,11 +109,13 @@ class key_formatter {
             );
         }
 
-        $output .= \html_writer::div(
+        // The owner's own money, so the bar carries the figures with it.
+        $output .= usage_formatter::progress(
+            $spend->get_amount() / $key->get_cap_amount(),
+            get_string('keys:cap', 'aiprovider_router'),
             get_string('keys:cap:spent', 'aiprovider_router', [
                 'amount' => format_float($spend->get_amount(), 2, true) . ' ' . $currency,
             ]),
-            'text-muted small',
         );
         if ($spend->has_reached($key->get_cap_amount())) {
             $output .= \html_writer::div(
