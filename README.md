@@ -202,7 +202,8 @@ Not every failure is treated this way, and the line matters:
 | A key somebody brought cannot be read, or was refused, or every instance they hold a key for has been tried | **Yes.** Carrying on would move the cost onto the site, which is the opposite of what was asked |
 | Nothing is configured to handle this request | **Yes.** A half configured site should be visibly half configured rather than quietly answered by something else |
 | No rule claimed this request | **No.** This is the router saying the request was not its business, which is exactly the point of running it alongside other providers. Moodle carrying on is correct |
-| A target was unreachable, broke, or returned nothing usable | **No.** That is what the fallback is for |
+| A target was unreachable, broke, or returned nothing usable | **No.** That is what the fallback is for — *unless* the request was being charged to a key somebody brought, in which case the next provider would answer it on the site's key and charge the site for what somebody else asked to pay for |
+| The rate limit set on the router itself has been reached | **Yes.** Moodle checks a provider's rate limit before calling the provider, so a router with a limit set on it had a way past every refusal above: once the limit was reached the router was not asked at all |
 
 Turning the setting off restores Moodle's ordinary behaviour throughout.
 

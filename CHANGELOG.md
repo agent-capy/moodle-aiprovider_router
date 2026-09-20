@@ -28,6 +28,13 @@ Fixes from a second independent review of the same code.
   deleted.
 - Redacting a delegate's exception now covers the field a brought key was
   actually put in, rather than only fields whose name looks like a key's.
+- A rate limit set on the router itself is no longer a way round everything
+  else. Moodle checks a provider's rate limit before calling the provider, so
+  the router was never asked about the requests that followed, and the ones a
+  budget would have refused went to the next provider on the site's key.
+- A request being charged to a key somebody brought is no longer finished on
+  the site's money when the target answers with nothing. The same failure on
+  the site's own key still falls through to the next provider, as before.
 
 ## 0.1.0 — 2026-09-20
 

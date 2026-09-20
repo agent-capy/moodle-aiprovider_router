@@ -63,6 +63,9 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var string Reason recorded when every instance the payer has a key for failed. */
     public const REASON_NO_KEY_LEFT = 'byok_no_key_left';
 
+    /** @var string Reason recorded when core's rate limiter turned the request away. */
+    public const REASON_RATE_LIMITED = 'rate_limited';
+
     /**
      * @var string[] Reasons that mean the site decided, rather than something breaking.
      *
@@ -85,6 +88,21 @@ abstract class abstract_processor extends \core_ai\process_base {
         self::REASON_KEY_UNREADABLE,
         self::REASON_KEY_REJECTED,
         self::REASON_NO_KEY_LEFT,
+        self::REASON_RATE_LIMITED,
+    ];
+
+    /**
+     * @var string[] Reasons that are final only when somebody other than the site pays.
+     *
+     * A target that answers with nothing is ordinarily a target that did not work, and
+     * core trying the next provider is the right thing. It stops being the right thing
+     * the moment the request was being charged to somebody's own key: the next provider
+     * answers on the site's key, so the request the person asked to pay for is paid for
+     * by the site instead, quietly and with nothing in the reports to say so. The
+     * failure is the same; who it happens to is what decides.
+     */
+    protected const FINAL_WHEN_BROUGHT = [
+        self::REASON_EMPTY,
     ];
 
     /** @var string Config names whose values are secrets, whatever the provider calls them. */
@@ -104,6 +122,12 @@ abstract class abstract_processor extends \core_ai\process_base {
 
     /** @var string|null Language string chosen for the last failure. */
     protected ?string $failurestring = null;
+
+    /** @var string Who was paying for the request the last failure belongs to. */
+    protected string $keysource = rule::KEYSOURCE_SITE;
+
+    /** @var bool Whether the router was ever reached, or core turned the request away first. */
+    protected bool $routed = false;
 
     /**
      * The response field carrying the generated content, if the action has one.
@@ -126,14 +150,52 @@ abstract class abstract_processor extends \core_ai\process_base {
         return $this->reason;
     }
 
+    /**
+     * Run the request, including the part of it core does before the router is asked.
+     *
+     * core_ai\process_base::process() checks the provider's rate limit and returns a
+     * failure without ever calling query_ai_api(), which is where everything this
+     * plugin does lives. A router with a rate limit set on it therefore had a way out
+     * of its own refusals: once the limit was reached, core's plain failure went back
+     * to the provider loop and the next provider answered the request -- including the
+     * requests a budget had already refused, since the router was never asked about
+     * them at all.
+     *
+     * The limit is not asked about again here. Core's limiter counts the request as it
+     * allows it, so asking twice would spend two of the allowance for one request. The
+     * answer is read afterwards instead: a failure that arrives without query_ai_api()
+     * having run can only have come from the limiter.
+     *
+     * @return response_base The result of the action.
+     */
+    #[\Override]
+    public function process(): response_base {
+        $this->routed = false;
+        $response = parent::process();
+        if ($this->routed || $response->get_success()) {
+            return $response;
+        }
+
+        // Recorded before it is raised, as every other refusal here is, so that what a
+        // site refused is in the reports whether or not the refusal was made final.
+        $this->fail((int) ($response->get_errorcode() ?: 429), 'ratelimited', self::REASON_RATE_LIMITED);
+        $this->record_usage($this->get_resolver(), null, null, 0);
+        $this->finalise([]);
+
+        // Not made final, so core's own answer is returned exactly as before.
+        return $response;
+    }
+
     #[\Override]
     protected function query_ai_api(): array {
+        $this->routed = true;
         if (!delegator::is_available()) {
             return $this->fail(503, 'delegationunavailable', self::REASON_UNAVAILABLE);
         }
 
         $resolver = $this->get_resolver();
         $candidates = $resolver->get_candidates($this->action);
+        $this->keysource = $resolver->get_keysource();
         if (!$candidates) {
             // Four quite different things leave nothing to delegate to, and an
             // administrator reading the monitor needs to tell them apart: a key that is
@@ -199,6 +261,8 @@ abstract class abstract_processor extends \core_ai\process_base {
                 continue;
             }
 
+            $this->keysource = $candidate->keysource;
+
             $data = $response->get_response_data();
             if ($this->has_content($data)) {
                 $this->record_usage($resolver, $candidate, $data, $attempts, true);
@@ -261,7 +325,10 @@ abstract class abstract_processor extends \core_ai\process_base {
      * @return array The same payload, when the failure is not a final one.
      */
     protected function finalise(array $outcome): array {
-        if (!in_array($this->reason, self::FINAL_REASONS, true)) {
+        $final = in_array($this->reason, self::FINAL_REASONS, true)
+            || ($this->keysource !== rule::KEYSOURCE_SITE
+                && in_array($this->reason, self::FINAL_WHEN_BROUGHT, true));
+        if (!$final) {
             return $outcome;
         }
         if (!$this->is_strict_decline()) {

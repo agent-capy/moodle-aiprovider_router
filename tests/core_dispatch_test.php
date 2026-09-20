@@ -150,6 +150,25 @@ final class core_dispatch_test extends \advanced_testcase {
     }
 
     /**
+     * A rule sending the request on the asker's own key.
+     *
+     * @param int $targetid Where it delegates.
+     */
+    protected function add_byok_rule(int $targetid): void {
+        global $DB;
+
+        set_config('byokaccess', eligibility_policy::ACCESS_EVERYBODY, 'aiprovider_router');
+        (new target_settings($DB))->set_key_field($targetid, 'apikey');
+        (new key_repository($DB))->save(key::SCOPE_USER, (int) get_admin()->id, $targetid, 'their-own-key-abcd');
+
+        $rule = new rule();
+        $rule->set('name', 'Charged to whoever asked');
+        $rule->set('targetid', $targetid);
+        $rule->set('keysource', rule::KEYSOURCE_USER);
+        (new rule_repository($DB))->save($rule);
+    }
+
+    /**
      * Record requests already made, so that a budget has something to weigh.
      *
      * @param int $count How many.
@@ -308,6 +327,116 @@ final class core_dispatch_test extends \advanced_testcase {
         } catch (declined_request $e) {
             $this->assertSame(abstract_processor::REASON_NO_TARGET, $e->get_reason());
         }
+    }
+
+    public function test_the_routers_own_rate_limit_is_not_a_way_round_its_refusals(): void {
+        // Core checks a provider's rate limit before it calls the provider at all, and
+        // returns a plain failure. Everything this plugin does happens after that
+        // point, so the router was never asked -- and the request it would have refused
+        // on a spent budget went to the next provider on the site's own key instead.
+        // Reaching the limit used to unlock everything the router was there to stop.
+        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
+        $target = $this->add_target('Metered', ['content' => 'Never reached']);
+        $this->add_router([
+            'defaulttarget' => $target->id,
+            'enableuserratelimit' => 1,
+            'userratelimit' => 1,
+        ]);
+        $this->add_budget_rule((int) $target->id, 1);
+
+        // The first request uses the one request the limiter allows.
+        $this->ask();
+
+        $this->expectException(declined_request::class);
+        $this->ask();
+    }
+
+    public function test_a_rate_limited_request_is_written_down_like_any_other_refusal(): void {
+        global $DB;
+
+        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
+        $target = $this->add_target('Metered', ['content' => 'Answered by the router']);
+        $this->add_router([
+            'defaulttarget' => $target->id,
+            'enableuserratelimit' => 1,
+            'userratelimit' => 1,
+        ]);
+
+        $this->ask();
+        try {
+            $this->ask();
+        } catch (declined_request $e) {
+            $this->assertSame(abstract_processor::REASON_RATE_LIMITED, $e->get_reason());
+        }
+
+        $refused = $DB->get_records(usage_logger::TABLE, ['success' => 0]);
+        $this->assertCount(1, $refused);
+        $this->assertSame(
+            abstract_processor::REASON_RATE_LIMITED,
+            reset($refused)->reason,
+        );
+    }
+
+    public function test_a_site_that_would_rather_keep_cores_behaviour_still_can(): void {
+        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
+        $target = $this->add_target('Metered', ['content' => 'Answered by the router']);
+        $this->add_router([
+            'defaulttarget' => $target->id,
+            'strictdecline' => 0,
+            'enableuserratelimit' => 1,
+            'userratelimit' => 1,
+        ]);
+
+        $this->ask();
+        $response = $this->ask();
+
+        // Core's own answer, unchanged: the next provider takes it.
+        $this->assertTrue($response->get_success());
+        $this->assertSame('Answered by the next provider', $response->get_response_data()['generatedcontent']);
+    }
+
+    public function test_one_request_spends_one_of_the_allowance(): void {
+        // The limiter counts a request as it allows it, so reading its answer twice
+        // would spend two of the allowance for one request and halve every limit on
+        // the site. Three requests against a limit of three must all get through.
+        $target = $this->add_target('Metered', ['content' => 'Answered by the router']);
+        $this->add_router([
+            'defaulttarget' => $target->id,
+            'enableuserratelimit' => 1,
+            'userratelimit' => 3,
+        ]);
+
+        for ($i = 0; $i < 3; $i++) {
+            $this->assertTrue($this->ask()->get_success(), "request {$i} should have been allowed");
+        }
+    }
+
+    public function test_a_request_somebody_pays_for_is_not_finished_on_the_sites_money(): void {
+        // A target that spends its token budget and returns nothing is ordinarily just
+        // a target that did not work, and core trying the next one is right. It stops
+        // being right when the request was being charged to somebody's own key: the
+        // next provider answers on the site's key, so the request the person asked to
+        // pay for is paid for by the site, quietly, with nothing to say it happened.
+        $this->add_target('Site provider', ['content' => 'Answered on the site key']);
+        $theirs = $this->add_target('Theirs', ['scenario' => \aiprovider_mock\provider::TRUNCATED]);
+        $this->add_router(['defaulttarget' => $theirs->id]);
+        $this->add_byok_rule((int) $theirs->id);
+
+        $this->expectException(declined_request::class);
+        $this->ask();
+    }
+
+    public function test_the_same_failure_on_the_sites_own_money_still_falls_through(): void {
+        // The other half: nobody brought a key, so nobody is being charged for
+        // something they did not ask for, and core's fallback is worth having.
+        $this->add_target('Site provider', ['content' => 'Answered on the site key']);
+        $empty = $this->add_target('Empty', ['scenario' => \aiprovider_mock\provider::TRUNCATED]);
+        $this->add_router(['defaulttarget' => $empty->id]);
+
+        $response = $this->ask();
+
+        $this->assertTrue($response->get_success());
+        $this->assertSame('Answered on the site key', $response->get_response_data()['generatedcontent']);
     }
 
     public function test_the_refusal_is_written_down_before_it_is_thrown(): void {
