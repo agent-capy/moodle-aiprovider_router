@@ -30,6 +30,7 @@
 require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
+use aiprovider_router\admin_page;
 use aiprovider_router\budget_notifier;
 use aiprovider_router\form\usage_settings_form;
 use aiprovider_router\price_book;
@@ -46,13 +47,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/ai/provider/router/usage.php');
-$PAGE->set_context($context);
-$PAGE->set_url($url);
-$PAGE->set_pagelayout('admin');
-$PAGE->set_title(get_string('usage:heading', 'aiprovider_router'));
-$PAGE->set_heading(get_string('usage:heading', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('pluginname', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('usage:heading', 'aiprovider_router'), $url);
+admin_page::setup($PAGE, $url, get_string('usage:heading', 'aiprovider_router'));
 
 $periods = [7, 30, 90, 365];
 if (!in_array($days, $periods, true)) {

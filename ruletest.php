@@ -31,6 +31,7 @@ require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
 use aiprovider_router\action_factory;
+use aiprovider_router\admin_page;
 use aiprovider_router\condition\registry;
 use aiprovider_router\evaluation_context;
 use aiprovider_router\form\rule_test_form;
@@ -45,14 +46,9 @@ require_capability('moodle/site:config', $context);
 
 $listurl = new moodle_url('/ai/provider/router/rules.php');
 $url = new moodle_url('/ai/provider/router/ruletest.php');
-$PAGE->set_context($context);
-$PAGE->set_url($url);
-$PAGE->set_pagelayout('admin');
-$PAGE->set_title(get_string('ruletest:heading', 'aiprovider_router'));
-$PAGE->set_heading(get_string('ruletest:heading', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('pluginname', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('rules:heading', 'aiprovider_router'), $listurl);
-$PAGE->navbar->add(get_string('ruletest:heading', 'aiprovider_router'), $url);
+admin_page::setup($PAGE, $url, get_string('ruletest:heading', 'aiprovider_router'), [
+    get_string('rules:heading', 'aiprovider_router') => $listurl,
+]);
 
 $form = new rule_test_form($url);
 

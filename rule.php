@@ -29,6 +29,7 @@
 require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
+use aiprovider_router\admin_page;
 use aiprovider_router\form\rule_form;
 use aiprovider_router\rule;
 use aiprovider_router\rule_repository;
@@ -42,15 +43,10 @@ require_capability('moodle/site:config', $context);
 
 $listurl = new moodle_url('/ai/provider/router/rules.php');
 $url = new moodle_url('/ai/provider/router/rule.php', $id ? ['id' => $id] : []);
-$PAGE->set_context($context);
-$PAGE->set_url($url);
-$PAGE->set_pagelayout('admin');
 $heading = get_string($id ? 'rule:edit' : 'rule:add', 'aiprovider_router');
-$PAGE->set_title($heading);
-$PAGE->set_heading($heading);
-$PAGE->navbar->add(get_string('pluginname', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('rules:heading', 'aiprovider_router'), $listurl);
-$PAGE->navbar->add($heading, $url);
+admin_page::setup($PAGE, $url, $heading, [
+    get_string('rules:heading', 'aiprovider_router') => $listurl,
+]);
 
 $repository = new rule_repository($DB);
 $existingconditions = [];

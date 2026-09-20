@@ -30,6 +30,7 @@
 require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
+use aiprovider_router\admin_page;
 use aiprovider_router\rule_formatter;
 use aiprovider_router\rule_repository;
 use aiprovider_router\target_resolver;
@@ -44,13 +45,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/ai/provider/router/rules.php');
-$PAGE->set_context($context);
-$PAGE->set_url($url);
-$PAGE->set_pagelayout('admin');
-$PAGE->set_title(get_string('rules:heading', 'aiprovider_router'));
-$PAGE->set_heading(get_string('rules:heading', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('pluginname', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('rules:heading', 'aiprovider_router'), $url);
+admin_page::setup($PAGE, $url, get_string('rules:heading', 'aiprovider_router'));
 
 $repository = new rule_repository($DB);
 

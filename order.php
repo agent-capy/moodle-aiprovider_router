@@ -35,6 +35,7 @@
 require(__DIR__ . '/../../../config.php');
 require_once(__DIR__ . '/lib.php');
 
+use aiprovider_router\admin_page;
 use aiprovider_router\order_formatter;
 use aiprovider_router\order_inspector;
 
@@ -46,13 +47,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/ai/provider/router/order.php');
-$PAGE->set_context($context);
-$PAGE->set_url($url);
-$PAGE->set_pagelayout('admin');
-$PAGE->set_title(get_string('order:heading', 'aiprovider_router'));
-$PAGE->set_heading(get_string('order:heading', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('pluginname', 'aiprovider_router'));
-$PAGE->navbar->add(get_string('order:heading', 'aiprovider_router'), $url);
+admin_page::setup($PAGE, $url, get_string('order:heading', 'aiprovider_router'));
 
 $manager = \core\di::get(\core_ai\manager::class);
 $inspector = new order_inspector($manager);
