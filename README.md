@@ -606,8 +606,8 @@ listen to a recording, or to look at a picture. Routing here is written against
 actions rather than against those four, so a provider plugin and a small plugin
 defining the action are enough to route something else.
 
-One is included as proof: `local_aiaudio` defines **transcribe audio**, and the
-Sakura AI Engine provider offers it. Rules, budgets, brought keys and the usage
+Two are included as proof: `local_aimedia` defines **transcribe audio** and **ask
+about a picture**, and the Sakura AI Engine provider offers both. Rules, budgets, brought keys and the usage
 history all apply to it, because none of them know which actions exist.
 
 An action defined outside core is offered **only while its plugin is installed**.
@@ -628,7 +628,9 @@ instead. This has been written up for core.
 
 ⚠ A transcription carries no token counts, so it cannot be costed from the rate
 table and shows as unknown spending. A budget counted in requests measures it,
-which is also the shape a provider's free allowance usually takes.
+which is also the shape a provider's free allowance usually takes. Asking about a
+picture is different: a vision model answers in text and counts tokens, so that
+one is costed like any other request.
 
 ## Behaviour when a target fails
 
