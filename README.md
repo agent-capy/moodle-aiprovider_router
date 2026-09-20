@@ -4,11 +4,12 @@ An AI **provider** plugin for the Moodle AI subsystem that acts as a *router*: i
 talking to a model itself, it decides — per request — which configured AI provider should
 handle the call, and delegates to it.
 
-> **Status: early development (alpha).** Everything described below is implemented and
-> covered by tests, and CI runs against Moodle 5.0 and 5.2 on PHP 8.3 and 8.4. It has
-> not yet been used on a site that is not our own, so please try it on a test site
-> rather than a live one. Reports of what does not work, or does not read clearly, are
-> welcome.
+> **Status: beta, 0.1.0.** Everything described below is implemented and covered by
+> tests, and CI runs the suite against Moodle 5.0, 5.1 and 5.2 on PHP 8.3 and 8.4. It
+> has not yet been run on a site that is not the author's, so please try it on a test
+> site rather than a live one. Reports of what does not work, or does not read clearly,
+> are very welcome — finding that out is what this release is for.
+> See [CHANGELOG.md](CHANGELOG.md) for what is in it.
 
 Developed as part of a 2026 domestic research and development project funded by the
 [Moodle Association of Japan](https://moodlejapan.org/) (MAJ).
