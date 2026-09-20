@@ -598,6 +598,32 @@ cannot be reached, or that fails for its own reasons, reports the third — tell
 their key is wrong when the provider is simply having a bad day sends them looking for a
 problem that is not there.
 
+## Routing an action Moodle does not define
+
+The four actions Moodle ships all take text in. Nothing in core asks an AI to
+listen to a recording, or to look at a picture. Routing here is written against
+actions rather than against those four, so a provider plugin and a small plugin
+defining the action are enough to route something else.
+
+One is included as proof: `local_aiaudio` defines **transcribe audio**, and the
+Sakura AI Engine provider offers it. Rules, budgets, brought keys and the usage
+history all apply to it, because none of them know which actions exist.
+
+An action defined outside core is offered **only while its plugin is installed**.
+Naming one that is absent makes the provider settings screen fatal, because that
+screen asks each action for its own name.
+
+⚠ Three places in `core_ai\manager` build an action's class name from core's own
+namespace, so an action living anywhere else is not found there. The one that
+shows is the enable and disable switch on the provider settings screen: it writes
+to a key nothing reads, so **an action Moodle did not define cannot be switched
+off there**. It arrives switched on and works. Stop it with a routing rule
+instead. This has been written up for core.
+
+⚠ A transcription carries no token counts, so it cannot be costed from the rate
+table and shows as unknown spending. A budget counted in requests measures it,
+which is also the shape a provider's free allowance usually takes.
+
 ## Behaviour when a target fails
 
 The router tries its candidates in order and returns the first usable answer.
