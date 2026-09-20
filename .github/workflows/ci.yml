@@ -34,8 +34,10 @@ jobs:
         # the old check API, and testing 5.0 and 5.2 alone would only cover that
         # combination by accident.
         #
-        # 5.3 is due in October 2026. It joins this matrix from November 2026
-        # as a non-blocking job, and is promoted once it has been verified.
+        # 5.3 is released on 2026-10-05, and joins this matrix as soon as it is,
+        # as a non-blocking job first and promoted once it has been verified.
+        # MOODLE_503_STABLE does not exist until release day; main carries 5.3
+        # until then, so that is what an early look has to use.
         include:
           - moodle-branch: MOODLE_500_STABLE
             php: '8.3'
