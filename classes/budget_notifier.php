@@ -16,6 +16,8 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\condition\budget;
+
 /**
  * Says once, afterwards, that a budget or a key's limit has been reached.
  *
@@ -99,13 +101,31 @@ class budget_notifier {
                 $spending = $this->ledger->measure_each($budget->scope, $from, $to);
             }
             foreach ($spending as $subjectid => $spend) {
-                $this->weigh($result, $budget->scope, (int) $subjectid, $spend, $budget->amount, $now);
+                $this->weigh(
+                    $result,
+                    $budget->scope,
+                    (int) $subjectid,
+                    $spend,
+                    $budget->amount,
+                    $budget->metric,
+                    $now,
+                );
             }
         }
 
         foreach ($this->get_capped_keys() as $key) {
+            // A limit somebody puts on their own key is an amount of money. What they
+            // are protecting is a bill, and the provider sends it in money.
             $spend = $key->get_cap_spend($this->ledger, $now);
-            $this->weigh($result, self::KIND_KEY, (int) $key->get('id'), $spend, $key->get_cap_amount(), $now);
+            $this->weigh(
+                $result,
+                self::KIND_KEY,
+                (int) $key->get('id'),
+                $spend,
+                $key->get_cap_amount(),
+                spend_ledger::METRIC_COST,
+                $now,
+            );
         }
 
         return $result;
@@ -155,6 +175,7 @@ class budget_notifier {
      * @param int $subjectid The course, person or key.
      * @param spend $spend What has been spent.
      * @param float $limit The limit.
+     * @param string $metric What the limit counts.
      * @param int $now The current time.
      */
     protected function weigh(
@@ -163,9 +184,10 @@ class budget_notifier {
         int $subjectid,
         spend $spend,
         float $limit,
+        string $metric,
         int $now,
     ): void {
-        if ($limit <= 0 || !$spend->is_known()) {
+        if ($limit <= 0 || !$spend->is_known($metric)) {
             // Nothing can be said about spending nobody can work out. The status report
             // is where a site is told that its rates are missing; saying it again here,
             // by mail, every day, would be a worse way to make the same point.
@@ -174,16 +196,20 @@ class budget_notifier {
 
         foreach (self::get_thresholds() as $threshold) {
             $result['checked']++;
-            $reached = $spend->get_amount() >= $limit * $threshold / 100;
+            $reached = $spend->get_measure($metric) >= $limit * $threshold / 100;
+            // The metric is part of what is being remembered. A course held to 3000
+            // JPY and to 3000 requests has two limits, reached at different moments;
+            // without this, one of them would silence the other.
             $remembered = $this->db->get_record(self::TABLE, [
                 'kind' => $kind,
                 'subjectid' => $subjectid,
+                'metric' => $metric,
                 'limitamount' => $limit,
                 'threshold' => $threshold,
             ]);
 
             if ($reached && $remembered === false) {
-                if (!$this->announce($kind, $subjectid, $spend, $limit, $threshold)) {
+                if (!$this->announce($kind, $subjectid, $spend, $limit, $metric, $threshold)) {
                     // Nobody to tell. ⚠ Not remembered as said, because it was not:
                     // recording it would mean that giving somebody the role tomorrow
                     // would still leave them hearing nothing.
@@ -192,6 +218,7 @@ class budget_notifier {
                 $this->db->insert_record(self::TABLE, (object) [
                     'kind' => $kind,
                     'subjectid' => $subjectid,
+                    'metric' => $metric,
                     'limitamount' => $limit,
                     'threshold' => $threshold,
                     'timenotified' => $now,
@@ -218,6 +245,7 @@ class budget_notifier {
      * @param int $subjectid The course, person or key.
      * @param spend $spend What has been spent.
      * @param float $limit The limit.
+     * @param string $metric What the limit counts.
      * @param int $threshold The share of it that has been crossed.
      * @return bool True when somebody was told.
      */
@@ -226,15 +254,17 @@ class budget_notifier {
         int $subjectid,
         spend $spend,
         float $limit,
+        string $metric,
         int $threshold,
     ): bool {
-        $currency = $spend->currency;
+        // Both figures carry the unit that says what they count, so the sentences
+        // around them do not have to be written twice.
         $figures = (object) [
-            'amount' => format_float($spend->get_amount(), 2, true) . ' ' . $currency,
-            'limit' => format_float($limit, 2, true) . ' ' . $currency,
+            'amount' => budget::label_amount($spend->get_measure($metric), $metric),
+            'limit' => budget::label_amount($limit, $metric),
             'subject' => $this->describe($kind, $subjectid),
         ];
-        $figures->share = min(999, (int) round($spend->get_amount() / $limit * 100));
+        $figures->share = min(999, (int) round($spend->get_measure($metric) / $limit * 100));
         $suffix = $threshold >= 100 ? 'reached' : 'nearly';
 
         if ($kind === self::KIND_KEY) {
@@ -396,7 +426,7 @@ class budget_notifier {
     /**
      * Every budget the enabled rules set.
      *
-     * @return \stdClass[] Rows of scope, amount, period and days.
+     * @return \stdClass[] Rows of scope, metric, amount, period and days.
      */
     protected function get_budgets(): array {
         return (new rule_repository($this->db))->get_budgets();

@@ -320,7 +320,7 @@ class rule_repository {
      * places that use it, so that the daily task and the screens showing how much of a
      * budget is gone cannot come to disagree about what the budgets are.
      *
-     * @return \stdClass[] Rows of scope, amount, period and days.
+     * @return \stdClass[] Rows of scope, metric, amount, period and days.
      */
     public function get_budgets(): array {
         $budgets = [];
@@ -342,6 +342,7 @@ class rule_repository {
             }
             $found = (object) [
                 'scope' => $condition->get_scope(),
+                'metric' => $condition->get_metric(),
                 'amount' => $condition->get_amount(),
                 'period' => $condition->get_period(),
                 'days' => $condition->get_days(),

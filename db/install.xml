@@ -175,6 +175,7 @@
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="kind" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="What the limit is about: the site, a course, a person, or one brought key."/>
         <FIELD NAME="subjectid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The course, person or key. Zero for the site, which has only one."/>
+        <FIELD NAME="metric" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="cost" SEQUENCE="false" COMMENT="What the limit counted: money, or requests. Part of the key, because the same subject can be held to a limit of each kind and they are reached at different moments."/>
         <FIELD NAME="limitamount" TYPE="number" LENGTH="12" NOTNULL="true" SEQUENCE="false" DECIMALS="6" COMMENT="The limit this was about. Part of the key, because one subject can have several budgets set on it by different rules."/>
         <FIELD NAME="threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="100" SEQUENCE="false" COMMENT="Which share of the limit was crossed, as a percentage. An early warning and the limit itself are told apart by this."/>
         <FIELD NAME="timenotified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
@@ -183,7 +184,7 @@
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
       </KEYS>
       <INDEXES>
-        <INDEX NAME="kind-subjectid-limitamount-threshold" UNIQUE="true" FIELDS="kind, subjectid, limitamount, threshold"/>
+        <INDEX NAME="kind-subjectid-metric-limitamount-threshold" UNIQUE="true" FIELDS="kind, subjectid, metric, limitamount, threshold"/>
       </INDEXES>
     </TABLE>
   </TABLES>

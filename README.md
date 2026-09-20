@@ -31,8 +31,9 @@ reference).
 - **BYOK (bring your own key)** — per-user and per-course API keys, stored encrypted with
   `\core\encryption`, a policy controlling who may bring one, and rules that send a
   request with somebody's own key instead of the site's
-- **Budget conditions** — route by how much has been spent already, by the site, by a
-  course or by a person, over a rolling period or a calendar month
+- **Budget conditions** — route by how much has been used already, counted in money or
+  in requests, by the site, by a course or by a person, over a rolling period or a
+  calendar month
 - **Key owner limits** — whoever brought a key can cap what it spends, for a calendar
   month or a rolling period
 
@@ -169,8 +170,9 @@ which is where a threshold is worked out.
 
 ### Routing by budget
 
-A **Budget** condition asks how much has been spent already, and can be written either
-way round: *is under* a limit, or *has reached* it. Two rules are what express what
+A **Budget** condition asks how much has been used already, and can be written either
+way round: *is under* a limit, or *has reached* it. It counts either **money** or
+**requests**, and the choice sits next to the figure. Two rules are what express what
 should happen on each side of it, and there is no separate "what to do when the budget
 runs out" setting, because the order of the rules already says it:
 
@@ -182,22 +184,31 @@ runs out" setting, because the order of the rules already says it:
 Delete the second rule, on a site that declines requests matching nothing, and the same
 pair blocks instead of switching.
 
-The spending measured is **what the site paid for**. Requests covered by a key somebody
-brought cost the site nothing and are left out of every budget, however large they are; a
-limit on a brought key belongs to whoever brought it. The period is either the last *N*
+**Counting requests is the measure for everything that has no bill.** A model you run
+yourself costs nothing to price and something to queue; a provider's free allowance is
+often written as so many requests a month, not as an amount of money. A budget counted
+in requests needs no rates at all, because requests are counted rather than worked out,
+so it also works on a site that has entered none. Everything else about the condition is
+the same either way, including which requests are counted.
+
+What is measured is **what the site paid for**. Requests covered by a key somebody
+brought cost the site nothing and are left out of every budget, however large they are;
+a limit on a brought key belongs to whoever brought it, and is always an amount of
+money. The period is either the last *N*
 days, counted from midnight today, or the current calendar month, and the figures come
 from the daily summaries as far as they reach and from the detail rows beyond them, so a
 budget still works over periods the detail rows no longer cover.
 
 Two things are worth knowing before relying on one.
 
-**A budget nobody can measure is not a budget with room left in it.** Costs are worked
-out from the rates entered on this site, so a request whose model has no rate has no cost
-at all, and a site that has entered no rates spends nothing however much it uses. A
-budget condition whose spending cannot be worked out is satisfied **neither** way round,
-so rules carrying one never match and requests fall through to whatever comes after them.
-The **Rates for budget conditions** status check says so when a site routes by budget
-and its rates do not cover what is being used.
+**A budget in money that nobody can measure is not a budget with room left in it.**
+Costs are worked out from the rates entered on this site, so a request whose model has
+no rate has no cost at all, and a site that has entered no rates spends nothing however
+much it uses. A budget condition whose spending cannot be worked out is satisfied
+**neither** way round, so rules carrying one never match and requests fall through to
+whatever comes after them. The **Rates for budget conditions** status check says so when
+a site routes by budget and its rates do not cover what is being used. None of this
+applies to a budget counted in requests, and that check leaves those alone.
 
 **A limit is accurate to about a minute.** Adding up the history on every AI request
 would be too much work for the path a request takes, so the figures are held briefly. A
@@ -223,6 +234,10 @@ Who hears what depends on what the budget is about:
 | A course | Also the people who can see that course's usage | That it has been reached, and what happens next — **no figures** |
 | A person | Administrators, and the person themselves | The figures to the administrators; to the person, that it has been reached |
 | A key somebody brought | Whoever brought it | The figures. It is their key and their money |
+
+Where a budget counts requests, the figures are counts rather than amounts of money,
+and the course page shows them in full: what is kept from a teacher is what the site
+pays, and how many requests their course made is that page's own subject.
 
 The figure-free messages are not an oversight. What the site spends is not shown to
 teachers anywhere in this plugin, and a notification must not be the way round that. The
@@ -361,10 +376,11 @@ answers with. No rate and a rate of zero are different statements — no rate me
 knows what a request cost, and zero means it was free — and several things downstream
 depend on which one you meant:
 
-- **Budget conditions can be measured.** Spending that cannot be worked out satisfies a
-  budget condition neither way round, so on a site whose traffic is entirely unpriced
-  those rules never match. With a rate of zero the spending is a known zero and budgets
-  work again.
+- **Budget conditions in money can be measured.** Spending that cannot be worked out
+  satisfies a budget condition neither way round, so on a site whose traffic is entirely
+  unpriced those rules never match. With a rate of zero the spending is a known zero and
+  budgets work again. (A budget counting requests rather than money needs none of this,
+  and is often the more honest way to limit a model that is free but not unlimited.)
 - **The status check stays quiet.** *Rates for budget conditions* counts requests that
   reached no rate, and a free provider entered as zero is priced, not missing.
 - **Dashboards stop reporting a gap.** An unpriced request is shown as such, beside the

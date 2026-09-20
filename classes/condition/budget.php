@@ -47,6 +47,12 @@ use aiprovider_router\spend_ledger;
  * make every limit here meaningless. The status report says so where a rule routes by
  * budget and the rates are missing.
  *
+ * A budget can be counted in requests instead of money, and then none of that applies:
+ * requests are counted rather than priced, so the figure is always there. That is the
+ * measure for a site running its own models, which cost nothing to price and everything
+ * to queue, and for a provider whose free allowance is written in requests per month
+ * rather than in money.
+ *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -66,6 +72,7 @@ class budget extends base {
         $amount = $this->get_amount();
         $scope = $this->get_scope();
         $direction = $this->get_direction();
+        $metric = $this->get_metric();
         if ($amount <= 0 || $scope === '' || $direction === '') {
             // An unfinished condition narrows the rule rather than widening it.
             return false;
@@ -85,9 +92,10 @@ class budget extends base {
             $this->get_days(),
             time(),
         );
-        $reached = $spend->has_reached($amount);
+        $reached = $spend->has_reached($amount, $metric);
         if ($reached === null) {
             // Nobody can say what has been spent, so nobody can say there is room.
+            // Only money reaches here: a count of requests is always known.
             return false;
         }
 
@@ -119,12 +127,60 @@ class budget extends base {
     }
 
     /**
+     * What the limit counts.
+     *
+     * @return string One of the ledger's metrics. Money, where the stored value is not
+     *                one of them, because that is what every budget written before
+     *                this setting existed meant.
+     */
+    public function get_metric(): string {
+        $metric = (string) ($this->config['metric'] ?? '');
+
+        return $metric === spend_ledger::METRIC_REQUESTS
+            ? spend_ledger::METRIC_REQUESTS
+            : spend_ledger::METRIC_COST;
+    }
+
+    /**
      * The limit being compared against.
      *
-     * @return float The amount, in the site currency.
+     * @return float The amount, in the site currency, or a number of requests.
      */
     public function get_amount(): float {
         return (float) ($this->config['amount'] ?? 0);
+    }
+
+    /**
+     * The limit as it is shown to somebody, with what it counts.
+     *
+     * @return string The figure and its unit.
+     */
+    public function get_amount_label(): string {
+        return self::label_amount($this->get_amount(), $this->get_metric());
+    }
+
+    /**
+     * A limit with the unit that says what it counts.
+     *
+     * Requests are whole things and are shown as whole numbers. An amount of money is
+     * shown to two decimals, not the four a recorded cost is kept to: this is a figure
+     * somebody typed, and handing it back with more precision than they gave it reads
+     * as a different number.
+     *
+     * @param float $amount The figure.
+     * @param string $metric What it counts.
+     * @return string The figure and its unit.
+     */
+    public static function label_amount(float $amount, string $metric): string {
+        if ($metric === spend_ledger::METRIC_REQUESTS) {
+            return get_string(
+                'condition:budget:requests',
+                'aiprovider_router',
+                number_format((float) round($amount)),
+            );
+        }
+
+        return format_float($amount, 2, true) . ' ' . price_book::get_currency();
     }
 
     /**
@@ -158,12 +214,27 @@ class budget extends base {
                 spend_ledger::SCOPE_COURSE => get_string('condition:budget:scope:course', 'aiprovider_router'),
                 spend_ledger::SCOPE_USER => get_string('condition:budget:scope:user', 'aiprovider_router'),
             ]),
+            // What is being counted comes before the figure, because it decides what
+            // the figure means, and in both languages the sentence wants it there.
+            $mform->createElement('select', 'budgetmetric', '', [
+                spend_ledger::METRIC_COST => get_string('condition:budget:metric:cost', 'aiprovider_router'),
+                spend_ledger::METRIC_REQUESTS => get_string(
+                    'condition:budget:metric:requests',
+                    'aiprovider_router',
+                ),
+            ]),
             $mform->createElement('select', 'budgetdirection', '', [
                 self::DIRECTION_UNDER => get_string('condition:budget:under', 'aiprovider_router'),
                 self::DIRECTION_OVER => get_string('condition:budget:over', 'aiprovider_router'),
             ]),
             $mform->createElement('text', 'budgetamount', '', ['size' => 10]),
+            // One unit is shown at a time. A budget in requests labelled with the site
+            // currency would be read as money by everybody who saw it.
             $mform->createElement('static', 'budgetcurrency', '', price_book::get_currency()),
+            $mform->createElement('static', 'budgetrequests', '', get_string(
+                'condition:budget:unit:requests',
+                'aiprovider_router',
+            )),
             $mform->createElement('select', 'budgetperiod', '', [
                 spend_ledger::PERIOD_ROLLING => get_string('condition:budget:period:rolling', 'aiprovider_router'),
                 spend_ledger::PERIOD_MONTH => get_string('condition:budget:period:month', 'aiprovider_router'),
@@ -178,10 +249,13 @@ class budget extends base {
         $mform->setType('budgetamount', PARAM_RAW_TRIMMED);
         $mform->setType('budgetdays', PARAM_INT);
         $mform->setDefault('budgetdirection', self::DIRECTION_UNDER);
+        $mform->setDefault('budgetmetric', spend_ledger::METRIC_COST);
         $mform->setDefault('budgetperiod', spend_ledger::PERIOD_ROLLING);
         $mform->setDefault('budgetdays', self::DEFAULT_DAYS);
         $mform->hideIf('budgetdays', 'budgetperiod', 'eq', spend_ledger::PERIOD_MONTH);
         $mform->hideIf('budgetunit', 'budgetperiod', 'eq', spend_ledger::PERIOD_MONTH);
+        $mform->hideIf('budgetcurrency', 'budgetmetric', 'eq', spend_ledger::METRIC_REQUESTS);
+        $mform->hideIf('budgetrequests', 'budgetmetric', 'eq', spend_ledger::METRIC_COST);
         $mform->addHelpButton('budgetgroup', 'condition:budget', 'aiprovider_router');
     }
 
@@ -200,6 +274,11 @@ class budget extends base {
             // wrongly is a rule that quietly matches every request instead of some.
             return ['budgetgroup' => get_string('condition:budget:error:amount', 'aiprovider_router')];
         }
+        $metric = (string) ($data['budgetmetric'] ?? spend_ledger::METRIC_COST);
+        if ($metric === spend_ledger::METRIC_REQUESTS && (float) $amount !== floor((float) $amount)) {
+            // Half a request is not a thing anybody can make.
+            return ['budgetgroup' => get_string('condition:budget:error:requests', 'aiprovider_router')];
+        }
 
         return [];
     }
@@ -213,11 +292,18 @@ class budget extends base {
         }
         $direction = (string) ($data->budgetdirection ?? self::DIRECTION_UNDER);
         $period = (string) ($data->budgetperiod ?? spend_ledger::PERIOD_ROLLING);
+        $metric = (string) ($data->budgetmetric ?? spend_ledger::METRIC_COST);
+        $metric = $metric === spend_ledger::METRIC_REQUESTS
+            ? spend_ledger::METRIC_REQUESTS
+            : spend_ledger::METRIC_COST;
 
         return [
             'scope' => in_array($scope, spend_ledger::get_scopes(), true) ? $scope : spend_ledger::SCOPE_SITE,
             'direction' => $direction === self::DIRECTION_OVER ? self::DIRECTION_OVER : self::DIRECTION_UNDER,
-            'amount' => (float) $amount,
+            'metric' => $metric,
+            'amount' => $metric === spend_ledger::METRIC_REQUESTS
+                ? (float) round((float) $amount)
+                : (float) $amount,
             'period' => $period === spend_ledger::PERIOD_MONTH
                 ? spend_ledger::PERIOD_MONTH
                 : spend_ledger::PERIOD_ROLLING,
@@ -230,6 +316,7 @@ class budget extends base {
         return [
             'budgetscope' => $config['scope'] ?? '',
             'budgetdirection' => $config['direction'] ?? self::DIRECTION_UNDER,
+            'budgetmetric' => $config['metric'] ?? spend_ledger::METRIC_COST,
             'budgetamount' => isset($config['amount']) ? (string) $config['amount'] : '',
             'budgetperiod' => $config['period'] ?? spend_ledger::PERIOD_ROLLING,
             'budgetdays' => $config['days'] ?? self::DEFAULT_DAYS,
@@ -243,18 +330,19 @@ class budget extends base {
             ? get_string('condition:describe:budget:month', 'aiprovider_router')
             : get_string('condition:describe:budget:rolling', 'aiprovider_router', $this->get_days());
 
+        // One string per metric as well as per direction. The verb differs between
+        // spending money and making requests, and in Japanese so does the word order,
+        // so neither can be assembled from parts here.
         return get_string(
-            'condition:describe:budget:' . ($this->get_direction() ?: self::DIRECTION_UNDER),
+            'condition:describe:budget:' . $this->get_metric()
+                . ':' . ($this->get_direction() ?: self::DIRECTION_UNDER),
             'aiprovider_router',
             [
                 'scope' => get_string(
                     'condition:budget:scope:' . ($scope ?: spend_ledger::SCOPE_SITE),
                     'aiprovider_router',
                 ),
-                // Two decimals, not the four a recorded cost is shown to. This is a
-                // figure somebody typed as an amount of money, and showing it back to
-                // them with more precision than they gave it reads as a different number.
-                'amount' => format_float($this->get_amount(), 2, true) . ' ' . price_book::get_currency(),
+                'amount' => $this->get_amount_label(),
                 'period' => $period,
             ],
         );

@@ -57,12 +57,14 @@ final class budget_notifier_test extends \advanced_testcase {
      * @param string $scope Whose spending it is about.
      * @param float $amount The limit.
      * @param string $period How the period is counted.
+     * @param string $metric What the limit counts.
      * @return rule The saved rule.
      */
     protected function budget_rule(
         string $scope,
         float $amount,
         string $period = spend_ledger::PERIOD_MONTH,
+        string $metric = spend_ledger::METRIC_COST,
     ): rule {
         global $DB;
 
@@ -73,6 +75,7 @@ final class budget_notifier_test extends \advanced_testcase {
         return (new rule_repository($DB))->save($record, ['budget' => [
             'scope' => $scope,
             'direction' => budget::DIRECTION_UNDER,
+            'metric' => $metric,
             'amount' => $amount,
             'period' => $period,
             'days' => 30,
@@ -314,5 +317,42 @@ final class budget_notifier_test extends \advanced_testcase {
 
         $this->assertSame(0, $result['sent']);
         $this->assertCount(0, $sink->get_messages());
+    }
+
+    public function test_a_budget_in_requests_is_announced_on_a_site_with_no_rates(): void {
+        $this->budget_rule(spend_ledger::SCOPE_SITE, 3.0, spend_ledger::PERIOD_MONTH, spend_ledger::METRIC_REQUESTS);
+        $this->spent(null);
+        $this->spent(null);
+        $this->spent(null);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $sink = $this->redirectMessages();
+        $result = $this->notifier->run($this->now);
+
+        // A budget in money would have said nothing at all here, because nothing on
+        // this site can be priced. Three requests against three is reached.
+        $this->assertSame(1, $result['sent']);
+        $messages = $sink->get_messages();
+        $this->assertCount(1, $messages);
+        $this->assertStringContainsString('3', $messages[0]->fullmessage);
+        $this->assertStringNotContainsString('{$a', $messages[0]->fullmessage);
+    }
+
+    public function test_two_limits_of_the_same_size_do_not_silence_each_other(): void {
+        // Three requests, and three of whatever the site's money is called. The two
+        // limits are the same number and are reached at different moments, so what has
+        // been said about one must not count as having been said about the other.
+        $this->budget_rule(spend_ledger::SCOPE_SITE, 3.0, spend_ledger::PERIOD_MONTH, spend_ledger::METRIC_REQUESTS);
+        $this->budget_rule(spend_ledger::SCOPE_SITE, 3.0, spend_ledger::PERIOD_MONTH, spend_ledger::METRIC_COST);
+        $this->spent(1.0);
+        $this->spent(1.0);
+        $this->spent(1.0);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $sink = $this->redirectMessages();
+        $result = $this->notifier->run($this->now);
+
+        $this->assertSame(2, $result['sent']);
+        $this->assertCount(2, $sink->get_messages());
     }
 }

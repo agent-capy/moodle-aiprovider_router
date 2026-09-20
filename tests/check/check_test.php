@@ -219,7 +219,7 @@ final class check_test extends \advanced_testcase {
     /**
      * Give the site a rule that routes by budget.
      */
-    protected function budget_rule(): void {
+    protected function budget_rule(string $metric = spend_ledger::METRIC_COST): void {
         global $DB;
         $rule = new rule();
         $rule->set('name', 'While there is money left');
@@ -227,6 +227,7 @@ final class check_test extends \advanced_testcase {
         (new rule_repository($DB))->save($rule, ['budget' => [
             'scope' => spend_ledger::SCOPE_SITE,
             'direction' => 'under',
+            'metric' => $metric,
             'amount' => 100.0,
             'period' => spend_ledger::PERIOD_ROLLING,
             'days' => 30,
@@ -278,6 +279,18 @@ final class check_test extends \advanced_testcase {
         // site would say so.
         $this->assertSame(result::ERROR, $result->get_status());
         $this->assertStringContainsString('2', $result->get_summary());
+    }
+
+    public function test_a_site_routing_by_request_counts_needs_no_rates(): void {
+        $this->budget_rule(spend_ledger::METRIC_REQUESTS);
+        $this->request(null);
+        $this->request(null);
+
+        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        // Requests are counted, not priced. Telling this site its budgets can never
+        // match would send somebody looking for a problem it does not have.
+        $this->assertSame(result::NA, $result->get_status());
     }
 
     public function test_a_mostly_unpriced_site_is_told_its_budgets_understate(): void {

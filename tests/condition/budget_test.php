@@ -288,6 +288,119 @@ final class budget_test extends \advanced_testcase {
         $this->assertStringNotContainsString('{$a', $description);
     }
 
+    /**
+     * A budget condition over the site, counted in requests.
+     *
+     * @param string $direction Which side of the limit is wanted.
+     * @param float $amount How many requests.
+     * @return budget The condition.
+     */
+    protected function siterequests(string $direction, float $amount): budget {
+        return new budget([
+            'scope' => spend_ledger::SCOPE_SITE,
+            'direction' => $direction,
+            'metric' => spend_ledger::METRIC_REQUESTS,
+            'amount' => $amount,
+            'period' => spend_ledger::PERIOD_ROLLING,
+            'days' => 30,
+        ]);
+    }
+
+    public function test_a_budget_in_requests_works_on_a_site_that_prices_nothing(): void {
+        $context = $this->context(\context_system::instance());
+        // The case this measure exists for: models somebody runs themselves, where
+        // there is no bill to estimate and so no rate to enter.
+        $this->log(['cost' => null]);
+        $this->log(['cost' => null]);
+
+        // The same two requests satisfy a budget in money neither way round.
+        $this->assertFalse($this->sitebudget(budget::DIRECTION_UNDER, 10.0)->is_met($context));
+        $this->assertFalse($this->sitebudget(budget::DIRECTION_OVER, 10.0)->is_met($context));
+
+        // Counted instead, they are two requests, and that is not in doubt.
+        $this->assertTrue($this->siterequests(budget::DIRECTION_UNDER, 5.0)->is_met($context));
+        $this->assertFalse($this->siterequests(budget::DIRECTION_OVER, 5.0)->is_met($context));
+
+        $this->log(['cost' => null]);
+        $this->log(['cost' => null]);
+        $this->log(['cost' => null]);
+
+        // Five made against a limit of five is a limit reached, as with money.
+        $this->assertFalse($this->siterequests(budget::DIRECTION_UNDER, 5.0)->is_met($context));
+        $this->assertTrue($this->siterequests(budget::DIRECTION_OVER, 5.0)->is_met($context));
+    }
+
+    public function test_requests_people_paid_for_themselves_are_not_the_sites_count(): void {
+        $context = $this->context(\context_system::instance());
+        $this->log(['cost' => null]);
+        for ($i = 0; $i < 20; $i++) {
+            $this->log(['cost' => null, 'keysource' => rule::KEYSOURCE_USER]);
+        }
+
+        // Somebody else's key, somebody else's allowance. One request is the site's.
+        $this->assertTrue($this->siterequests(budget::DIRECTION_UNDER, 5.0)->is_met($context));
+    }
+
+    public function test_a_budget_counted_in_requests_has_to_be_whole(): void {
+        $whole = [
+            'budgetscope' => spend_ledger::SCOPE_SITE,
+            'budgetmetric' => spend_ledger::METRIC_REQUESTS,
+            'budgetamount' => '3000',
+        ];
+        $this->assertSame([], budget::validate_form($whole));
+
+        // Half a request is not something anybody can make. In money it is ordinary.
+        $this->assertArrayHasKey('budgetgroup', budget::validate_form(
+            ['budgetamount' => '100.5'] + $whole,
+        ));
+        $this->assertSame([], budget::validate_form([
+            'budgetscope' => spend_ledger::SCOPE_SITE,
+            'budgetmetric' => spend_ledger::METRIC_COST,
+            'budgetamount' => '100.5',
+        ]));
+    }
+
+    public function test_a_request_budget_survives_the_trip_through_the_form(): void {
+        $config = budget::read_from_form((object) [
+            'budgetscope' => spend_ledger::SCOPE_COURSE,
+            'budgetdirection' => budget::DIRECTION_OVER,
+            'budgetmetric' => spend_ledger::METRIC_REQUESTS,
+            'budgetamount' => '3000',
+            'budgetperiod' => spend_ledger::PERIOD_MONTH,
+            'budgetdays' => 30,
+        ]);
+
+        $this->assertSame(spend_ledger::METRIC_REQUESTS, $config['metric']);
+        $this->assertSame(3000.0, $config['amount']);
+        $this->assertSame(spend_ledger::METRIC_REQUESTS, budget::to_form_data($config)['budgetmetric']);
+    }
+
+    public function test_a_budget_written_before_this_setting_existed_is_about_money(): void {
+        // Stored configuration from an earlier version carries no metric at all, and
+        // every one of those was an amount of money.
+        $this->assertSame(spend_ledger::METRIC_COST, (new budget([
+            'scope' => spend_ledger::SCOPE_SITE,
+            'direction' => budget::DIRECTION_UNDER,
+            'amount' => 10.0,
+        ]))->get_metric());
+        $this->assertSame(spend_ledger::METRIC_COST, (new budget([
+            'metric' => 'something else',
+        ]))->get_metric());
+        $this->assertSame(spend_ledger::METRIC_COST, budget::to_form_data([])['budgetmetric']);
+    }
+
+    public function test_a_request_budget_reads_as_a_sentence_of_its_own(): void {
+        $money = $this->sitebudget(budget::DIRECTION_UNDER, 3000.0)->get_description();
+        $requests = $this->siterequests(budget::DIRECTION_UNDER, 3000.0)->get_description();
+
+        $this->assertStringNotContainsString('{$a', $requests);
+        // The same number, said to be two different things. A description that could
+        // not tell them apart would be the whole feature going unsaid on the screen
+        // where somebody checks their rules.
+        $this->assertNotSame($money, $requests);
+        $this->assertStringContainsString('3,000', $requests);
+    }
+
     public function test_the_registry_knows_the_type(): void {
         $this->assertTrue(registry::is_known('budget'));
         $this->assertInstanceOf(budget::class, registry::make('budget', []));

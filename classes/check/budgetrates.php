@@ -19,6 +19,7 @@ namespace aiprovider_router\check;
 use aiprovider_router\condition\budget;
 use aiprovider_router\rule;
 use aiprovider_router\rule_repository;
+use aiprovider_router\spend_ledger;
 use aiprovider_router\usage_logger;
 use core\check\result;
 
@@ -32,6 +33,11 @@ use core\check\result;
  *
  * Nothing about that looks wrong from the outside. The rules are there, they are
  * enabled, and they simply never match. This is where it gets said instead.
+ *
+ * Only budgets counted in money are weighed here. A budget counted in requests needs no
+ * rates at all - requests are counted rather than priced - so a site routing entirely
+ * by request counts is in good order however empty its rate table is, and telling it
+ * otherwise would send somebody looking for a problem it does not have.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
@@ -56,13 +62,7 @@ class budgetrates extends base {
     protected function check_router(): result {
         global $DB;
 
-        $rules = $DB->count_records_sql(
-            'SELECT COUNT(DISTINCT c.ruleid)
-               FROM {' . rule_repository::CONDITION_TABLE . '} c
-               JOIN {' . rule::TABLE . '} r ON r.id = c.ruleid
-              WHERE c.type = :type AND r.enabled = 1',
-            ['type' => budget::get_type()],
-        );
+        $rules = $this->count_costed_rules();
         if ($rules === 0) {
             // Rates are worth entering anyway, for the monitor. They are only load
             // bearing once a rule routes on them, and that is what this check is about.
@@ -102,5 +102,38 @@ class budgetrates extends base {
         }
 
         return new result(result::OK, get_string('check:budgetrates:ok', 'aiprovider_router', $a));
+    }
+
+    /**
+     * How many enabled rules hold a budget that has to be priced to work.
+     *
+     * The metric is inside the condition's configuration rather than in a column, so
+     * the rows are read and decoded here. There are as many of them as there are
+     * budget conditions on the site, which is a handful.
+     *
+     * @return int The number of rules.
+     */
+    protected function count_costed_rules(): int {
+        global $DB;
+
+        $records = $DB->get_records_sql(
+            'SELECT c.id, c.ruleid, c.configdata
+               FROM {' . rule_repository::CONDITION_TABLE . '} c
+               JOIN {' . rule::TABLE . '} r ON r.id = c.ruleid
+              WHERE c.type = :type AND r.enabled = 1',
+            ['type' => budget::get_type()],
+        );
+        $ruleids = [];
+        foreach ($records as $record) {
+            $config = json_decode((string) $record->configdata, true);
+            if (!is_array($config)) {
+                continue;
+            }
+            if ((new budget($config))->get_metric() === spend_ledger::METRIC_COST) {
+                $ruleids[(int) $record->ruleid] = true;
+            }
+        }
+
+        return count($ruleids);
     }
 }

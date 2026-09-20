@@ -179,6 +179,24 @@ final class spend_ledger_test extends \advanced_testcase {
         $this->assertSame(0, $spend->costedrequests);
     }
 
+    public function test_a_count_of_requests_is_known_even_where_the_money_is_not(): void {
+        $this->log($this->day(0) + HOURSECS, ['cost' => null]);
+        $this->log($this->day(0) + HOURSECS, ['cost' => null]);
+        $this->log($this->day(0) + HOURSECS, ['cost' => null]);
+
+        [$from, $to] = $this->week();
+        $spend = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+
+        // The same period, read two ways. Nobody can say what it cost; everybody can
+        // say how many requests it took.
+        $this->assertFalse($spend->is_known(spend_ledger::METRIC_COST));
+        $this->assertTrue($spend->is_known(spend_ledger::METRIC_REQUESTS));
+        $this->assertSame(3.0, $spend->get_measure(spend_ledger::METRIC_REQUESTS));
+        $this->assertTrue($spend->has_reached(3.0, spend_ledger::METRIC_REQUESTS));
+        $this->assertFalse($spend->has_reached(4.0, spend_ledger::METRIC_REQUESTS));
+        $this->assertSame(1.0, $spend->get_remaining(4.0, spend_ledger::METRIC_REQUESTS));
+    }
+
     public function test_a_provider_that_costs_nothing_is_a_known_zero(): void {
         // A model the site runs itself, entered with a rate of zero. The requests are
         // priced, and priced at nothing, which is a different state from unpriced: a

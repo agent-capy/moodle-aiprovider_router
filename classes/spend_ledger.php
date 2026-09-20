@@ -65,6 +65,12 @@ class spend_ledger extends usage_report {
     /** @var string This calendar month so far. */
     public const PERIOD_MONTH = 'month';
 
+    /** @var string What a budget is counted in: money, worked out from the rates. */
+    public const METRIC_COST = 'cost';
+
+    /** @var string What a budget is counted in: how many requests were made. */
+    public const METRIC_REQUESTS = 'requests';
+
     /** @var string The cache area holding recently measured figures. */
     public const CACHE_AREA = 'budget';
 
@@ -102,6 +108,21 @@ class spend_ledger extends usage_report {
      */
     public static function get_periods(): array {
         return [self::PERIOD_ROLLING, self::PERIOD_MONTH];
+    }
+
+    /**
+     * What a budget can be counted in.
+     *
+     * Money is the one an administrator usually means, and it is the one that cannot
+     * always be worked out: it comes from the rates this site has entered. A count of
+     * requests is always available, which makes it the measure for a site whose models
+     * cost nothing to run and for a provider whose free allowance is written in
+     * requests rather than in money.
+     *
+     * @return string[] The metric names.
+     */
+    public static function get_metrics(): array {
+        return [self::METRIC_COST, self::METRIC_REQUESTS];
     }
 
     /**

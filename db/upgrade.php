@@ -288,5 +288,33 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092001, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026092002) {
+        // A budget can now be counted in requests as well as in money, so what has
+        // already been said has to say which of the two it was about. Every notice
+        // written before this was about money, which is what the default says.
+        $table = new xmldb_table('aiprovider_router_notice');
+        $field = new xmldb_field('metric', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'cost', 'subjectid');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // The old key would let a limit of 3000 requests be silenced by a limit of
+        // 3000 in money, so it is replaced rather than added to.
+        $old = new xmldb_index('kind-subjectid-limitamount-threshold', XMLDB_INDEX_UNIQUE, [
+            'kind', 'subjectid', 'limitamount', 'threshold',
+        ]);
+        if ($dbman->index_exists($table, $old)) {
+            $dbman->drop_index($table, $old);
+        }
+        $new = new xmldb_index('kind-subjectid-metric-limitamount-threshold', XMLDB_INDEX_UNIQUE, [
+            'kind', 'subjectid', 'metric', 'limitamount', 'threshold',
+        ]);
+        if (!$dbman->index_exists($table, $new)) {
+            $dbman->add_index($table, $new);
+        }
+
+        upgrade_plugin_savepoint(true, 2026092002, 'aiprovider', 'router');
+    }
+
     return true;
 }

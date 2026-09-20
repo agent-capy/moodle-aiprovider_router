@@ -29,6 +29,10 @@ namespace aiprovider_router;
  * treated as not knowing: a budget that cannot be measured is not a budget with room
  * left in it.
  *
+ * The count of requests beside it has none of that difficulty, because it is counted
+ * rather than worked out. It is the figure a budget falls back on where money cannot be
+ * said: a model somebody runs themselves, or an allowance a provider writes in requests.
+ *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -64,7 +68,7 @@ class spend {
     }
 
     /**
-     * Whether the amount means anything.
+     * Whether the figure means anything.
      *
      * A period with no requests in it has genuinely been spent nothing on, and that is
      * known. A period with requests in it and no rate covering any of them is not a
@@ -74,9 +78,17 @@ class spend {
      * converts between currencies, so adding them would produce a number in no
      * currency at all.
      *
-     * @return bool True when the amount can be compared against a limit.
+     * A count of requests has none of these difficulties. It is counted rather than
+     * worked out, so it is always known, including on a site that has entered no rates
+     * at all and on one whose models cost nothing.
+     *
+     * @param string $metric Which figure is being asked about.
+     * @return bool True when the figure can be compared against a limit.
      */
-    public function is_known(): bool {
+    public function is_known(string $metric = spend_ledger::METRIC_COST): bool {
+        if ($metric === spend_ledger::METRIC_REQUESTS) {
+            return true;
+        }
         if ($this->mixedcurrency) {
             return false;
         }
@@ -106,34 +118,48 @@ class spend {
     }
 
     /**
+     * The figure a budget of this kind is weighed against.
+     *
+     * @param string $metric Which figure is wanted.
+     * @return float The amount spent, or the number of requests made.
+     */
+    public function get_measure(string $metric = spend_ledger::METRIC_COST): float {
+        return $metric === spend_ledger::METRIC_REQUESTS
+            ? (float) $this->requests
+            : $this->get_amount();
+    }
+
+    /**
      * Whether a limit has been reached.
      *
      * Reaching the limit counts as reaching it. A limit of ten is a statement about how
      * much may be spent, and ten has been spent.
      *
      * @param float $limit The limit to compare against.
-     * @return bool|null True or false, or null when the spending is not known.
+     * @param string $metric What the limit is counted in.
+     * @return bool|null True or false, or null when the figure is not known.
      */
-    public function has_reached(float $limit): ?bool {
-        if (!$this->is_known()) {
+    public function has_reached(float $limit, string $metric = spend_ledger::METRIC_COST): ?bool {
+        if (!$this->is_known($metric)) {
             return null;
         }
 
-        return $this->get_amount() >= $limit;
+        return $this->get_measure($metric) >= $limit;
     }
 
     /**
      * What is left of a limit.
      *
      * @param float $limit The limit.
-     * @return float|null What remains, never below zero, or null when the spending is not known.
+     * @param string $metric What the limit is counted in.
+     * @return float|null What remains, never below zero, or null when the figure is not known.
      */
-    public function get_remaining(float $limit): ?float {
-        if (!$this->is_known()) {
+    public function get_remaining(float $limit, string $metric = spend_ledger::METRIC_COST): ?float {
+        if (!$this->is_known($metric)) {
             return null;
         }
 
-        return max(0.0, $limit - $this->get_amount());
+        return max(0.0, $limit - $this->get_measure($metric));
     }
 
     /**

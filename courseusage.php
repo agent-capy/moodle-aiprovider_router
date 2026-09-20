@@ -88,19 +88,30 @@ foreach ((new rule_repository($DB))->get_budgets() as $budget) {
     }
     [$budgetfrom, $budgetto] = $ledger->get_window($budget->period, $budget->days, $now);
     $spend = $ledger->measure(spend_ledger::SCOPE_COURSE, (int) $course->id, $budgetfrom, $budgetto);
-    if (!$spend->is_known()) {
+    if (!$spend->is_known($budget->metric)) {
         // Nothing this site can price, so there is no share to show. Saying nothing is
         // better than a bar at zero, which would read as plenty of room.
         continue;
     }
+    $requests = $budget->metric === spend_ledger::METRIC_REQUESTS;
+    $note = get_string(
+        'courseusage:budget:' . ($budget->period === spend_ledger::PERIOD_MONTH ? 'month' : 'rolling'),
+        'aiprovider_router',
+        $budget->days,
+    );
+    if ($requests) {
+        // A budget counted in requests can be shown in full. What is kept off this page
+        // is what the site pays, and how many requests this course made is the page's
+        // own subject, printed a few lines further down.
+        $note = get_string('courseusage:budget:used', 'aiprovider_router', [
+            'used' => number_format($spend->requests),
+            'limit' => number_format($budget->amount),
+        ]) . ' ' . $note;
+    }
     $bars[] = usage_formatter::progress(
-        $spend->get_amount() / $budget->amount,
-        get_string('usage:budget:label', 'aiprovider_router'),
-        get_string(
-            'courseusage:budget:' . ($budget->period === spend_ledger::PERIOD_MONTH ? 'month' : 'rolling'),
-            'aiprovider_router',
-            $budget->days,
-        ),
+        $spend->get_measure($budget->metric) / $budget->amount,
+        get_string($requests ? 'usage:budget:label:requests' : 'usage:budget:label', 'aiprovider_router'),
+        $note,
     );
 }
 if ($bars) {
