@@ -4,14 +4,18 @@ An AI **provider** plugin for the Moodle AI subsystem that acts as a *router*: i
 talking to a model itself, it decides — per request — which configured AI provider should
 handle the call, and delegates to it.
 
-> **Status: early development (alpha).** Delegation works end to end: pick a target in
-> the router's settings and every AI request the router receives is run against that
-> target, with a fallback chain, loop prevention and error mapping. There is no rule
-> engine yet, so the target is the same for every request regardless of context.
-> Do not use this on a live site.
+> **Status: early development (alpha).** Everything described below is implemented and
+> covered by tests, and CI runs against Moodle 5.0 and 5.2 on PHP 8.3 and 8.4. It has
+> not yet been used on a site that is not our own, so please try it on a test site
+> rather than a live one. Reports of what does not work, or does not read clearly, are
+> welcome.
 
 Developed as part of a 2026 domestic research and development project funded by the
 [Moodle Association of Japan](https://moodlejapan.org/) (MAJ).
+
+**日本語の導入・設定マニュアルがあります → [doc/manual-ja.md](doc/manual-ja.md)**
+(a manual in Japanese, written as a walk-through rather than as a translation of this
+reference).
 
 ## Features
 
@@ -468,6 +472,24 @@ field for each provider, offering a guess taken from the instance's own configur
 
 A provider nobody has answered for cannot take a key.
 
+What we have found so far, which the providers themselves may change:
+
+| Provider | Where it ships | The field | Can take a brought key |
+| --- | --- | --- | --- |
+| OpenAI API Provider (`aiprovider_openai`) | Moodle 5.0 onwards | `apikey` | Yes |
+| Azure AI Provider (`aiprovider_azureai`) | Moodle 5.0 onwards | `apikey` | Yes |
+| Ollama API Provider (`aiprovider_ollama`) | Moodle 5.0 onwards | none | Takes no key |
+| DeepSeek (`aiprovider_deepseek`) | Moodle 5.1 onwards | `apikey` | Yes |
+| Google Gemini (`aiprovider_gemini`) | Moodle 5.2 onwards | `apikey` | Yes |
+| AWS Bedrock (`aiprovider_awsbedrock`) | Moodle 5.2 onwards | `apikey` **and** `apisecret` | **No** — see below |
+| Sakura AI Engine (`aiprovider_sakuraaiengine`) | Separately | `account_token` | Yes |
+| Claude (`aiprovider_claude`) | Separately | `apikey` | Yes |
+
+⚠ **A brought key cannot be used with AWS Bedrock in this version.** It authenticates
+with an access key *and* a secret, and only one field is substituted, so the request
+would carry somebody else's access key against the site's secret and be refused. Set
+that provider to *This site allows no brought keys here*.
+
 ### What each provider allows
 
 Beside the field, and separately from it, each provider carries what this site allows
@@ -609,9 +631,14 @@ do not go through it are not. This has been written up for a bug report.
 
 ## Installation
 
-Copy this directory to `ai/provider/router/` inside your Moodle installation, then visit
-*Site administration → Notifications* (or run `php admin/cli/upgrade.php`) to complete
-the install.
+Copy this directory into your Moodle installation, then visit *Site administration →
+Notifications* (or run `php admin/cli/upgrade.php`) to complete the install. Where it
+goes depends on the release, because the web root moved under `public/` in 5.1:
+
+| Release | Path |
+| --- | --- |
+| Moodle 5.0 | `<moodleroot>/ai/provider/router/` |
+| Moodle 5.1 and later | `<moodleroot>/public/ai/provider/router/` |
 
 > Moodle caches the list of present plugins, so if you copy the files with `rsync` or
 > similar, run `php admin/cli/purge_caches.php` **before** the upgrade — otherwise Moodle
