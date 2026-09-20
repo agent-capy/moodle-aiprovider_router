@@ -51,6 +51,7 @@ require_once(__DIR__ . '/../fixtures/fixture_unconfigured_provider.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(singleinstance::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(byokkeys::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(budgetrates::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(staleactions::class)]
 final class check_test extends \advanced_testcase {
     #[\Override]
     public function setUp(): void {
@@ -257,6 +258,36 @@ final class check_test extends \advanced_testcase {
             'cost' => $cost,
             'keysource' => usage_logger::KEY_SITE,
         ]);
+    }
+
+    public function test_an_instance_made_before_an_action_existed_is_reported(): void {
+        // The action list is read fresh on every request; the instance's action
+        // configuration is written once, when the instance is made. Installing a
+        // plugin that defines a new action leaves the two disagreeing, and the
+        // provider settings screen cannot put it right.
+        // A brand new instance agrees with itself: the constructor fills its action
+        // configuration from the list the provider offers right now.
+        $fresh = $this->router(5);
+        $this->assertSame(
+            result::OK,
+            (new staleactions($this->inspector([5 => $fresh], ',5')))->get_result()->get_status(),
+        );
+
+        // One the site has had for a while, from before an action arrived.
+        $actions = provider::get_action_list();
+        $stale = new provider(
+            enabled: true,
+            name: 'Router 5',
+            config: json_encode(['mode' => provider::MODE_FULL, 'defaulttarget' => 99]),
+            actionconfig: json_encode([
+                reset($actions) => ['enabled' => true, 'settings' => []],
+            ]),
+            id: 5,
+        );
+        $result = (new staleactions($this->inspector([5 => $stale], ',5')))->get_result();
+
+        $this->assertSame(result::WARNING, $result->get_status());
+        $this->assertStringContainsString('recreat', strtolower($result->get_details()));
     }
 
     public function test_rates_are_only_load_bearing_once_a_rule_routes_by_budget(): void {

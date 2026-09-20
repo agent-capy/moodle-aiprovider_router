@@ -70,6 +70,7 @@ The plugin reports this on *Site administration → Reports → System status*:
 | Providers ahead of the AI Router | A provider that comes earlier handles the same actions and will answer first. |
 | Leftover entries in the provider order | The order still names instances that have been deleted. Moving providers up and down works on positions in that list, so leftovers can make reordering appear to do nothing. |
 | Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
+| Actions the router instance can carry | An action the router offers is not configured on its instance, so requests for it never reach the router. This happens when a plugin defining an action is installed after the router instance was made: the action list is read fresh every time, the instance's configuration is written once. ⚠ The provider settings screen cannot put it right for an action outside core, so recreating the instance is the fix. |
 
 Each check links to **AI provider order** (`/ai/provider/router/order.php`), which is the
 only page that changes the order. It shows the current order entry by entry, and what the
@@ -612,6 +613,11 @@ history all apply to it, because none of them know which actions exist.
 An action defined outside core is offered **only while its plugin is installed**.
 Naming one that is absent makes the provider settings screen fatal, because that
 screen asks each action for its own name.
+
+⚠ **Install the plugin defining the action before creating the router instance.**
+An instance is configured for the actions that existed when it was made, and nothing
+revisits that later, so a router that predates the action lists it and never receives
+it. The *Actions the router instance can carry* status check reports this.
 
 ⚠ Three places in `core_ai\manager` build an action's class name from core's own
 namespace, so an action living anywhere else is not found there. The one that
