@@ -178,13 +178,15 @@
         <FIELD NAME="metric" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="cost" SEQUENCE="false" COMMENT="What the limit counted: money, or requests. Part of the key, because the same subject can be held to a limit of each kind and they are reached at different moments."/>
         <FIELD NAME="limitamount" TYPE="number" LENGTH="12" NOTNULL="true" SEQUENCE="false" DECIMALS="6" COMMENT="The limit this was about. Part of the key, because one subject can have several budgets set on it by different rules."/>
         <FIELD NAME="threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="100" SEQUENCE="false" COMMENT="Which share of the limit was crossed, as a percentage. An early warning and the limit itself are told apart by this."/>
+        <FIELD NAME="periodstart" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The start of the stretch of time the limit was about, for a limit measured over a calendar month. Zero for a rolling period, whose start moves every day and would otherwise make this say something new each morning. Part of the key, so that February gets its own answer rather than inheriting January's."/>
+        <FIELD NAME="perioddays" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="How many days a rolling period covers. Zero for a calendar month. Part of the key, because the same subject can be held to the same amount over two different stretches of time and they are reached at different moments."/>
         <FIELD NAME="timenotified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
       </KEYS>
       <INDEXES>
-        <INDEX NAME="kind-subjectid-metric-limitamount-threshold" UNIQUE="true" FIELDS="kind, subjectid, metric, limitamount, threshold"/>
+        <INDEX NAME="kind-subjectid-metric-limitamount-threshold-periodstart-perioddays" UNIQUE="true" FIELDS="kind, subjectid, metric, limitamount, threshold, periodstart, perioddays"/>
       </INDEXES>
     </TABLE>
   </TABLES>

@@ -86,8 +86,14 @@ echo html_writer::end_div();
 // to the point where its AI starts behaving differently certainly is.
 $ledger = new spend_ledger($DB, $aggregator, false);
 $bars = [];
-foreach ((new rule_repository($DB))->get_budgets() as $budget) {
+foreach ((new rule_repository($DB))->get_budgets($now) as $budget) {
     if ($budget->scope !== spend_ledger::SCOPE_COURSE) {
+        continue;
+    }
+    if ($budget->courseids !== null && !in_array((int) $course->id, $budget->courseids, true)) {
+        // A budget set by a rule about other courses. It could never have restricted
+        // this one, so a bar for it here would describe something that is not
+        // happening in this course.
         continue;
     }
     [$budgetfrom, $budgetto] = $ledger->get_window($budget->period, $budget->days, $now);

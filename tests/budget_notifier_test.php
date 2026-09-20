@@ -58,6 +58,9 @@ final class budget_notifier_test extends \advanced_testcase {
      * @param float $amount The limit.
      * @param string $period How the period is counted.
      * @param string $metric What the limit counts.
+     * @param array $conditions Other conditions to put on the rule.
+     * @param array $window Rule fields to set, for testing a rule whose dates matter.
+     * @param int $days How many days a rolling period covers.
      * @return rule The saved rule.
      */
     protected function budget_rule(
@@ -65,20 +68,26 @@ final class budget_notifier_test extends \advanced_testcase {
         float $amount,
         string $period = spend_ledger::PERIOD_MONTH,
         string $metric = spend_ledger::METRIC_COST,
+        array $conditions = [],
+        array $window = [],
+        int $days = 30,
     ): rule {
         global $DB;
 
         $record = new rule();
         $record->set('name', 'While there is money left');
         $record->set('targetid', 3);
+        foreach ($window as $field => $value) {
+            $record->set($field, $value);
+        }
 
-        return (new rule_repository($DB))->save($record, ['budget' => [
+        return (new rule_repository($DB))->save($record, $conditions + ['budget' => [
             'scope' => $scope,
             'direction' => budget::DIRECTION_UNDER,
             'metric' => $metric,
             'amount' => $amount,
             'period' => $period,
-            'days' => 30,
+            'days' => $days,
         ]]);
     }
 
@@ -392,6 +401,109 @@ final class budget_notifier_test extends \advanced_testcase {
         $this->assertCount(1, $messages);
         $this->assertStringContainsString('3', $messages[0]->fullmessage);
         $this->assertStringNotContainsString('{$a', $messages[0]->fullmessage);
+    }
+
+    public function test_a_new_month_is_announced_even_though_nothing_happened_on_the_first(): void {
+        global $DB;
+
+        // The case that went wrong, and it needs a budget about a person or a course
+        // rather than the whole site: the site is measured every morning whether it
+        // spent anything or not, but a person is only looked at if they spent
+        // something in the window. A limit is reached in January; on the first of
+        // February that person has spent nothing, so nothing clears January's note;
+        // and when they reach the limit again in February the note says it has
+        // already been announced.
+        $spender = $this->getDataGenerator()->create_user();
+        $this->budget_rule(spend_ledger::SCOPE_USER, 10.0);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+        $january = make_timestamp(2026, 1, 20, 12, 0, 0);
+        $february = make_timestamp(2026, 2, 20, 12, 0, 0);
+
+        $this->spent(10.0, [
+            'userid' => (int) $spender->id,
+            'timecreated' => make_timestamp(2026, 1, 15, 12, 0, 0),
+        ]);
+        $sink = $this->redirectMessages();
+        $this->assertSame(1, $this->notifier->run($january)['sent']);
+
+        // A quiet first of the month. Nothing spent, nothing to announce, and the
+        // note about January is no longer about anything.
+        $this->notifier->run(make_timestamp(2026, 2, 1, 6, 0, 0));
+        $this->assertSame(0, $DB->count_records(budget_notifier::TABLE));
+
+        $this->spent(10.0, [
+            'userid' => (int) $spender->id,
+            'timecreated' => make_timestamp(2026, 2, 15, 12, 0, 0),
+        ]);
+        $this->assertSame(1, $this->notifier->run($february)['sent']);
+        // Two announcements, and each reaches both the person it is about and the
+        // people who watch what the site spends.
+        $this->assertCount(4, $sink->get_messages());
+    }
+
+    public function test_the_same_limit_over_two_stretches_of_time_is_two_limits(): void {
+        // The same subject, the same amount, the same metric, counted once over this
+        // month and once over the last day. They are reached at different moments and
+        // what has been said about one is not an answer about the other.
+        $this->budget_rule(spend_ledger::SCOPE_SITE, 3.0, spend_ledger::PERIOD_MONTH, spend_ledger::METRIC_REQUESTS);
+        $this->budget_rule(
+            spend_ledger::SCOPE_SITE,
+            3.0,
+            spend_ledger::PERIOD_ROLLING,
+            spend_ledger::METRIC_REQUESTS,
+            days: 1,
+        );
+        $this->spent(1.0);
+        $this->spent(1.0);
+        $this->spent(1.0);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $sink = $this->redirectMessages();
+        $result = $this->notifier->run($this->now);
+
+        $this->assertSame(2, $result['sent']);
+        $this->assertCount(2, $sink->get_messages());
+    }
+
+    public function test_a_rule_whose_dates_have_passed_sets_no_budget(): void {
+        $this->budget_rule(
+            spend_ledger::SCOPE_SITE,
+            10.0,
+            window: ['timeend' => $this->now - DAYSECS],
+        );
+        $this->spent(10.0);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $sink = $this->redirectMessages();
+        $result = $this->notifier->run($this->now);
+
+        // The rule cannot route anything today, so there is no limit today either.
+        $this->assertSame(0, $result['sent']);
+        $this->assertCount(0, $sink->get_messages());
+    }
+
+    public function test_a_budget_set_by_a_rule_about_one_course_is_not_about_another(): void {
+        $watched = $this->getDataGenerator()->create_course();
+        $other = $this->getDataGenerator()->create_course();
+        $teacher = $this->getDataGenerator()->create_and_enrol($other, 'editingteacher');
+        unset($teacher);
+
+        $this->budget_rule(
+            spend_ledger::SCOPE_COURSE,
+            10.0,
+            conditions: ['course' => ['courseids' => [(int) $watched->id]]],
+        );
+        // Only the other course has spent anything.
+        $this->spent(10.0, ['courseid' => (int) $other->id]);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $sink = $this->redirectMessages();
+        $result = $this->notifier->run($this->now);
+
+        // The rule could never have restricted that course, so a limit on it is not
+        // something that is happening.
+        $this->assertSame(0, $result['sent']);
+        $this->assertCount(0, $sink->get_messages());
     }
 
     public function test_two_limits_of_the_same_size_do_not_silence_each_other(): void {

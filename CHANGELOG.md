@@ -50,6 +50,18 @@ Fixes from a second independent review of the same code.
   them. Every logged in account holds the authenticated user role and nobody
   holds an assignment for it, so a condition naming it could be chosen on the
   screen and satisfied by nobody.
+- Budget notices know which stretch of time they are about. A limit reached in
+  January stayed on record into February, so February's crossing was read as
+  already announced -- and a subject that spent nothing in the new month was
+  never looked at, so nothing cleared the old note. The same subject held to
+  the same amount over a calendar month and over a rolling period is now two
+  limits rather than one silencing the other. **The notices already recorded
+  are cleared by the upgrade**, so a limit already reached is announced once
+  more on the first run after it.
+- A budget set by a rule that has expired is no longer announced, and a budget
+  set by a rule about one course is no longer announced for other courses: that
+  rule could never have restricted them. The per-course usage screen follows the
+  same rule.
 - What a target used before answering with nothing is no longer lost. A target
   can succeed, report the tokens it charged for, and return nothing usable; the
   request moves on to the next target and the money does not come back. It is

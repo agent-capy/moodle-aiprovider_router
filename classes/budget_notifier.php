@@ -109,13 +109,25 @@ class budget_notifier {
         }
 
         $result = ['sent' => 0, 'cleared' => 0, 'checked' => 0];
-        foreach ($this->get_budgets() as $budget) {
+        foreach ($this->get_budgets($now) as $budget) {
             [$from, $to] = $this->ledger->get_window($budget->period, $budget->days, $now);
+            // What stretch of time this is, as something that can be written down. A
+            // calendar month is named by when it began, so February is not January. A
+            // rolling period begins a day later every morning, so naming it that way
+            // would make every morning a new period and say the same thing again.
+            $stamp = (object) [
+                'periodstart' => $budget->period === spend_ledger::PERIOD_MONTH ? $from : 0,
+                'perioddays' => $budget->period === spend_ledger::PERIOD_MONTH ? 0 : max(1, (int) $budget->days),
+            ];
+
             if ($budget->scope === spend_ledger::SCOPE_SITE) {
                 $spending = [0 => $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to)];
             } else {
                 $spending = $this->ledger->measure_each($budget->scope, $from, $to);
+                $spending = $this->within_scope($budget, $spending);
             }
+
+            $reached = [];
             foreach ($spending as $subjectid => $spend) {
                 $this->weigh(
                     $result,
@@ -125,8 +137,11 @@ class budget_notifier {
                     $budget->amount,
                     $budget->metric,
                     $now,
+                    $stamp,
+                    $reached,
                 );
             }
+            $this->forget_the_rest($result, $budget, $stamp, $reached);
         }
 
         foreach ($this->get_capped_keys() as $key) {
@@ -193,6 +208,11 @@ class budget_notifier {
      * @param float $limit The limit.
      * @param string $metric What the limit counts.
      * @param int $now The current time.
+     * @param \stdClass|null $stamp Which stretch of time this is, as periodstart and
+     *                              perioddays. Null for a limit somebody put on their
+     *                              own key, which is not read from a rule.
+     * @param array $reached Subjects found to be over a threshold. Modified in place, so
+     *                       that the ones that are not can be forgotten afterwards.
      */
     protected function weigh(
         array &$result,
@@ -202,7 +222,10 @@ class budget_notifier {
         float $limit,
         string $metric,
         int $now,
+        ?\stdClass $stamp = null,
+        array &$reached = [],
     ): void {
+        $stamp ??= (object) ['periodstart' => 0, 'perioddays' => 0];
         if ($limit <= 0 || !$spend->is_known($metric)) {
             // Nothing can be said about spending nobody can work out. The status report
             // is where a site is told that its rates are missing; saying it again here,
@@ -212,40 +235,115 @@ class budget_notifier {
 
         foreach (self::get_thresholds() as $threshold) {
             $result['checked']++;
-            $reached = $spend->get_measure($metric) >= $limit * $threshold / 100;
-            // The metric is part of what is being remembered. A course held to 3000
-            // JPY and to 3000 requests has two limits, reached at different moments;
-            // without this, one of them would silence the other.
-            $remembered = $this->db->get_record(self::TABLE, [
+            $over = $spend->get_measure($metric) >= $limit * $threshold / 100;
+            // The metric and the stretch of time are both part of what is being
+            // remembered. A course held to 3000 JPY and to 3000 requests has two
+            // limits, reached at different moments, and a course held to 3000 this
+            // month and 3000 over the last week has two more. Without this, any one
+            // of them silences the others.
+            $key = [
                 'kind' => $kind,
                 'subjectid' => $subjectid,
                 'metric' => $metric,
                 'limitamount' => $limit,
                 'threshold' => $threshold,
-            ]);
+                'periodstart' => (int) $stamp->periodstart,
+                'perioddays' => (int) $stamp->perioddays,
+            ];
+            $remembered = $this->db->get_record(self::TABLE, $key);
 
-            if ($reached && $remembered === false) {
+            if ($over) {
+                $reached[$threshold][$subjectid] = true;
+            }
+
+            if ($over && $remembered === false) {
                 if (!$this->announce($kind, $subjectid, $spend, $limit, $metric, $threshold)) {
                     // Nobody to tell. Not remembered as said, because it was not:
                     // recording it would mean that giving somebody the role tomorrow
                     // would still leave them hearing nothing.
+                    unset($reached[$threshold][$subjectid]);
+
                     continue;
                 }
-                $this->db->insert_record(self::TABLE, (object) [
-                    'kind' => $kind,
-                    'subjectid' => $subjectid,
-                    'metric' => $metric,
-                    'limitamount' => $limit,
-                    'threshold' => $threshold,
-                    'timenotified' => $now,
-                ]);
+                $this->db->insert_record(self::TABLE, $key + ['timenotified' => $now]);
                 $result['sent']++;
-            } else if (!$reached && $remembered !== false) {
+            } else if (!$over && $remembered !== false) {
                 // Eased off, so the next time it is reached is worth saying again.
                 $this->db->delete_records(self::TABLE, ['id' => $remembered->id]);
                 $result['cleared']++;
             }
         }
+    }
+
+    /**
+     * Forget every subject this budget is no longer about.
+     *
+     * weigh() can only clear what it is shown, and it is shown the subjects that spent
+     * something in the window. A course that spent nothing this month is not in that
+     * list, which is the ordinary state of the first few days of a month -- and it was
+     * exactly the case that went wrong: the note saying last month's limit had been
+     * reached stayed on record, and this month's crossing was read as already
+     * announced. Anything recorded for this budget and not found over a threshold just
+     * now is removed here, including the notes left by periods that have ended.
+     *
+     * @param array $result Counts so far. Modified in place.
+     * @param \stdClass $budget The budget being weighed.
+     * @param \stdClass $stamp Which stretch of time this is.
+     * @param array $reached Subjects found over each threshold.
+     */
+    protected function forget_the_rest(
+        array &$result,
+        \stdClass $budget,
+        \stdClass $stamp,
+        array $reached,
+    ): void {
+        foreach (self::get_thresholds() as $threshold) {
+            $where = 'kind = :kind AND metric = :metric AND limitamount = :limitamount
+                      AND threshold = :threshold AND perioddays = :perioddays';
+            $params = [
+                'kind' => $budget->scope,
+                'metric' => $budget->metric,
+                'limitamount' => $budget->amount,
+                'threshold' => $threshold,
+                'perioddays' => (int) $stamp->perioddays,
+            ];
+
+            // Either the note belongs to a period that has ended, or it belongs to this
+            // one and names a subject that is no longer over the line.
+            $subjects = array_keys($reached[$threshold] ?? []);
+            if ($subjects) {
+                [$insql, $inparams] = $this->db->get_in_or_equal(
+                    $subjects,
+                    SQL_PARAMS_NAMED,
+                    'subj',
+                    false,
+                );
+                $where .= " AND (periodstart <> :periodstart OR subjectid {$insql})";
+                $params += ['periodstart' => (int) $stamp->periodstart] + $inparams;
+            } else {
+                $where .= ' AND (periodstart <> :periodstart OR 1 = 1)';
+                $params['periodstart'] = (int) $stamp->periodstart;
+            }
+
+            $result['cleared'] += $this->db->count_records_select(self::TABLE, $where, $params);
+            $this->db->delete_records_select(self::TABLE, $where, $params);
+        }
+    }
+
+    /**
+     * Drop the subjects a budget's own rule could never have restricted.
+     *
+     * @param \stdClass $budget The budget, carrying the courses it is limited to.
+     * @param spend[] $spending What each subject spent.
+     * @return spend[] The ones the budget is about.
+     */
+    protected function within_scope(\stdClass $budget, array $spending): array {
+        $courseids = $budget->courseids ?? null;
+        if ($courseids === null || $budget->scope !== spend_ledger::SCOPE_COURSE) {
+            return $spending;
+        }
+
+        return array_intersect_key($spending, array_flip($courseids));
     }
 
     /**
@@ -441,12 +539,13 @@ class budget_notifier {
     }
 
     /**
-     * Every budget the enabled rules set.
+     * Every budget the rules in force set.
      *
-     * @return \stdClass[] Rows of scope, metric, amount, period and days.
+     * @param int $now The moment to test rule windows against.
+     * @return \stdClass[] Rows of scope, metric, amount, period, days and courses.
      */
-    protected function get_budgets(): array {
-        return (new rule_repository($this->db))->get_budgets();
+    protected function get_budgets(int $now): array {
+        return (new rule_repository($this->db))->get_budgets($now);
     }
 
     /**

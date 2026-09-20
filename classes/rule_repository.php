@@ -17,6 +17,7 @@
 namespace aiprovider_router;
 
 use aiprovider_router\condition\budget;
+use aiprovider_router\condition\course as course_condition;
 
 /**
  * Reads and writes routing rules.
@@ -313,24 +314,42 @@ class rule_repository {
         return $max === null || $max === false ? 0 : (int) $max + 1;
     }
     /**
-     * Every budget the enabled rules set, with duplicates removed.
+     * Every budget the rules in force set, with duplicates removed.
      *
      * Two rules asking for the same budget describe one budget: somebody has one limit
      * to think about, and should hear about it once. Read here rather than in the
      * places that use it, so that the daily task and the screens showing how much of a
      * budget is gone cannot come to disagree about what the budgets are.
      *
-     * @return \stdClass[] Rows of scope, metric, amount, period and days.
+     * A rule that is switched off, or whose dates have passed, sets no budget. Neither
+     * does a rule about one course set a budget on any other course: the rule could
+     * never have restricted those courses, so announcing a limit on them describes
+     * something that is not happening. The conditions that depend on the request rather
+     * than on the course -- who asked, which action, how long the prompt was -- cannot
+     * be reflected in a figure for a whole course, so they are not: the figure is what
+     * the course spent, which is what the budget condition itself measures.
+     *
+     * @param int|null $now The moment to test rule windows against, or null for now.
+     * @return \stdClass[] Rows of scope, metric, amount, period and days, each with the
+     *                     courses it is limited to or null where it is limited to none.
      */
-    public function get_budgets(): array {
+    public function get_budgets(?int $now = null): array {
+        $now ??= time();
         $budgets = [];
         $records = $this->db->get_records_sql(
-            'SELECT c.id, c.configdata
+            'SELECT c.id, c.ruleid, c.configdata
                FROM {' . self::CONDITION_TABLE . '} c
                JOIN {' . rule::TABLE . '} r ON r.id = c.ruleid
-              WHERE c.type = :type AND r.enabled = 1',
-            ['type' => budget::get_type()],
+              WHERE c.type = :type AND r.enabled = 1
+                AND (r.timestart = 0 OR r.timestart <= :startnow)
+                AND (r.timeend = 0 OR r.timeend > :endnow)',
+            ['type' => budget::get_type(), 'startnow' => $now, 'endnow' => $now],
         );
+        if (!$records) {
+            return [];
+        }
+
+        $courses = $this->courses_by_rule(array_column($records, 'ruleid'));
         foreach ($records as $record) {
             $config = json_decode((string) $record->configdata, true);
             if (!is_array($config)) {
@@ -347,9 +366,52 @@ class rule_repository {
                 'period' => $condition->get_period(),
                 'days' => $condition->get_days(),
             ];
-            $budgets[implode('|', (array) $found)] = $found;
+            $key = implode('|', (array) $found);
+            $found->courseids = $courses[(int) $record->ruleid] ?? null;
+
+            if (!isset($budgets[$key])) {
+                $budgets[$key] = $found;
+
+                continue;
+            }
+            // The same budget written twice, once with a course restriction and once
+            // without, is a budget without one: the wider rule can reach the courses
+            // the narrower one cannot.
+            $budgets[$key]->courseids = $budgets[$key]->courseids === null || $found->courseids === null
+                ? null
+                : array_values(array_unique(array_merge($budgets[$key]->courseids, $found->courseids)));
         }
 
         return array_values($budgets);
+    }
+
+    /**
+     * The courses each rule restricts itself to, for the rules that restrict themselves.
+     *
+     * @param int[] $ruleids The rules to look at.
+     * @return array<int, int[]> Course ids keyed by rule id, for those rules only.
+     */
+    protected function courses_by_rule(array $ruleids): array {
+        if (!$ruleids) {
+            return [];
+        }
+        [$insql, $params] = $this->db->get_in_or_equal(array_unique($ruleids), SQL_PARAMS_NAMED);
+        $params['type'] = course_condition::get_type();
+
+        $courses = [];
+        $records = $this->db->get_records_select(
+            self::CONDITION_TABLE,
+            "type = :type AND ruleid {$insql}",
+            $params,
+        );
+        foreach ($records as $record) {
+            $config = json_decode((string) $record->configdata, true);
+            $ids = array_map('intval', (array) ($config['courseids'] ?? []));
+            if ($ids) {
+                $courses[(int) $record->ruleid] = $ids;
+            }
+        }
+
+        return $courses;
     }
 }

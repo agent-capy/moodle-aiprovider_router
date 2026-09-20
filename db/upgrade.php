@@ -339,5 +339,42 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092009, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026092010) {
+        // A notice said which subject, which limit and which share of it, and nothing
+        // about the stretch of time it was about. So a limit reached in January was
+        // still on record in February and February's crossing went unannounced, and
+        // two budgets that differed only in their period silenced each other.
+        $table = new xmldb_table('aiprovider_router_notice');
+        foreach (['periodstart', 'perioddays'] as $name) {
+            $field = new xmldb_field($name, XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'threshold');
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        $old = new xmldb_index('kind-subjectid-metric-limitamount-threshold', XMLDB_INDEX_UNIQUE, [
+            'kind', 'subjectid', 'metric', 'limitamount', 'threshold',
+        ]);
+        if ($dbman->index_exists($table, $old)) {
+            $dbman->drop_index($table, $old);
+        }
+        $new = new xmldb_index(
+            'kind-subjectid-metric-limitamount-threshold-periodstart-perioddays',
+            XMLDB_INDEX_UNIQUE,
+            ['kind', 'subjectid', 'metric', 'limitamount', 'threshold', 'periodstart', 'perioddays'],
+        );
+        if (!$dbman->index_exists($table, $new)) {
+            $dbman->add_index($table, $new);
+        }
+
+        // What is already recorded cannot be assigned to a period after the fact, and
+        // keeping it would silence the first crossing of the current one. The cost of
+        // clearing it is that a limit already reached is announced once more, which is
+        // the direction that tells somebody something rather than the one that does not.
+        $DB->delete_records('aiprovider_router_notice');
+
+        upgrade_plugin_savepoint(true, 2026092010, 'aiprovider', 'router');
+    }
+
     return true;
 }
