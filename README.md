@@ -38,7 +38,7 @@ reference).
 - **Key owner limits** — whoever brought a key can cap what it spends, for a calendar
   month or a rolling period
 
-- **Budget notices** — a daily task tells the people who watch the spending, and the
+- **Budget notices** — a daily task tells the people the matching report would admit, and the
   course or person a budget is about, when one has been reached
 
 ## Settings

@@ -110,8 +110,11 @@ class key_tester {
         } catch (\Throwable $e) {
             // Unreachable, timed out, or a provider that throws where others return. None
             // of that is evidence about the key.
+            // The key being tested is in this target's config, and an HTTP client that
+            // puts the request in the exception message puts the key in it too.
             debugging(
-                'aiprovider_router: key test threw ' . get_class($e) . ': ' . $e->getMessage(),
+                'aiprovider_router: key test threw ' . get_class($e) . ': '
+                    . abstract_processor::redact_for($e->getMessage(), $target),
                 DEBUG_NORMAL,
             );
 

@@ -210,9 +210,6 @@ final class budget_notifier_test extends \advanced_testcase {
     }
 
     public function test_the_people_who_watch_the_spending_are_told_the_figures(): void {
-        $manager = $this->getDataGenerator()->create_user();
-        $roleid = $this->getDataGenerator()->create_role(['archetype' => 'manager']);
-        role_assign($roleid, $manager->id, \context_system::instance()->id);
         $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
         $this->spent(10.0);
         set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
@@ -222,10 +219,69 @@ final class budget_notifier_test extends \advanced_testcase {
 
         $theirs = array_values(array_filter(
             $sink->get_messages(),
-            fn($message) => (int) $message->useridto === (int) $manager->id,
+            fn($message) => (int) $message->useridto === (int) get_admin()->id,
         ));
         $this->assertCount(1, $theirs);
         $this->assertStringContainsString('10.00', $theirs[0]->fullmessage);
+    }
+
+    /**
+     * Who is told what, for each kind of budget.
+     *
+     * @return array<string, array{string, string, bool}> Archetype, capability to add, whether they hear figures.
+     */
+    public static function watchers(): array {
+        return [
+            // A manager may see the named report, so a budget about one person is theirs.
+            'a manager, about one person' => ['manager', spend_ledger::SCOPE_USER, true],
+            // The same manager cannot open the site's own spending screen, so the
+            // site's figures are not theirs to be sent either.
+            'a manager, about the site' => ['manager', spend_ledger::SCOPE_SITE, false],
+            // The course monitor shows a course's figures and names nobody. It is not
+            // a way to be told what one person spent.
+            'a course monitor, about one person' => ['teacher', spend_ledger::SCOPE_USER, false],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('watchers')]
+    public function test_a_notice_goes_only_to_people_the_matching_screen_would_admit(
+        string $archetype,
+        string $scope,
+        bool $told,
+    ): void {
+        $watcher = $this->getDataGenerator()->create_user();
+        $roleid = $this->getDataGenerator()->create_role(['archetype' => $archetype]);
+        if ($archetype === 'teacher') {
+            // The course monitor capability, held site wide, which is the case the
+            // notices used to answer to for every kind of budget.
+            assign_capability(
+                'aiprovider/router:viewusage',
+                CAP_ALLOW,
+                $roleid,
+                \context_system::instance()->id,
+            );
+        }
+        role_assign($roleid, $watcher->id, \context_system::instance()->id);
+
+        $spender = $this->getDataGenerator()->create_user();
+        $this->budget_rule($scope, 10.0);
+        $this->spent(10.0, $scope === spend_ledger::SCOPE_USER ? ['userid' => (int) $spender->id] : []);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $sink = $this->redirectMessages();
+        $this->notifier->run($this->now);
+
+        $theirs = array_values(array_filter(
+            $sink->get_messages(),
+            fn($message) => (int) $message->useridto === (int) $watcher->id,
+        ));
+
+        if ($told) {
+            $this->assertCount(1, $theirs);
+            $this->assertStringContainsString('10.00', $theirs[0]->fullmessage);
+        } else {
+            $this->assertSame([], $theirs);
+        }
     }
 
     public function test_a_key_limit_is_announced_to_its_owner(): void {

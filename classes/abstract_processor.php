@@ -59,6 +59,12 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var string Reason recorded when every instance the payer has a key for failed. */
     public const REASON_NO_KEY_LEFT = 'byok_no_key_left';
 
+    /** @var string Config names whose values are secrets, whatever the provider calls them. */
+    protected const SECRET_FIELDS = '/key|secret|token|password/i';
+
+    /** @var int How much of a thrown message is worth writing down. */
+    protected const MESSAGE_LIMIT = 500;
+
     /** @var string[] Finish reasons that mean the token budget ran out. */
     protected const TRUNCATED = ['length', 'max_tokens', 'model_length'];
 
@@ -254,8 +260,8 @@ abstract class abstract_processor extends \core_ai\process_base {
             'attempts' => $attempts,
             'keysource' => $resolver->get_keysource(),
             'keyid' => $keyid === null ? null : (int) $keyid,
-            'prompttokens' => isset($data['prompttokens']) ? (int) $data['prompttokens'] : null,
-            'completiontokens' => isset($data['completiontokens']) ? (int) $data['completiontokens'] : null,
+            'prompttokens' => self::counted($data['prompttokens'] ?? null),
+            'completiontokens' => self::counted($data['completiontokens'] ?? null),
         ];
 
         $this->get_logger()->record($entry, $this->get_image_count($success));
@@ -316,9 +322,59 @@ abstract class abstract_processor extends \core_ai\process_base {
     protected function report_target_failure(\core_ai\provider $target, \Throwable $e): void {
         debugging(
             'aiprovider_router: delegation target ' . (int) $target->id . ' threw '
-                . get_class($e) . ': ' . $e->getMessage(),
+                . get_class($e) . ': ' . self::redact_for($e->getMessage(), $target),
             DEBUG_NORMAL,
         );
+    }
+
+    /**
+     * A usage figure a target reported, as a number this site is willing to believe.
+     *
+     * The count comes from outside and nothing checks it. A negative count is the one
+     * that matters: cost is the count times a rate, so a negative count is a negative
+     * cost, and a negative cost does not merely look odd in a report -- it subtracts
+     * from what has been spent, which is what a budget weighs. A target that returned
+     * -1,000,000 tokens would hand back a budget somebody had already used up.
+     *
+     * A count that cannot be believed is recorded as no count at all, which the
+     * reports already understand: it means the same as a provider that said nothing.
+     *
+     * @param mixed $value Whatever the target reported.
+     * @return int|null The count, or null where there is not a usable one.
+     */
+    protected static function counted(mixed $value): ?int {
+        if (!is_numeric($value)) {
+            return null;
+        }
+        $count = (int) $value;
+
+        return $count >= 0 ? $count : null;
+    }
+
+    /**
+     * Take the target's own secrets back out of a message before it is written down.
+     *
+     * What a delegate throws is written by somebody else, and an HTTP client that
+     * puts the request in the exception message puts the key in it too. Debug output
+     * reaches the screen and the server log, so the message is not ours to pass on
+     * unread. The secrets are known exactly -- they are the ones about to be used --
+     * so this replaces those values rather than guessing at what a secret looks like.
+     *
+     * @param string $message What was thrown.
+     * @param \core_ai\provider $target The instance it was thrown by.
+     * @return string The message, with the target's secrets removed and its length capped.
+     */
+    public static function redact_for(string $message, \core_ai\provider $target): string {
+        foreach ($target->config as $name => $value) {
+            if (!is_string($value) || $value === '' || !preg_match(self::SECRET_FIELDS, (string) $name)) {
+                continue;
+            }
+            $message = str_replace($value, '[redacted]', $message);
+        }
+
+        // A provider that returns its whole response body in an exception is not
+        // telling an administrator anything useful past the first few lines.
+        return \core_text::substr($message, 0, self::MESSAGE_LIMIT);
     }
 
     /**

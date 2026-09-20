@@ -56,6 +56,22 @@ class budget_notifier {
     /** @var string A limit somebody put on the key they brought. */
     public const KIND_KEY = 'key';
 
+    /**
+     * @var array<string, string> What somebody must be allowed before a notice reaches them.
+     *
+     * A notice carries figures, and the same figures sit behind a screen. The two
+     * have to agree, or the notice becomes a way around the screen: a notice about
+     * one person names them and says what they spent, which belongs to the named
+     * report rather than the course monitor, and a notice about the site's money
+     * belongs to the site's own report. A course notice carries a course's figures,
+     * which is exactly what the course monitor shows, so that one is unchanged.
+     */
+    protected const WATCHER_CAPABILITY = [
+        self::KIND_SITE => 'moodle/site:config',
+        self::KIND_COURSE => 'aiprovider/router:viewusage',
+        self::KIND_USER => 'aiprovider/router:viewuserusage',
+    ];
+
     /** @var string Config saying whether to send anything at all. */
     public const ENABLED_SETTING = 'budgetnotify';
 
@@ -279,7 +295,7 @@ class budget_notifier {
         }
 
         $told = [];
-        foreach ($this->get_watchers() as $user) {
+        foreach ($this->get_watchers($kind) as $user) {
             $told[(int) $user->id] = true;
             $this->post('budget', $user, 'notify:budget:' . $kind . ':' . $suffix, $figures);
         }
@@ -356,7 +372,7 @@ class budget_notifier {
      *
      * @return \stdClass[] The users, keyed by id.
      */
-    protected function get_watchers(): array {
+    protected function get_watchers(string $kind): array {
         // Whole records, deliberately: message_send() wants auth, suspended, deleted
         // and emailstop as well as the name fields, and quietly fetches them one at a
         // time when they are missing. Admin records come back whole already.
@@ -365,7 +381,8 @@ class budget_notifier {
         foreach (get_admins() as $admin) {
             $watchers[(int) $admin->id] = $admin;
         }
-        foreach (get_users_by_capability(\context_system::instance(), 'aiprovider/router:viewusage', $fields) as $user) {
+        $capability = self::WATCHER_CAPABILITY[$kind] ?? self::WATCHER_CAPABILITY[self::KIND_SITE];
+        foreach (get_users_by_capability(\context_system::instance(), $capability, $fields) as $user) {
             $watchers[(int) $user->id] = $user;
         }
 

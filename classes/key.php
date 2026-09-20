@@ -201,6 +201,13 @@ class key extends \core\persistent {
             return '';
         }
 
+        // A hint is the tail of something longer. Where the key is no longer than the
+        // hint, the tail is the key, and the promise that the plaintext is never kept
+        // or shown again would be broken by the very thing meant to keep it.
+        if (\core_text::strlen($secret) <= self::HINT_LENGTH) {
+            return '';
+        }
+
         return \core_text::substr($secret, -self::HINT_LENGTH);
     }
 

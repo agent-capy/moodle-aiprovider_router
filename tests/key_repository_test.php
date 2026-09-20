@@ -52,6 +52,15 @@ final class key_repository_test extends \advanced_testcase {
         $this->assertSame('sk-secret-value-1234', $this->repository->reveal($saved));
     }
 
+    public function test_a_key_too_short_to_hint_at_gets_no_hint(): void {
+        // The hint is the tail of something longer. Where the key is no longer than
+        // the hint, the tail is the whole key, and the promise that the plaintext is
+        // never kept or shown again would be broken by the thing meant to keep it.
+        $this->assertSame('', key::hint_of('abcd'));
+        $this->assertSame('', key::hint_of('ab'));
+        $this->assertSame('bcde', key::hint_of('abcde'));
+    }
+
     public function test_the_hint_is_the_end_of_the_key_not_the_start(): void {
         $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-proj-abcdefgh');
 
