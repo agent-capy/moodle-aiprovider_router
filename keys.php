@@ -57,6 +57,11 @@ if ($courseid > 0) {
     $url = new moodle_url('/ai/provider/router/keys.php', ['courseid' => $course->id]);
     $heading = get_string('keys:heading:course', 'aiprovider_router');
     $intro = get_string('keys:intro:course', 'aiprovider_router');
+    // Before the heading, not after. set_heading() runs the text through
+    // format_string(), which asks the page for its context and complains when there
+    // is none. require_login($course) happens to leave one behind here and nothing
+    // does in the branch below, which is how this went unnoticed on one of the two.
+    $PAGE->set_context($context);
     $PAGE->set_pagelayout('incourse');
     $PAGE->set_heading(format_string($course->fullname));
 } else {
@@ -67,11 +72,11 @@ if ($courseid > 0) {
     $url = new moodle_url('/ai/provider/router/keys.php');
     $heading = get_string('keys:heading', 'aiprovider_router');
     $intro = get_string('keys:intro', 'aiprovider_router');
+    $PAGE->set_context($context);
     $PAGE->set_pagelayout('standard');
     $PAGE->set_heading(fullname($USER));
 }
 
-$PAGE->set_context($context);
 $PAGE->set_url($url);
 $PAGE->set_title($heading);
 
