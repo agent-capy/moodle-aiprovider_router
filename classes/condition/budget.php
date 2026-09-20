@@ -67,8 +67,15 @@ class budget extends base {
     /** @var int The rolling period used when none was chosen. */
     public const DEFAULT_DAYS = 30;
 
+    /** @var bool Whether the last evaluation failed because the limit had been reached. */
+    protected bool $exhausted = false;
+
     #[\Override]
     public function is_met(evaluation_context $context): bool {
+        // Every path out of this method other than the last one leaves this false, which
+        // is the point of it. See was_exhausted() for why the difference matters.
+        $this->exhausted = false;
+
         $amount = $this->get_amount();
         $scope = $this->get_scope();
         $direction = $this->get_direction();
@@ -99,7 +106,37 @@ class budget extends base {
             return false;
         }
 
-        return $direction === self::DIRECTION_OVER ? $reached : !$reached;
+        if ($direction === self::DIRECTION_OVER) {
+            // A rule that wants the limit to have been passed. Failing it means the
+            // limit has not been passed, which is money still available rather than
+            // money gone: the ordinary state of a site that has just started the month.
+            return $reached;
+        }
+
+        $this->exhausted = $reached;
+
+        return !$reached;
+    }
+
+    /**
+     * Whether the last evaluation failed because the money had actually run out.
+     *
+     * The router stops a request outright when a rule fitted it in every respect except
+     * its budget, on the grounds that spending the site refused is not for another
+     * provider to spend instead. That reasoning only holds for one of the ways this
+     * condition can fail. A rule asking to be used once a limit has been passed fails
+     * every time the limit has not been passed, and a course budget asked about a
+     * request belonging to no course fails because there is no budget here at all.
+     * Neither is a refusal, and reading them as one stops requests the site never meant
+     * to stop -- which in a site running the router alongside other providers is every
+     * request it makes.
+     *
+     * Only meaningful straight after is_met() has been called with the same request.
+     *
+     * @return bool True when the limit was reached, rather than merely not satisfied.
+     */
+    public function was_exhausted(): bool {
+        return $this->exhausted;
     }
 
     /**

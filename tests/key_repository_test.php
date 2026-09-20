@@ -86,6 +86,39 @@ final class key_repository_test extends \advanced_testcase {
         $this->assertNull($second->get('verifystatus'));
     }
 
+    public function test_a_verdict_never_writes_back_the_key_it_was_read_with(): void {
+        global $DB;
+
+        // What happens in between is the point. Testing a key puts a request to
+        // somebody else's server, and while it is out another administrator can rotate
+        // the key or lower what it may spend. The object being held was read before any
+        // of that, and saving it whole afterwards would put all of it back.
+        $tested = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'the-old-key-aaaa');
+        $this->repository->set_cap($tested, 100.0, spend_ledger::PERIOD_MONTH, 30);
+
+        $meanwhile = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'the-new-key-bbbb');
+        $this->repository->set_cap($meanwhile, 10.0, spend_ledger::PERIOD_MONTH, 30);
+
+        $this->repository->record_verification($tested, key::VERIFY_OK, 1000);
+
+        $now = $this->repository->find(key::SCOPE_COURSE, 42, 3);
+        $this->assertSame('the-new-key-bbbb', $this->repository->reveal($now));
+        $this->assertSame(10.0, $now->get_cap_amount());
+        // And the verdict itself is not attached to a key it was never about.
+        $this->assertNull($now->get('verifystatus'));
+        $this->assertSame(1, $DB->count_records(key::TABLE));
+    }
+
+    public function test_a_verdict_is_recorded_when_the_key_is_still_the_one_tested(): void {
+        $key = $this->repository->save(key::SCOPE_USER, 7, 3, 'a-steady-key-cccc');
+
+        $this->repository->record_verification($key, key::VERIFY_REJECTED, 1000);
+
+        $now = $this->repository->find(key::SCOPE_USER, 7, 3);
+        $this->assertSame(key::VERIFY_REJECTED, $now->get('verifystatus'));
+        $this->assertSame(1000, (int) $now->get('timeverified'));
+    }
+
     public function test_a_key_starts_with_no_limit_on_it(): void {
         $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-a-key-abcd');
 

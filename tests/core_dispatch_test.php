@@ -126,7 +126,11 @@ final class core_dispatch_test extends \advanced_testcase {
      * @param int $targetid Where the rule delegates.
      * @param int $allowance How many requests the site may make.
      */
-    protected function add_budget_rule(int $targetid, int $allowance): void {
+    protected function add_budget_rule(
+        int $targetid,
+        int $allowance,
+        string $direction = budget::DIRECTION_UNDER,
+    ): void {
         global $DB;
 
         $rule = new rule();
@@ -136,7 +140,7 @@ final class core_dispatch_test extends \advanced_testcase {
         (new rule_repository($DB))->save($rule, [
             'budget' => [
                 'scope' => spend_ledger::SCOPE_SITE,
-                'direction' => budget::DIRECTION_UNDER,
+                'direction' => $direction,
                 'amount' => $allowance,
                 'metric' => spend_ledger::METRIC_REQUESTS,
                 'period' => spend_ledger::PERIOD_ROLLING,
@@ -236,6 +240,39 @@ final class core_dispatch_test extends \advanced_testcase {
 
         $this->assertTrue($response->get_success());
         $this->assertSame('Answered by the next provider', $response->get_response_data()['generatedcontent']);
+    }
+
+    public function test_a_limit_nobody_has_reached_does_not_stop_anybody(): void {
+        // A rule that says "once the site has passed a hundred requests, send them
+        // somewhere cheaper". Before the hundredth request that rule simply does not
+        // apply, and a coexisting site expects its other providers to carry on. The
+        // router used to read every way that rule could fail as the money having run
+        // out, so writing one rule of this shape stopped every request the site made.
+        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
+        $cheaper = $this->add_target('Cheaper', ['content' => 'Never reached']);
+        $this->add_router(['nomatch' => provider::NOMATCH_DECLINE, 'defaulttarget' => $cheaper->id]);
+        $this->add_budget_rule((int) $cheaper->id, 100, budget::DIRECTION_OVER);
+
+        $response = $this->ask();
+
+        $this->assertTrue($response->get_success());
+        $this->assertSame('Answered by the next provider', $response->get_response_data()['generatedcontent']);
+    }
+
+    public function test_a_limit_that_has_been_passed_sends_the_request_where_the_rule_says(): void {
+        // The same rule, doing the job it was written for. Nothing here is refused, so
+        // nothing here tests the refusal: it is the other end of the test above, kept
+        // beside it so that neither can be broken to make the other pass.
+        $this->add_target('Site provider', ['content' => 'Never reached']);
+        $cheaper = $this->add_target('Cheaper', ['content' => 'Answered by the cheaper one']);
+        $this->add_router(['nomatch' => provider::NOMATCH_DECLINE, 'defaulttarget' => $cheaper->id]);
+        $this->add_budget_rule((int) $cheaper->id, 1, budget::DIRECTION_OVER);
+        $this->spend(2);
+
+        $response = $this->ask();
+
+        $this->assertTrue($response->get_success());
+        $this->assertSame('Answered by the cheaper one', $response->get_response_data()['generatedcontent']);
     }
 
     public function test_a_target_that_merely_broke_still_lets_the_next_provider_try(): void {

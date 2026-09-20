@@ -16,6 +16,7 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\condition\budget;
 use aiprovider_router\condition\registry;
 
 /**
@@ -66,17 +67,25 @@ class rule_evaluator {
         $this->budgetblocked = [];
 
         foreach ($rules as $id => $rule) {
-            $unmet = $this->unmet_conditions($conditions[$id] ?? [], $context);
-            if (!$unmet) {
+            $failed = $this->failed_conditions($conditions[$id] ?? [], $context);
+            if (!$failed) {
                 yield $id => $rule;
 
                 continue;
             }
-            if ($unmet === [self::BUDGET]) {
-                // Everything else about this rule fitted the request. Worth remembering,
-                // because "this rule is not for you" and "this rule is for you and the
-                // money has run out" are the same absence of a match and mean opposite
-                // things to a site that set a budget.
+            if (array_keys($failed) !== [self::BUDGET]) {
+                continue;
+            }
+            // Everything else about this rule fitted the request. Worth remembering,
+            // because "this rule is not for you" and "this rule is for you and the
+            // money has run out" are the same absence of a match and mean opposite
+            // things to a site that set a budget.
+            //
+            // The condition is asked which of the two this was rather than assumed. It
+            // fails for several reasons that are not a budget running out at all, and
+            // treating those as a refusal stops requests the site never refused.
+            $condition = $failed[self::BUDGET];
+            if ($condition instanceof budget && $condition->was_exhausted()) {
                 $this->budgetblocked[$id] = $rule;
             }
         }
@@ -135,15 +144,38 @@ class rule_evaluator {
      * @return string[] The types that were not met. Empty means the rule matches.
      */
     protected function unmet_conditions(array $conditions, evaluation_context $context): array {
-        $unmet = [];
+        return array_keys($this->failed_conditions($conditions, $context));
+    }
+
+    /**
+     * The same answer, keeping the conditions themselves.
+     *
+     * A condition that has just been evaluated can say more about why it failed than
+     * its type does, and the budget condition is asked exactly that. Kept apart from
+     * unmet_conditions() so that the rule tester, which only names the types, is not
+     * given objects it would have to know what to do with.
+     *
+     * @param array[] $conditions Stored configuration keyed by condition type.
+     * @param evaluation_context $context The request being routed.
+     * @return array<string, \aiprovider_router\condition\base|null> The conditions that
+     *                 were not met, keyed by type. A type this version does not know is
+     *                 present with a null against it.
+     */
+    protected function failed_conditions(array $conditions, evaluation_context $context): array {
+        $failed = [];
         foreach ($conditions as $type => $config) {
             $condition = registry::make((string) $type, $config);
-            if ($condition === null || !$condition->is_met($context)) {
-                $unmet[] = (string) $type;
+            if ($condition === null) {
+                $failed[(string) $type] = null;
+
+                continue;
+            }
+            if (!$condition->is_met($context)) {
+                $failed[(string) $type] = $condition;
             }
         }
 
-        return $unmet;
+        return $failed;
     }
 
     /**

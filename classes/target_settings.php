@@ -238,6 +238,23 @@ class target_settings {
     }
 
     /**
+     * The targets a brought key may not be used at.
+     *
+     * The companion of get_byok_only_ids(), and read the same way and for the same
+     * reason: the choice of target is made on the path of every request.
+     *
+     * @return int[] The target ids.
+     */
+    public function get_byok_disallowed_ids(): array {
+        $ids = [];
+        foreach ($this->db->get_records(self::TABLE, ['byokmode' => self::MODE_DISALLOWED]) as $record) {
+            $ids[] = (int) $record->targetid;
+        }
+
+        return $ids;
+    }
+
+    /**
      * Whether this provider may only be reached with a key somebody brought.
      *
      * @param int $targetid The delegation target.

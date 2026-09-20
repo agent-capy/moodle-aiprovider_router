@@ -39,6 +39,12 @@ enum key_status: string {
     // Nobody has said which configuration field this provider's key goes in.
     case NO_FIELD = 'nofield';
 
+    // The site has said that keys brought to this provider are not to be used. Like
+    // ABSENT and NO_FIELD the rule does not apply, but it is told apart from them
+    // because this one is a decision somebody made rather than a setting nobody
+    // finished, and the two want different things said about them on a screen.
+    case DISALLOWED = 'disallowed';
+
     // A key is stored and cannot be decrypted. A fault, and the request stops.
     case UNREADABLE = 'unreadable';
 }

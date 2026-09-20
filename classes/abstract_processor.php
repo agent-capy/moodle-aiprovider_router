@@ -445,8 +445,18 @@ abstract class abstract_processor extends \core_ai\process_base {
      * @return string The message, with the target's secrets removed and its length capped.
      */
     public static function redact_for(string $message, \core_ai\provider $target): string {
+        global $DB;
+
+        // The field a brought key was put in is known outright, so it is taken from
+        // where it was recorded rather than recognised by its name. Every provider in
+        // Moodle happens to call its key something this pattern matches, but nothing
+        // makes them: the name belongs to whoever wrote the provider, and a key the
+        // pattern missed would be somebody's own key going into the site's debug log.
+        $named = (new target_settings($DB))->get_key_field((int) $target->id);
+
         foreach ($target->config as $name => $value) {
-            if (!is_string($value) || $value === '' || !preg_match(self::SECRET_FIELDS, (string) $name)) {
+            $secret = (string) $name === $named || preg_match(self::SECRET_FIELDS, (string) $name);
+            if (!is_string($value) || $value === '' || !$secret) {
                 continue;
             }
             $message = str_replace($value, '[redacted]', $message);

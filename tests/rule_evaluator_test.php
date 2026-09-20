@@ -270,6 +270,48 @@ final class rule_evaluator_test extends \advanced_testcase {
         $this->assertSame([], $this->evaluator->get_budget_blocked());
     }
 
+    public function test_a_limit_that_has_not_been_reached_yet_is_not_a_limit_that_has_run_out(): void {
+        // A rule that asks to be used once the site has passed a limit. Before it is
+        // passed the rule does not apply, which is the ordinary state of the first day
+        // of the month -- not a refusal, and nothing for the router to stop on. Reading
+        // it as one stopped every request a coexisting site made.
+        $this->add('over the line', 7, ['budget' => $this->onerequest(condition\budget::DIRECTION_OVER)]);
+
+        $this->assertSame([], $this->matched($this->request()));
+        $this->assertSame([], $this->evaluator->get_budget_blocked());
+    }
+
+    public function test_a_limit_that_has_been_reached_still_stops_the_request(): void {
+        // The other half of the test above: the same rule, once the limit is passed,
+        // matches outright. What must not happen is the failure being read as a refusal.
+        $this->add('over the line', 7, ['budget' => $this->onerequest(condition\budget::DIRECTION_OVER)]);
+        $this->spend_one();
+
+        $this->assertSame(['over the line'], $this->matched($this->request()));
+        $this->assertSame([], $this->evaluator->get_budget_blocked());
+    }
+
+    public function test_a_course_budget_asked_about_no_course_is_not_a_budget_running_out(): void {
+        // There is no course here, so there is no budget here to be inside or past.
+        // The rule does not apply; nobody has run out of anything.
+        $this->add('course metered', 7, [
+            'budget' => ['scope' => spend_ledger::SCOPE_COURSE] + $this->onerequest(),
+        ]);
+        $this->spend_one();
+
+        $this->assertSame([], $this->matched($this->request()));
+        $this->assertSame([], $this->evaluator->get_budget_blocked());
+    }
+
+    public function test_an_unfinished_budget_is_not_a_budget_running_out(): void {
+        // A condition somebody started and did not finish narrows the rule. It says
+        // nothing at all about money, so it must not end the request.
+        $this->add('half written', 7, ['budget' => ['amount' => 0] + $this->onerequest()]);
+
+        $this->assertSame([], $this->matched($this->request()));
+        $this->assertSame([], $this->evaluator->get_budget_blocked());
+    }
+
     public function test_what_the_last_walk_found_replaces_what_the_one_before_found(): void {
         $rule = $this->add('metered', 7, ['budget' => $this->onerequest()]);
         $this->spend_one();

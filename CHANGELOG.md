@@ -3,6 +3,32 @@
 All notable changes to this plugin are recorded here. Dates are the date of the
 release, and versions follow [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+Fixes from a second independent review of the same code.
+
+### Fixed
+
+- A rule that routes by budget no longer ends the request unless the budget has
+  actually run out. A rule asking to be used *once* a limit has been passed fails
+  every time the limit has not been passed, and a course budget asked about a
+  request belonging to no course fails because there is no budget there at all.
+  Both were being read as "the money has gone", which on a site running the
+  router alongside other providers stopped every request it made.
+- A provider the site has told not to accept keys people bring now refuses them
+  at the moment of use, not only at the moment of registration. Keys registered
+  before the setting was changed were still being used, and a fallback chain
+  could still land on such a provider.
+- Recording the result of a key test no longer writes back the rest of the key.
+  Testing a key puts a request to somebody else's server, and a key rotated or a
+  spending limit lowered while that was in flight was being undone when the
+  answer came back.
+- The key a course pays with is deleted when the course is. What the course spent
+  stays; the secret does not. An upgrade step removes the keys of courses already
+  deleted.
+- Redacting a delegate's exception now covers the field a brought key was
+  actually put in, rather than only fields whose name looks like a key's.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

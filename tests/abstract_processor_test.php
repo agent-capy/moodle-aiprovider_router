@@ -69,6 +69,30 @@ final class abstract_processor_test extends \advanced_testcase {
         $this->assertStringContainsString('org-visible', $redacted);
     }
 
+    public function test_the_field_a_key_was_put_in_is_redacted_whatever_it_is_called(): void {
+        global $DB;
+
+        // Every provider Moodle ships happens to call its key something a pattern of
+        // likely names would catch, but nothing obliges one to. The name belongs to
+        // whoever wrote the provider, and the value here is somebody's own key, put
+        // there by this plugin, which therefore knows exactly where it is.
+        $target = \core\di::get(\core_ai\manager::class)->create_provider_instance(
+            classname: '\aiprovider_openai\provider',
+            name: 'Target two',
+            config: ['apikey' => 'sk-site-key', 'orgid' => 'org-visible'],
+        );
+        (new target_settings($DB))->set_key_field((int) $target->id, 'orgid');
+        $carrying = $target->with(config: ['orgid' => 'brought-key-1234'] + $target->config);
+
+        $redacted = abstract_processor::redact_for(
+            'refused the orgid brought-key-1234 supplied',
+            $carrying,
+        );
+
+        $this->assertStringNotContainsString('brought-key-1234', $redacted);
+        $this->assertStringContainsString('[redacted]', $redacted);
+    }
+
     public function test_a_message_long_enough_to_be_a_response_body_is_cut(): void {
         $redacted = abstract_processor::redact_for(str_repeat('x', 4000), $this->target());
 

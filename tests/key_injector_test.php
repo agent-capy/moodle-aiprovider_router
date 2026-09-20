@@ -145,6 +145,42 @@ final class key_injector_test extends \advanced_testcase {
         $this->assertSame(key_status::ABSENT, $injection->status);
     }
 
+    public function test_a_key_is_not_used_where_the_site_has_said_keys_are_not_welcome(): void {
+        // The setting has to hold over keys that were registered before it was made.
+        // Enforcing it only where a key is registered leaves every key already stored
+        // going on being used, which is not a policy at all.
+        $this->settings->set_key_field(3, 'apikey');
+        $key = $this->keys->save(key::SCOPE_USER, 7, 3, 'the-users-own-key');
+        $this->settings->set_mode(3, target_settings::MODE_DISALLOWED);
+
+        $injection = $this->injector->inject($this->target(), $key);
+
+        $this->assertFalse($injection->is_usable());
+        // Told apart from a target nobody has finished setting up, because this one is
+        // a decision somebody made.
+        $this->assertSame(key_status::DISALLOWED, $injection->status);
+    }
+
+    public function test_a_target_that_is_merely_unfinished_still_reads_as_unfinished(): void {
+        $key = $this->keys->save(key::SCOPE_USER, 7, 3, 'the-users-own-key');
+        $this->settings->set_mode(3, target_settings::MODE_DISALLOWED);
+
+        $injection = $this->injector->inject($this->target(), $key);
+
+        $this->assertSame(key_status::NO_FIELD, $injection->status);
+    }
+
+    public function test_a_key_brought_to_a_subject_is_refused_there_too(): void {
+        // The same test, reached the way a request reaches it.
+        $this->settings->set_key_field(3, 'apikey');
+        $this->keys->save(key::SCOPE_COURSE, 42, 3, 'the-course-key');
+        $this->settings->set_mode(3, target_settings::MODE_DISALLOWED);
+
+        $injection = $this->injector->for_subject($this->target(), key::SCOPE_COURSE, 42);
+
+        $this->assertSame(key_status::DISALLOWED, $injection->status);
+    }
+
     public function test_a_subjects_own_key_is_found_and_applied(): void {
         $this->settings->set_key_field(3, 'apikey');
         $this->keys->save(key::SCOPE_COURSE, 42, 3, 'the-course-key');

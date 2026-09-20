@@ -214,14 +214,35 @@ class key_repository {
     /**
      * Record what happened when the key was last tested.
      *
+     * Written as a statement of its own rather than by saving the key, because of what
+     * happens in between. Testing a key puts a request to somebody else's server, and
+     * the object being held while that happens was read before it started. Moodle's
+     * persistent saves every column it holds, so saving it afterwards would write back
+     * the secret and the spending limit as they were when the test began -- undoing a
+     * key somebody rotated, or a limit somebody lowered, in the meantime. The window is
+     * as long as the provider takes to answer, which is the longest window in the
+     * plugin.
+     *
+     * The stored secret is part of the condition, so a verdict is never attached to a
+     * key other than the one it was about. A key replaced during the test simply has no
+     * verdict recorded, which is correct: nobody has tested it.
+     *
      * @param key $key The key that was tested.
      * @param string $status One of the key verification results.
      * @param int|null $when The time of the test, or null for now.
      */
     public function record_verification(key $key, string $status, ?int $when = null): void {
-        $key->set('verifystatus', $status);
-        $key->set('timeverified', $when ?? time());
-        $key->save();
+        $this->db->execute(
+            'UPDATE {' . key::TABLE . '}
+                SET verifystatus = :status, timeverified = :when
+              WHERE id = :id AND secret = :secret',
+            [
+                'status' => $status,
+                'when' => $when ?? time(),
+                'id' => (int) $key->get('id'),
+                'secret' => (string) $key->get('secret'),
+            ],
+        );
     }
 
     /**

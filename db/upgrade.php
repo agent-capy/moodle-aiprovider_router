@@ -316,5 +316,28 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092002, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026092009) {
+        // Until now nothing removed a course's key when the course was deleted, so a
+        // site that has deleted a course is holding a secret for it that no screen can
+        // reach and no request can use. New deletions are handled as they happen; the
+        // ones already here are swept up once.
+        //
+        // Written as a delete by id rather than a subquery so that it behaves the same
+        // on every database Moodle supports, and so that a site with a large key table
+        // is not asked to do the work in one statement.
+        $orphans = $DB->get_fieldset_sql(
+            'SELECT k.id
+               FROM {aiprovider_router_key} k
+          LEFT JOIN {course} c ON c.id = k.scopeid
+              WHERE k.scope = :scope AND c.id IS NULL',
+            ['scope' => 'course'],
+        );
+        if ($orphans) {
+            $DB->delete_records_list('aiprovider_router_key', 'id', $orphans);
+        }
+
+        upgrade_plugin_savepoint(true, 2026092009, 'aiprovider', 'router');
+    }
+
     return true;
 }

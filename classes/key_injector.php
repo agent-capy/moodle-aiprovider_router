@@ -84,13 +84,23 @@ class key_injector {
      * @return key_injection What happened, and the instance to use if there is one.
      */
     public function inject(ai_provider $target, key $key): key_injection {
-        $field = $this->settings->get_key_field((int) $target->id);
-        if ($field === null || $field === target_settings::NO_KEY) {
+        // Asked here rather than only where a key is registered. A site can forbid
+        // brought keys at a provider long after somebody registered one for it, and a
+        // policy that is only enforced at the moment of registration is not a policy:
+        // the keys already stored would go on being used indefinitely.
+        if (!$this->settings->supports_byok((int) $target->id)) {
+            $field = $this->settings->get_key_field((int) $target->id);
+            if ($field !== null && $field !== target_settings::NO_KEY) {
+                return new key_injection(key_status::DISALLOWED, key: $key);
+            }
+
             // Either nobody has said where this provider's key goes, or somebody has said
             // it takes none. Both mean the key cannot be applied, and putting it nowhere
             // would send the request charged to the site instead.
             return new key_injection(key_status::NO_FIELD, key: $key);
         }
+
+        $field = $this->settings->get_key_field((int) $target->id);
 
         $secret = $this->keys->reveal($key);
         if ($secret === null) {

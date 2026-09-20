@@ -60,6 +60,9 @@ class target_resolver {
     /** @var int[]|null The targets the site's own key may not be used at, once read. */
     protected ?array $byokonly = null;
 
+    /** @var int[]|null The targets a brought key may not be used at, once read. */
+    protected ?array $byokdisallowed = null;
+
     /** @var key|null A key that is registered and cannot be decrypted. */
     protected ?key $unreadable = null;
 
@@ -93,6 +96,7 @@ class target_resolver {
         $this->unreadable = null;
         $this->budgetspent = false;
         $this->byokonly = null;
+        $this->byokdisallowed = null;
         $instances = $this->get_instances_by_id();
 
         $this->evaluated = $this->get_evaluation_context($action);
@@ -483,10 +487,18 @@ class target_resolver {
             return false;
         }
 
+        if ($brought) {
+            // The mirror of the test below. A provider the site has told not to accept
+            // keys people bring must not be reached by a fallback chain either, or the
+            // setting would hold for the target a rule names and not for the one the
+            // request actually lands on.
+            return !in_array((int) $instance->id, $this->get_byok_disallowed(), true);
+        }
+
         // A provider the site has set aside for brought keys only. Turned away here
         // rather than at the provider, so that a request the site would have paid for
         // moves on to the next rule instead of spending a round trip finding out.
-        return $brought || !in_array((int) $instance->id, $this->get_byok_only(), true);
+        return !in_array((int) $instance->id, $this->get_byok_only(), true);
     }
 
     /**
@@ -524,6 +536,19 @@ class target_resolver {
         $this->byokonly ??= (new target_settings($DB))->get_byok_only_ids();
 
         return $this->byokonly;
+    }
+
+    /**
+     * The instances a brought key may not be used at, read once per request.
+     *
+     * @return int[] The instance ids.
+     */
+    protected function get_byok_disallowed(): array {
+        global $DB;
+
+        $this->byokdisallowed ??= (new target_settings($DB))->get_byok_disallowed_ids();
+
+        return $this->byokdisallowed;
     }
 
     /**

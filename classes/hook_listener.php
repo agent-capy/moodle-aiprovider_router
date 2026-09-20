@@ -17,9 +17,10 @@
 namespace aiprovider_router;
 
 use core_ai\hook\after_ai_provider_form_hook;
+use core_course\hook\before_course_deleted;
 
 /**
- * Builds the settings form for a router instance.
+ * Callbacks for the core hooks this plugin listens to.
  *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
@@ -259,5 +260,28 @@ class hook_listener {
      */
     protected static function get_target_options(): array {
         return target_resolver::get_delegation_targets();
+    }
+
+    /**
+     * Remove the key a course paid with when the course goes.
+     *
+     * What a course used the AI for is history and stays: a removed course does not
+     * unspend the money. Its key is not history. It is a secret this site can still
+     * decrypt, for an account somebody is still paying for, and once the course is gone
+     * there is nothing left that could ever use it and no screen that could reach it to
+     * take it away -- the key screen is a page in a course. Moodle's privacy tools
+     * cannot find it either, because they find a course key through the course context,
+     * which is deleted with everything else.
+     *
+     * Done on the hook that fires before the deletion rather than on the event that
+     * follows it, because the event arrives once the course, and the context the key is
+     * reached through, have already gone.
+     *
+     * @param before_course_deleted $hook The hook being handled.
+     */
+    public static function delete_keys_for_deleted_course(before_course_deleted $hook): void {
+        global $DB;
+
+        (new key_repository($DB))->delete_for_course((int) $hook->course->id);
     }
 }
