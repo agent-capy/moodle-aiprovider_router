@@ -481,6 +481,7 @@ $string['ruletest:result'] = '各ルールの判定結果';
 $string['ruletest:run'] = 'テストする';
 $string['ruletest:tokens'] = '推定トークン数';
 $string['ruletest:tokens:value'] = '約 {$a->tokens} トークン（{$a->cjk} 文字を1トークンあたり {$a->cjkratio} 文字、{$a->other} 文字を {$a->otherratio} 文字として計算）。閾値を決めるときの目安としての推定値です。プロバイダが実際に課金する値とは差が出ますし、ルールの判定はこの値に依存しません。';
+$string['ruletest:unreadablekey'] = 'ルールがこの要求を引き受けましたが、指定された鍵が登録されているのに読み出せません。どこにも送られず、そこで止まります。このサイトの暗号鍵が変わった可能性があります。鍵を持ち込んだ本人が登録し直せば直ります。';
 $string['ruletest:user'] = 'ユーザー';
 $string['ruletest:user:none'] = 'なし';
 $string['ruletest:user_help'] = 'ユーザ名またはメールアドレスを入力します。指定したコースでそのユーザーが持つロール（上位から継承したものを含む）が、ロール条件の判定対象になります。空欄にすると、ユーザーのない要求として試せます。';

@@ -148,6 +148,23 @@ class budget_notifier {
             // A limit somebody puts on their own key is an amount of money. What they
             // are protecting is a bill, and the provider sends it in money.
             $spend = $key->get_cap_spend($this->ledger, $now);
+            // Stamped with its period, exactly as a rule's budget is. A limit reached
+            // in January is not an answer about February, and without this the note
+            // about January was still on record and February went unannounced.
+            [$capfrom] = $this->ledger->get_window($key->get_cap_period(), $key->get_cap_days(), $now);
+            $capstamp = (object) [
+                'periodstart' => $key->get_cap_period() === spend_ledger::PERIOD_MONTH ? $capfrom : 0,
+                'perioddays' => $key->get_cap_period() === spend_ledger::PERIOD_MONTH
+                    ? 0
+                    : max(1, (int) $key->get_cap_days()),
+            ];
+            // Only the notes about a period that has ended. A capped key is looked at
+            // on every run whether it spent anything or not -- they are read from the
+            // key table rather than from who spent something -- so weigh() clears the
+            // note as soon as the spending eases off, and the only thing it cannot
+            // reach is a note left by last month.
+            $this->forget_other_periods($result, (int) $key->get('id'), $capstamp);
+
             $this->weigh(
                 $result,
                 self::KIND_KEY,
@@ -156,6 +173,7 @@ class budget_notifier {
                 $key->get_cap_amount(),
                 spend_ledger::METRIC_COST,
                 $now,
+                $capstamp,
             );
         }
 
@@ -273,6 +291,27 @@ class budget_notifier {
                 $result['cleared']++;
             }
         }
+    }
+
+    /**
+     * Forget what was said to one key about a stretch of time that has ended.
+     *
+     * @param array $result Counts so far. Modified in place.
+     * @param int $keyid The key.
+     * @param \stdClass $stamp Which stretch of time is the current one.
+     */
+    protected function forget_other_periods(array &$result, int $keyid, \stdClass $stamp): void {
+        $where = 'kind = :kind AND subjectid = :subjectid
+                  AND (periodstart <> :periodstart OR perioddays <> :perioddays)';
+        $params = [
+            'kind' => self::KIND_KEY,
+            'subjectid' => $keyid,
+            'periodstart' => (int) $stamp->periodstart,
+            'perioddays' => (int) $stamp->perioddays,
+        ];
+
+        $result['cleared'] += $this->db->count_records_select(self::TABLE, $where, $params);
+        $this->db->delete_records_select(self::TABLE, $where, $params);
     }
 
     /**

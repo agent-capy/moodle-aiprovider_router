@@ -129,17 +129,6 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var bool Whether the router was ever reached, or core turned the request away first. */
     protected bool $routed = false;
 
-    /**
-     * @var array{prompttokens: int, completiontokens: int, cost: float|null} What the
-     *      attempts before this one already used.
-     *
-     * A target can answer successfully, report the tokens it charged for, and return
-     * nothing anybody can be shown. The request moves on to the next target, and what
-     * the first one spent is spent all the same. It is carried here rather than written
-     * as a row of its own, because one row is one request everywhere else in the
-     * reports and a budget counted in requests would start counting fallbacks.
-     */
-    protected array $spilled = ['prompttokens' => 0, 'completiontokens' => 0, 'cost' => 0.0];
 
     /**
      * The response field carrying the generated content, if the action has one.
@@ -201,7 +190,6 @@ abstract class abstract_processor extends \core_ai\process_base {
     #[\Override]
     protected function query_ai_api(): array {
         $this->routed = true;
-        $this->spilled = ['prompttokens' => 0, 'completiontokens' => 0, 'cost' => 0.0];
         if (!delegator::is_available()) {
             return $this->fail(503, 'delegationunavailable', self::REASON_UNAVAILABLE);
         }
@@ -286,9 +274,12 @@ abstract class abstract_processor extends \core_ai\process_base {
             // A success carrying no content must never reach the placement: the user
             // would be shown an empty result as though it had worked.
             if (!$this->is_truncated($data)) {
-                // Nothing to show and no reason given, so another target is tried. What
-                // this one charged for is not undone by that.
-                $this->remember_spill($candidate, $data);
+                // Nothing to show and no reason given, so another target is tried.
+                // What this one charged for is not undone by that, and it was charged
+                // to this target and to whatever key paid for it -- not to whichever
+                // one happens to answer next. So it gets a row of its own, marked as
+                // not being a request: the person asked once.
+                $this->record_usage($resolver, $candidate, $data, 1, false, false);
                 $last = $response;
 
                 continue;
@@ -393,6 +384,8 @@ abstract class abstract_processor extends \core_ai\process_base {
      * @param array|null $data The response data from that target.
      * @param int $attempts How many targets were tried.
      * @param bool $success Whether the user got an answer.
+     * @param bool $counted Whether this row is one of the site's requests. False for
+     *                      the record of a delegation attempt that did not answer.
      */
     protected function record_usage(
         target_resolver $resolver,
@@ -400,6 +393,7 @@ abstract class abstract_processor extends \core_ai\process_base {
         ?array $data,
         int $attempts,
         bool $success = false,
+        bool $counted = true,
     ): void {
         $context = $resolver->get_evaluated_context($this->action);
         $rule = $resolver->get_matched_rule();
@@ -420,7 +414,7 @@ abstract class abstract_processor extends \core_ai\process_base {
             'targetid' => $target === null ? null : (int) $target->id,
             'targetname' => $target === null ? null : $target->name,
             'targetprovider' => $target === null ? null : self::component_of($target),
-            'model' => $data['model'] ?? null,
+            'model' => self::modelled($data['model'] ?? null),
             'success' => (int) $success,
             'errorcode' => $success ? null : $this->failurecode,
             'reason' => $success ? null : $this->reason,
@@ -431,46 +425,20 @@ abstract class abstract_processor extends \core_ai\process_base {
             'completiontokens' => self::counted($data['completiontokens'] ?? null),
         ];
 
-        // One row is one request everywhere in these reports, and a budget counted in
-        // requests counts rows. So a target that answered with nothing does not get a
-        // row of its own; what it used is added to the row the request does get, with
-        // its own rate applied to its own tokens rather than the answering target's.
-        $this->get_logger()->record($entry, $this->get_image_count($success), $this->spilled);
-    }
-
-    /**
-     * Keep what a target used when its answer is not the one being returned.
-     *
-     * @param candidate $candidate The target that produced it.
-     * @param array $data Its response data.
-     */
-    protected function remember_spill(candidate $candidate, array $data): void {
-        $prompt = self::counted($data['prompttokens'] ?? null);
-        $completion = self::counted($data['completiontokens'] ?? null);
-        if ($prompt === null && $completion === null) {
-            // Nothing reported, so nothing known to have been used.
+        // A row that is not a request is still priced, still names its target and
+        // still names the key that paid for it. What it is not is a second request:
+        // the person asked once, and a budget counted in requests must agree.
+        $entry->counted = (int) $counted;
+        $images = $this->get_image_count($success);
+        $used = (int) ($entry->prompttokens ?? 0) + (int) ($entry->completiontokens ?? 0) + $images;
+        if (!$counted && $used === 0) {
+            // An attempt that used nothing anybody can point at leaves nothing to
+            // attribute, and a row saying so would be a row about nothing.
             return;
         }
 
-        $this->spilled['prompttokens'] += (int) $prompt;
-        $this->spilled['completiontokens'] += (int) $completion;
-
-        if ($this->spilled['cost'] === null) {
-            return;
-        }
-        $cost = $this->get_logger()->attempt_cost(
-            self::component_of($candidate->target),
-            isset($data['model']) ? (string) $data['model'] : null,
-            time(),
-            $prompt,
-            $completion,
-        );
-        // Unknown wins, as it does everywhere else here: a total that quietly dropped
-        // the part it could not price would read as a smaller bill rather than an
-        // unmeasured one.
-        $this->spilled['cost'] = $cost === null ? null : $this->spilled['cost'] + $cost;
+        $this->get_logger()->record($entry, $images);
     }
-
 
 
     /**
@@ -531,6 +499,41 @@ abstract class abstract_processor extends \core_ai\process_base {
                 . get_class($e) . ': ' . self::redact_for($e->getMessage(), $target),
             DEBUG_NORMAL,
         );
+    }
+
+    /**
+     * @var int How long a model name may be before it is not one.
+     *
+     * The column it goes in. A name longer than this is not shortened to fit: two
+     * models whose names differ only past this point would become one, and the rate
+     * table matches on the name.
+     */
+    protected const MODEL_LENGTH = 100;
+
+    /**
+     * The model a target said answered, as a name this site is willing to believe.
+     *
+     * The name comes from outside and nothing checks it. One that will not fit the
+     * column used to take the whole row down with it: the insert failed, the failure
+     * was swallowed so that recording a request can never break the request, and the
+     * result was a request that happened and left no trace at all -- no tokens, no
+     * cost, nothing for a budget to count.
+     *
+     * A name that cannot be believed is recorded as no name, which the reports
+     * already understand, and which the rate table reads as "whatever rate covers
+     * this provider". Saying "some model of theirs" is true; saying a shortened name
+     * would be saying something false about which one.
+     *
+     * @param mixed $value Whatever the target reported.
+     * @return string|null The name, or null where there is not a usable one.
+     */
+    protected static function modelled(mixed $value): ?string {
+        if (!is_string($value) && !is_numeric($value)) {
+            return null;
+        }
+        $name = trim((string) $value);
+
+        return $name !== '' && \core_text::strlen($name) <= self::MODEL_LENGTH ? $name : null;
     }
 
     /**

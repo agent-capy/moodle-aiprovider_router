@@ -33,14 +33,15 @@ class user_report_formatter {
      *
      * @param \stdClass[] $people Rows from the report.
      * @param string[] $names User names keyed by id.
-     * @param string $currency The site currency.
+     * @param string|null $currency What the figures are in, or null where the period
+     *                              holds more than one currency.
      * @param \moodle_url $url The page each person's name links back into.
      * @return \html_table The table.
      */
     public static function people(
         array $people,
         array $names,
-        string $currency,
+        ?string $currency,
         \moodle_url $url,
     ): \html_table {
         $table = new \html_table();
@@ -98,10 +99,11 @@ class user_report_formatter {
      * What somebody spent on their own key, with the warning that belongs beside it.
      *
      * @param \stdClass $person The person's figures.
-     * @param string $currency The site currency.
+     * @param string|null $currency What the figures are in, or null where the period
+     *                              holds more than one currency.
      * @return string HTML.
      */
-    protected static function brought(\stdClass $person, string $currency): string {
+    protected static function brought(\stdClass $person, ?string $currency): string {
         if ((int) $person->broughtrequests === 0) {
             return \html_writer::span('-', 'text-muted');
         }
@@ -117,10 +119,11 @@ class user_report_formatter {
      * One person's usage, day by day.
      *
      * @param \stdClass[] $days Rows from the report.
-     * @param string $currency The site currency.
+     * @param string|null $currency What the figures are in, or null where the period
+     *                              holds more than one currency.
      * @return \html_table The table.
      */
-    public static function days(array $days, string $currency): \html_table {
+    public static function days(array $days, ?string $currency): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('report:day', 'aiprovider_router'),
@@ -154,10 +157,11 @@ class user_report_formatter {
      * One person's individual requests.
      *
      * @param \stdClass[] $requests Rows from the report.
-     * @param string $currency The site currency, for a row recorded before there was one.
+     * @param string|null $currency What to fall back to for a row recorded before
+     *                              there was a currency at all.
      * @return \html_table The table.
      */
-    public static function requests(array $requests, string $currency): \html_table {
+    public static function requests(array $requests, ?string $currency): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('report:when', 'aiprovider_router'),
@@ -205,7 +209,8 @@ class user_report_formatter {
      * @param string[] $names User names keyed by id.
      * @param string[] $courses Course names keyed by id.
      * @param string[] $targets Target names keyed by id.
-     * @param string $currency The site currency.
+     * @param string|null $currency What the figures are in, or null where the period
+     *                              holds more than one currency.
      * @return \html_table The table.
      */
     public static function holders(
@@ -214,7 +219,7 @@ class user_report_formatter {
         array $names,
         array $courses,
         array $targets,
-        string $currency,
+        ?string $currency,
     ): \html_table {
         $table = new \html_table();
         $table->head = [
@@ -321,10 +326,17 @@ class user_report_formatter {
      *
      * @param \stdClass[] $people Rows from the report.
      * @param string[] $names User names keyed by id.
-     * @param string $currency The site currency.
+     * @param string|null $currency What the figures are in, or null where the period
+     *                              holds more than one currency.
      * @return array[] Rows of plain values.
      */
-    public static function people_rows(array $people, array $names, string $currency): array {
+    public static function people_rows(array $people, array $names, ?string $currency): array {
+        // A spreadsheet has nowhere to put "it depends". Where the period holds more
+        // than one currency the money columns are left empty and the currency column
+        // says why, because a number in the file would be read as a number: this is
+        // the one output that leaves Moodle and gets added up by somebody else.
+        $mixed = $currency === null;
+
         $rows = [];
         foreach ($people as $person) {
             $userid = (int) $person->userid;
@@ -334,10 +346,10 @@ class user_report_formatter {
                 (int) $person->requests,
                 (int) $person->prompttokens,
                 (int) $person->completiontokens,
-                $person->sitecost === null ? '' : (float) $person->sitecost,
-                $person->broughtcost === null ? '' : (float) $person->broughtcost,
+                $mixed || $person->sitecost === null ? '' : (float) $person->sitecost,
+                $mixed || $person->broughtcost === null ? '' : (float) $person->broughtcost,
                 (int) $person->broughtrequests,
-                $currency,
+                $mixed ? get_string('usage:cost:mixed', 'aiprovider_router') : $currency,
             ];
         }
 

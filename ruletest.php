@@ -120,9 +120,15 @@ if ($data) {
     $router = (new order_inspector())->get_primary_router();
     $resolver = $router === null ? null : new target_resolver($router);
     $candidates = $resolver?->get_candidates($action) ?? [];
-    $chosenrule = $resolver?->get_matched_rule();
-    $chosenid = $chosenrule === null ? null : (int) $chosenrule->get('id');
     $chosentarget = $candidates[0]->target ?? null;
+    // A rule can be matched and still carry the request nowhere. The clearest case is
+    // a key that is registered and cannot be decrypted: the resolver remembers the
+    // rule, empties the candidates and stops the request. Reading the rule alone
+    // produced a screen that said the request would be sent, to a provider it could
+    // not name.
+    $chosenrule = $chosentarget === null ? null : $resolver?->get_matched_rule();
+    $chosenid = $chosenrule === null ? null : (int) $chosenrule->get('id');
+    $unreadablekey = $resolver?->get_unreadable_key();
 
     echo $OUTPUT->heading(get_string('ruletest:result', 'aiprovider_router'), 3);
 
@@ -186,6 +192,11 @@ if ($data) {
             ]),
             'success',
         );
+    } else if ($unreadablekey !== null) {
+        // The one outcome that is nobody's mistake on this screen and everybody's
+        // problem on a real request: the request stops, and it stops for a reason an
+        // administrator can act on.
+        echo $OUTPUT->notification(get_string('ruletest:unreadablekey', 'aiprovider_router'), 'warning');
     } else if ($resolver !== null && $resolver->was_budget_spent()) {
         // Worth saying on its own. This is the one outcome that stops the request
         // outright rather than handing it on, and it reads on the screen above as

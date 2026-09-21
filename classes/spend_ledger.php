@@ -151,6 +151,50 @@ class spend_ledger extends usage_report {
     }
 
     /**
+     * How far back the furthest limit on this site has to be able to see.
+     *
+     * Every budget is worked out from what is still stored, so history removed from
+     * inside a budget's period does not make the figure unknown -- which is what this
+     * plugin does everywhere else it cannot measure something -- it makes it smaller.
+     * A limit that had been reached comes back under the line, and the requests it
+     * was stopping start going through again.
+     *
+     * Both kinds of limit count: the budgets a rule sets, and the limits people put
+     * on keys they brought. Asked in one place, because three separate screens can
+     * each create the mismatch and only one of them is about retention.
+     *
+     * A calendar month is counted as 31 days, which is the most one can be.
+     *
+     * @param \moodle_database $db The database to read.
+     * @return int Days, or zero where nothing on the site sets a limit.
+     */
+    public static function longest_reach_days(\moodle_database $db): int {
+        $days = 0;
+
+        foreach ((new rule_repository($db))->get_budgets() as $budget) {
+            $days = max($days, self::reach_of((string) $budget->period, (int) $budget->days));
+        }
+
+        foreach ($db->get_records_select(key::TABLE, 'capamount IS NOT NULL') as $record) {
+            $cap = new key(0, $record);
+            $days = max($days, self::reach_of($cap->get_cap_period(), $cap->get_cap_days()));
+        }
+
+        return $days;
+    }
+
+    /**
+     * How many days one limit reaches back over.
+     *
+     * @param string $period One of the PERIOD_ constants.
+     * @param int $length How many days a rolling period counts.
+     * @return int The days.
+     */
+    protected static function reach_of(string $period, int $length): int {
+        return $period === self::PERIOD_MONTH ? 31 : max(1, $length);
+    }
+
+    /**
      * What the site has spent on a subject's behalf over a period.
      *
      * @param string $scope One of the SCOPE_ constants.

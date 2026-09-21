@@ -86,6 +86,41 @@ Fixes from a second independent review of the same code.
   priced against the provider that ran it, and a total with an unpriceable part
   in it stays unknown rather than becoming a smaller number.
 
+### Fixed again
+
+A third review found that several of the fixes above were narrower than the
+problems they were for. These finish them.
+
+- A fallback chain now writes one row per attempt, against the target and the
+  key that paid for it, instead of adding what an earlier attempt spent to the
+  row of whichever target answered. Charging the first one's spending to the
+  second key blocked a key that had spent almost nothing and let through the
+  one that had spent its limit. One request is still one request: the extra
+  rows say they are not to be counted as one, and every count of requests
+  reads that rather than counting rows.
+- A model name too long for the column is recorded as no name rather than
+  taking the whole row down with it. The insert failed, the failure was
+  swallowed so that recording can never break a request, and the result was a
+  request that happened and left no trace at all.
+- Limits people put on their own keys are stamped with their period, as rule
+  budgets already were, so a limit reached in January is announced again in
+  February.
+- A budget set by a rule about a category is about the courses in that
+  category, including those further down. Only a rule that named courses one
+  by one was being read, so a category rule's budget was announced to every
+  course on the site.
+- Every figure on a usage screen is in the currency the period was recorded
+  in, and where the period holds two, no money figure is given -- in the
+  tables, on the chart and in the exported file, not only in the headline.
+- Removing history a budget still reaches back into is refused by the settings
+  form, which now counts limits on brought keys as well as rule budgets, and
+  is prevented at the purge itself, which is the only place that sees a budget
+  written after the retention was shortened.
+- After a change of timezone, a day that begins before the point the
+  summariser reached is counted from that point rather than skipped whole.
+- The rule tester no longer says a request would be sent when the key it needs
+  is registered and cannot be read. It says what would really happen.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

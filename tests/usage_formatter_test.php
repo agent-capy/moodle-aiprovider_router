@@ -91,7 +91,7 @@ final class usage_formatter_test extends \advanced_testcase {
     public function test_a_period_in_one_currency_shows_the_figure_in_it(): void {
         $this->resetAfterTest();
 
-        $out = usage_formatter::totals($this->totals(1010.0), 'USD', ['JPY']);
+        $out = usage_formatter::totals($this->totals(1010.0), 'JPY');
 
         // The currency the costs were recorded in, not the one the site uses today.
         $this->assertStringContainsString('JPY', $out);
@@ -101,7 +101,7 @@ final class usage_formatter_test extends \advanced_testcase {
     public function test_a_period_holding_two_currencies_gives_no_total(): void {
         $this->resetAfterTest();
 
-        $out = usage_formatter::totals($this->totals(1010.0), 'USD', ['JPY', 'USD']);
+        $out = usage_formatter::totals($this->totals(1010.0), null);
 
         // 1000 JPY and 10 USD do not add up to 1010 of anything. Nothing here
         // converts between currencies, and a figure that looks like money in the
@@ -113,10 +113,10 @@ final class usage_formatter_test extends \advanced_testcase {
         $this->assertStringNotContainsString('1,010', $out);
     }
 
-    public function test_a_period_that_priced_nothing_falls_back_to_the_site_currency(): void {
+    public function test_a_period_that_priced_nothing_uses_the_site_currency(): void {
         $this->resetAfterTest();
 
-        $out = usage_formatter::totals($this->totals(0.0), 'USD', []);
+        $out = usage_formatter::totals($this->totals(0.0), 'USD');
 
         $this->assertStringContainsString('USD', $out);
     }

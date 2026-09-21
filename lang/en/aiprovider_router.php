@@ -481,6 +481,7 @@ $string['ruletest:result'] = 'What each rule did';
 $string['ruletest:run'] = 'Test';
 $string['ruletest:tokens'] = 'Estimated tokens';
 $string['ruletest:tokens:value'] = 'About {$a->tokens} tokens ({$a->cjk} characters counted at {$a->cjkratio} per token, {$a->other} at {$a->otherratio}). An estimate, shown as a guide when choosing a threshold; what a provider charges will differ, and no rule depends on this figure.';
+$string['ruletest:unreadablekey'] = 'A rule claimed this request and asked for a key that is registered but cannot be read, so the request would stop there rather than being sent anywhere. The encryption key this site uses has probably changed; whoever brought the key can register it again.';
 $string['ruletest:user'] = 'User';
 $string['ruletest:user:none'] = 'None';
 $string['ruletest:user_help'] = 'A username or an email address. Their roles in the chosen course, including any inherited from above it, are what role conditions are tested against. Leave empty to test a request with no user attached.';

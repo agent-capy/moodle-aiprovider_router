@@ -33,23 +33,16 @@ class usage_formatter {
      * The headline figures for the period.
      *
      * @param \stdClass $totals The totals.
-     * @param string $currency The site currency, for a period that priced nothing.
-     * @param string[] $currencies The currencies the period's costs were recorded in.
+     * @param string|null $currency What the figures are in, or null where the period
+     *                              holds more than one currency.
      * @return string HTML.
      */
-    public static function totals(\stdClass $totals, string $currency, array $currencies = []): string {
-        // More than one currency in the period means there is no total to give. The
-        // figures were worked out when the requests happened and nothing here converts
-        // between currencies, so adding them would produce a number in no currency at
-        // all -- and it would look exactly like a number in the site's own.
-        $mixed = count($currencies) > 1;
+    public static function totals(\stdClass $totals, ?string $currency): string {
         $items = [
             'usage:total:requests' => number_format((int) $totals->requests),
             'usage:total:failures' => number_format((int) $totals->failures),
             'usage:total:tokens' => number_format((int) $totals->prompttokens + (int) $totals->completiontokens),
-            'usage:total:cost' => $mixed
-                ? get_string('usage:cost:mixed', 'aiprovider_router')
-                : self::cost($totals->cost, $currencies ? (string) reset($currencies) : $currency),
+            'usage:total:cost' => self::cost($totals->cost, $currency),
         ];
 
         $cells = '';
@@ -124,10 +117,20 @@ class usage_formatter {
      * A cost, with the currency it is counted in.
      *
      * @param int|float|null $cost The cost, or null when nothing priced it.
-     * @param string $currency The site currency.
+     * @param string|null $currency What it is in, or null where the period holds more
+     *                              than one currency and no figure can be given.
      * @return string The formatted cost.
      */
-    public static function cost(int|float|null $cost, string $currency): string {
+    public static function cost(int|float|null $cost, ?string $currency): string {
+        if ($currency === null) {
+            // More than one currency in the period, so there is no figure to give.
+            // Costs are worked out when a request happens and nothing here converts
+            // between currencies, so adding them would produce a number in no
+            // currency at all -- and it would look exactly like a number in the
+            // site's own. Said at every figure rather than only at the total,
+            // because a table of them is where somebody reads the detail.
+            return get_string('usage:cost:mixed', 'aiprovider_router');
+        }
         if ($cost === null) {
             return get_string('usage:cost:unknown', 'aiprovider_router');
         }
@@ -188,10 +191,11 @@ class usage_formatter {
      * few units drawn against a few hundred requests is a flat line along the bottom.
      *
      * @param array $series Rows keyed by the midnight of their day.
-     * @param string $currency The site currency.
+     * @param string|null $currency What the costs are in, or null where the period
+     *                              holds more than one and the cost axis is left off.
      * @return \core\chart_line The chart.
      */
-    public static function daily_chart(array $series, string $currency): \core\chart_line {
+    public static function daily_chart(array $series, ?string $currency): \core\chart_line {
         $labels = [];
         $requests = [];
         $costs = [];
@@ -207,6 +211,12 @@ class usage_formatter {
             get_string('usage:total:requests', 'aiprovider_router'),
             $requests,
         ));
+
+        if ($currency === null) {
+            // More than one currency in the period, so the cost line would be a sum
+            // of things that do not add up. The request count is still worth drawing.
+            return $chart;
+        }
 
         $cost = new \core\chart_series(
             get_string('usage:total:cost', 'aiprovider_router') . ' (' . $currency . ')',
@@ -277,10 +287,11 @@ class usage_formatter {
      * What each model was asked for, what it used and what it cost.
      *
      * @param \stdClass[] $rows The rows, busiest first.
-     * @param string $currency The site currency.
+     * @param string|null $currency What the costs are in, or null where the period
+     *                              holds more than one.
      * @return \html_table The table.
      */
-    public static function model_table(array $rows, string $currency): \html_table {
+    public static function model_table(array $rows, ?string $currency): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('usage:column:model', 'aiprovider_router'),

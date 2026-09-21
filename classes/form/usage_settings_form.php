@@ -119,22 +119,17 @@ class usage_settings_form extends \moodleform {
     }
 
     /**
-     * How far back the longest budget on this site has to be able to see.
+     * How far back the furthest limit on this site has to be able to see.
      *
-     * A calendar month is counted as 31 days, which is the most one can be.
+     * Both kinds count: the budgets a rule sets, and the limits people put on keys
+     * they brought. The second was missed at first, and a site with no rule budgets
+     * and a monthly key limit could throw away the month the limit was about.
      *
-     * @return int Days, or zero where no rule sets a budget.
+     * @return int Days, or zero where nothing on the site sets a limit.
      */
     protected function longest_budget_days(): int {
         global $DB;
 
-        $days = 0;
-        foreach ((new rule_repository($DB))->get_budgets() as $budget) {
-            $days = max($days, $budget->period === spend_ledger::PERIOD_MONTH
-                ? 31
-                : max(1, (int) $budget->days));
-        }
-
-        return $days;
+        return spend_ledger::longest_reach_days($DB);
     }
 }

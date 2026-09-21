@@ -170,7 +170,7 @@ class user_report extends usage_report {
     public function get_key_usage(int $from, int $to): array {
         return $this->db->get_records_sql(
             'SELECT keyid,
-                    COUNT(*) AS requests,
+                    SUM(counted) AS requests,
                     SUM(cost) AS cost
                FROM {' . usage_logger::TABLE . '}
               WHERE keyid IS NOT NULL AND timecreated >= :from AND timecreated < :to

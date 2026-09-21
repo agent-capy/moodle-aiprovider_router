@@ -17,6 +17,8 @@
 namespace aiprovider_router\form;
 
 use aiprovider_router\condition\budget;
+use aiprovider_router\key;
+use aiprovider_router\key_repository;
 use aiprovider_router\rule;
 use aiprovider_router\rule_repository;
 use aiprovider_router\spend_ledger;
@@ -99,6 +101,21 @@ final class usage_settings_form_test extends \advanced_testcase {
 
         $this->assertArrayHasKey('summaryretentiondays', $this->validate(1, 30));
         $this->assertArrayNotHasKey('summaryretentiondays', $this->validate(1, 31));
+    }
+
+    public function test_a_limit_on_a_brought_key_counts_too(): void {
+        global $DB;
+
+        // A site with no rule budgets at all can still have a limit to protect: the
+        // one somebody put on a key they brought. That is set on a screen which
+        // knows nothing about retention, and it was being left out of this check.
+        $user = $this->getDataGenerator()->create_user();
+        $this->setUser($user);
+        $repository = new key_repository($DB);
+        $key = $repository->save(key::SCOPE_USER, (int) $user->id, 3, 'their-own-key-ab');
+        $repository->set_cap($key, 50.0, spend_ledger::PERIOD_MONTH, 30);
+
+        $this->assertArrayHasKey('summaryretentiondays', $this->validate(1, 2));
     }
 
     public function test_keeping_everything_for_ever_is_always_allowed(): void {

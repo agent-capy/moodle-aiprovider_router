@@ -149,21 +149,32 @@ class usage_report {
             }
         }
 
-        // Days the task has not reached are counted one at a time. On a site whose cron
-        // is running that is today and nothing else.
+        // What the task has not reached yet is counted one at a time. On a site whose
+        // cron is running that is today and nothing else.
+        //
+        // A day is counted from the boundary rather than skipped for being before it.
+        // The two need not line up: the boundary is a midnight in the timezone the
+        // task last ran in, and after a change of timezone a day can begin before it
+        // and end after it. Skipping such a day whole lost the part of it that had
+        // never been summarised, and that part is still sitting in the detail.
         foreach (array_keys($series) as $day) {
-            if ($day < $boundary) {
+            $detailfrom = max($day, $from, $boundary);
+            $detailto = min($this->aggregator->add_days($day, 1), $to);
+            if ($detailfrom >= $detailto) {
+                // All of this day was summarised, so the summaries above have it.
                 continue;
             }
-            $end = min($this->aggregator->add_days($day, 1), $to);
+
             $rows = $this->detailed([], 'timecreated >= :from AND timecreated < :to', [
-                'from' => max($day, $from),
-                'to' => $end,
+                'from' => $detailfrom,
+                'to' => $detailto,
             ], $courseid, $keysource);
             // An aggregate over no rows still comes back, as one row of nothing, so what
             // arrives is normalised rather than trusted.
             if ($rows) {
-                $series[$day] = $this->normalise(reset($rows));
+                // Added, because the earlier part of the same day may already be here
+                // from a summary.
+                $series[$day] = self::total([$series[$day], $this->normalise(reset($rows))]);
             }
         }
 
@@ -219,12 +230,36 @@ class usage_report {
     }
 
     /**
-     * The currencies the costs in a period were recorded in.
+     * What every figure on a screen about this period should be labelled with.
      *
      * Costs are worked out when a request happens and kept, and nothing is ever
-     * converted, so a site that changes its currency ends up holding both. Adding
+     * converted, so a site that changed its currency ends up holding both. Adding
      * those together produces a number in no currency at all, which is worse than
-     * saying the total cannot be given: the figure looks right and is not.
+     * saying the total cannot be given: the figure looks right and is not. Decided
+     * once per screen so that the headline, every table, the chart and the exported
+     * file cannot come to different answers.
+     *
+     * @param int $from The start of the period.
+     * @param int $to The end of the period.
+     * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to requests one payer covered, or null for all.
+     * @return string|null The currency, or null where the period holds more than one.
+     */
+    public function currency_for(int $from, int $to, ?int $courseid = null, ?string $keysource = null): ?string {
+        $found = $this->get_currencies($from, $to, $courseid, $keysource);
+
+        return match (count($found)) {
+            // Nothing in the period was priced, so the site's own currency is as good
+            // an answer as any and the figures will all read "not known" anyway.
+            0 => price_book::get_currency(),
+            1 => (string) reset($found),
+            // More than one. There is no figure to give, and saying so is the answer.
+            default => null,
+        };
+    }
+
+    /**
+     * The currencies the costs in a period were recorded in.
      *
      * @param int $from The start of the period.
      * @param int $to The end of the period.
@@ -305,7 +340,10 @@ class usage_report {
         ?int $courseid = null,
         ?string $keysource = null,
     ): array {
-        $where = 'success = 0 AND timecreated >= :from AND timecreated < :to';
+        // Only the requests. A delegation attempt that answered with nothing has a
+        // row of its own so that what it spent lands on the right key, but the
+        // request it belonged to was answered by the next target and did not fail.
+        $where = 'counted = 1 AND success = 0 AND timecreated >= :from AND timecreated < :to';
         $params = ['from' => $from, 'to' => $to];
         [$where, $params] = $this->for_course($where, $params, $courseid);
         [$where, $params] = $this->for_keysource($where, $params, $keysource);
@@ -435,7 +473,7 @@ class usage_report {
 
         return $this->rows(
             'SELECT ' . $select . '
-                    COUNT(*) AS requests,
+                    SUM(counted) AS requests,
                     SUM(CASE WHEN success = 1 THEN 0 ELSE 1 END) AS failures,
                     SUM(CASE WHEN prompttokens IS NULL THEN 0 ELSE prompttokens END) AS prompttokens,
                     SUM(CASE WHEN completiontokens IS NULL THEN 0 ELSE completiontokens END) AS completiontokens,

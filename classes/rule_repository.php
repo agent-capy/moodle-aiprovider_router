@@ -17,6 +17,7 @@
 namespace aiprovider_router;
 
 use aiprovider_router\condition\budget;
+use aiprovider_router\condition\category as category_condition;
 use aiprovider_router\condition\course as course_condition;
 
 /**
@@ -388,6 +389,17 @@ class rule_repository {
     /**
      * The courses each rule restricts itself to, for the rules that restrict themselves.
      *
+     * Two conditions can do the restricting and both have to be read. A rule about a
+     * category is about the courses in it, so a budget it sets is not about any course
+     * outside -- reading only the course condition announced a limit to courses the
+     * rule could never have restricted. Where a rule has both, it applies to the
+     * courses that satisfy both, which is what a rule's conditions mean together.
+     *
+     * The conditions that depend on the request rather than on the course -- who
+     * asked, which action, how long the prompt was -- cannot be reflected in a figure
+     * for a whole course, so they are not: the figure is what the course spent, which
+     * is what the budget condition itself measures.
+     *
      * @param int[] $ruleids The rules to look at.
      * @return array<int, int[]> Course ids keyed by rule id, for those rules only.
      */
@@ -396,22 +408,73 @@ class rule_repository {
             return [];
         }
         [$insql, $params] = $this->db->get_in_or_equal(array_unique($ruleids), SQL_PARAMS_NAMED);
-        $params['type'] = course_condition::get_type();
+        $params['coursetype'] = course_condition::get_type();
+        $params['categorytype'] = category_condition::get_type();
 
         $courses = [];
         $records = $this->db->get_records_select(
             self::CONDITION_TABLE,
-            "type = :type AND ruleid {$insql}",
+            "type IN (:coursetype, :categorytype) AND ruleid {$insql}",
             $params,
         );
         foreach ($records as $record) {
             $config = json_decode((string) $record->configdata, true);
-            $ids = array_map('intval', (array) ($config['courseids'] ?? []));
-            if ($ids) {
-                $courses[(int) $record->ruleid] = $ids;
+            $ruleid = (int) $record->ruleid;
+
+            $ids = (string) $record->type === category_condition::get_type()
+                ? self::courses_in_categories(array_map('intval', (array) ($config['categoryids'] ?? [])))
+                : array_map('intval', (array) ($config['courseids'] ?? []));
+            if (!$ids) {
+                continue;
             }
+
+            // Both conditions on one rule narrow it to what satisfies both.
+            $courses[$ruleid] = isset($courses[$ruleid])
+                ? array_values(array_intersect($courses[$ruleid], $ids))
+                : $ids;
         }
 
         return $courses;
+    }
+
+    /**
+     * Every course a set of categories holds, including those further down.
+     *
+     * A category condition is satisfied by a course anywhere beneath the category, so
+     * the budget it sets is about all of them.
+     *
+     * @param int[] $categoryids The categories.
+     * @return int[] The course ids.
+     */
+    protected static function courses_in_categories(array $categoryids): array {
+        global $DB;
+
+        if (!$categoryids) {
+            return [];
+        }
+
+        // Asked of the database rather than of core_course_category::get_courses(),
+        // which is written for showing a category to somebody and leaves out what
+        // they may not see. A budget is about every course under the category,
+        // whoever happens to be looking.
+        $courses = [];
+        foreach ($categoryids as $categoryid) {
+            $path = $DB->get_field('course_categories', 'path', ['id' => $categoryid]);
+            if ($path === false) {
+                continue;
+            }
+            $found = $DB->get_fieldset_sql(
+                "SELECT c.id
+                   FROM {course} c
+                   JOIN {course_categories} cc ON cc.id = c.category
+                  WHERE cc.id = :categoryid OR " . $DB->sql_like('cc.path', ':path'),
+                ['categoryid' => (int) $categoryid, 'path' => $DB->sql_like_escape($path) . '/%'],
+            );
+            foreach ($found as $courseid) {
+                $courses[(int) $courseid] = true;
+            }
+        }
+
+        return array_keys($courses);
     }
 }

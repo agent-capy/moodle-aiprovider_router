@@ -376,5 +376,18 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092010, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026092101) {
+        // A delegation attempt that used tokens and answered with nothing now gets a
+        // row of its own, against the target and the key that paid for it. One request
+        // is still one request, so the new rows say they are not to be counted as one.
+        $table = new xmldb_table('aiprovider_router_log');
+        $field = new xmldb_field('counted', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '1', 'attempts');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026092101, 'aiprovider', 'router');
+    }
+
     return true;
 }

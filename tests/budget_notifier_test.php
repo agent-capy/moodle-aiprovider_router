@@ -506,6 +506,117 @@ final class budget_notifier_test extends \advanced_testcase {
         $this->assertCount(0, $sink->get_messages());
     }
 
+    public function test_a_key_limit_is_announced_again_in_the_new_month(): void {
+        global $DB;
+
+        // The same fault as the rule budgets had, in the other loop. A limit somebody
+        // put on their own key is stamped with its period too, or January's note is
+        // still on record in February and February goes unannounced.
+        $owner = $this->getDataGenerator()->create_user();
+        $this->setUser($owner);
+        $key = (new key_repository($DB))->save(key::SCOPE_USER, (int) $owner->id, 3, 'their-own-key-ab');
+        (new key_repository($DB))->set_cap($key, 10.0, spend_ledger::PERIOD_MONTH, 30);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $this->spent(10.0, [
+            'userid' => (int) $owner->id,
+            'keysource' => rule::KEYSOURCE_USER,
+            'keyid' => (int) $key->get('id'),
+            'targetid' => 3,
+            'timecreated' => make_timestamp(2026, 1, 15, 12, 0, 0),
+        ]);
+        $sink = $this->redirectMessages();
+        $this->assertSame(1, $this->notifier->run(make_timestamp(2026, 1, 20, 12, 0, 0))['sent']);
+
+        $this->spent(10.0, [
+            'userid' => (int) $owner->id,
+            'keysource' => rule::KEYSOURCE_USER,
+            'keyid' => (int) $key->get('id'),
+            'targetid' => 3,
+            'timecreated' => make_timestamp(2026, 2, 15, 12, 0, 0),
+        ]);
+
+        // Straight to February, with no run in between that saw the spending below
+        // the line. Nothing about a cron outage is needed for this.
+        $this->assertSame(1, $this->notifier->run(make_timestamp(2026, 2, 20, 12, 0, 0))['sent']);
+        $this->assertCount(2, $sink->get_messages());
+    }
+
+    public function test_one_key_reaching_its_limit_does_not_silence_another(): void {
+        global $DB;
+
+        // Two keys, the same limit, both over it. Clearing "everything not over the
+        // line" per key would delete the first key's note while looking at the
+        // second, and the pair would be announced again every morning.
+        $owner = $this->getDataGenerator()->create_user();
+        $this->setUser($owner);
+        $repository = new key_repository($DB);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        foreach ([3, 4] as $targetid) {
+            $key = $repository->save(key::SCOPE_USER, (int) $owner->id, $targetid, "their-key-at-{$targetid}");
+            $repository->set_cap($key, 10.0, spend_ledger::PERIOD_MONTH, 30);
+            $this->spent(10.0, [
+                'userid' => (int) $owner->id,
+                'keysource' => rule::KEYSOURCE_USER,
+                'keyid' => (int) $key->get('id'),
+                'targetid' => $targetid,
+            ]);
+        }
+
+        $sink = $this->redirectMessages();
+        $first = $this->notifier->run($this->now);
+        $second = $this->notifier->run($this->now);
+
+        $this->assertSame(2, $first['sent']);
+        // The second morning. Both still over, and nothing more to say about either.
+        $this->assertSame(0, $second['sent']);
+        $this->assertCount(2, $sink->get_messages());
+    }
+
+    public function test_a_budget_set_by_a_rule_about_one_category_is_not_about_another(): void {
+        $watched = $this->getDataGenerator()->create_category();
+        $other = $this->getDataGenerator()->create_category();
+        $inside = $this->getDataGenerator()->create_course(['category' => $watched->id]);
+        $outside = $this->getDataGenerator()->create_course(['category' => $other->id]);
+        unset($inside);
+
+        // A category condition restricts a rule to the courses under it just as
+        // surely as naming them one by one does.
+        $this->budget_rule(
+            spend_ledger::SCOPE_COURSE,
+            10.0,
+            conditions: ['category' => ['categoryids' => [(int) $watched->id]]],
+        );
+        $this->spent(10.0, ['courseid' => (int) $outside->id]);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $sink = $this->redirectMessages();
+        $result = $this->notifier->run($this->now);
+
+        $this->assertSame(0, $result['sent']);
+        $this->assertCount(0, $sink->get_messages());
+    }
+
+    public function test_a_course_under_the_named_category_is_still_told(): void {
+        $watched = $this->getDataGenerator()->create_category();
+        $child = $this->getDataGenerator()->create_category(['parent' => $watched->id]);
+        $course = $this->getDataGenerator()->create_course(['category' => $child->id]);
+
+        // A course further down the tree is inside the category as well.
+        $this->budget_rule(
+            spend_ledger::SCOPE_COURSE,
+            10.0,
+            conditions: ['category' => ['categoryids' => [(int) $watched->id]]],
+        );
+        $this->spent(10.0, ['courseid' => (int) $course->id]);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $this->redirectMessages();
+
+        $this->assertSame(1, $this->notifier->run($this->now)['sent']);
+    }
+
     public function test_two_limits_of_the_same_size_do_not_silence_each_other(): void {
         // Three requests, and three of whatever the site's money is called. The two
         // limits are the same number and are reached at different moments, so what has

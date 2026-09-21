@@ -93,9 +93,11 @@ $form->set_data([
 ]);
 
 $report = new usage_report($DB, $aggregator);
-$currency = price_book::get_currency();
 $now = time();
 $from = $aggregator->add_days($aggregator->day_of($now), -($days - 1));
+// One answer for the whole screen: the headline, the tables, the chart and the
+// exported file must not disagree about what the money is counted in.
+$currency = $report->currency_for($from, $now, null, $keysource);
 
 $series = $report->get_series($from, $now, null, $keysource);
 $totals = usage_report::total($series);
@@ -151,7 +153,7 @@ if ((int) $totals->requests === 0) {
     echo $OUTPUT->notification(get_string('usage:none', 'aiprovider_router'), 'info');
     echo usage_formatter::elsewhere($bykeysource, $keysource);
 } else {
-    echo usage_formatter::totals($totals, $currency, $report->get_currencies($from, $now, null, $keysource));
+    echo usage_formatter::totals($totals, $currency);
     echo usage_formatter::elsewhere($bykeysource, $keysource);
 
     echo $OUTPUT->heading(get_string('usage:chart:daily', 'aiprovider_router'), 3);

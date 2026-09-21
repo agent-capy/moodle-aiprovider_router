@@ -233,6 +233,18 @@ class usage_aggregator {
 
         $today = $this->day_of($now);
         $cutoff = min($this->add_days($today, -$days), $this->add_days($today, -$detaildays));
+
+        // Nothing a budget still reaches back into is removed, whatever the retention
+        // settings say. The settings form refuses the combination when it can see it,
+        // but a budget can be written after the retention was shortened, and a limit
+        // on a brought key is set on a screen that knows nothing about either. Losing
+        // that history does not make the spending unknown, it makes it smaller, and a
+        // limit that had been reached comes back under the line.
+        $reach = spend_ledger::longest_reach_days($this->db);
+        if ($reach > 0) {
+            $cutoff = min($cutoff, $this->add_days($today, -$reach));
+        }
+
         $params = ['cutoff' => $cutoff];
         $count = $this->db->count_records_select(self::TABLE, 'daystart < :cutoff', $params);
         if ($count > 0) {
@@ -349,12 +361,12 @@ class usage_aggregator {
      */
     protected function get_summary_sql(): string {
         return 'SELECT courseid, userid, actionname, targetid, targetname, targetprovider, model, keysource, currency,
-                       COUNT(*) AS requests,
-                       SUM(CASE WHEN success = 1 THEN 0 ELSE 1 END) AS failures,
+                       SUM(counted) AS requests,
+                       SUM(CASE WHEN counted = 1 AND success = 0 THEN 1 ELSE 0 END) AS failures,
                        SUM(CASE WHEN prompttokens IS NULL THEN 0 ELSE prompttokens END) AS prompttokens,
                        SUM(CASE WHEN completiontokens IS NULL THEN 0 ELSE completiontokens END) AS completiontokens,
                        SUM(cost) AS cost,
-                       SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedrequests
+                       SUM(CASE WHEN counted = 1 AND cost IS NOT NULL THEN 1 ELSE 0 END) AS costedrequests
                   FROM {' . usage_logger::TABLE . '}
                  WHERE timecreated >= :start AND timecreated < :end
               GROUP BY courseid, userid, actionname, targetid, targetname, targetprovider, model,

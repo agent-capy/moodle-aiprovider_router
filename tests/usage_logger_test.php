@@ -238,10 +238,24 @@ final class usage_logger_test extends \advanced_testcase {
      */
     protected function logged(): \stdClass {
         global $DB;
-        $records = $DB->get_records(usage_logger::TABLE, null, 'id ASC');
+        // The row for the request itself. A fallback chain writes one row per attempt
+        // so that what each one used lands on the target and the key that paid for
+        // it, and only one of them is the request.
+        $records = $DB->get_records(usage_logger::TABLE, ['counted' => 1], 'id ASC');
         $this->assertCount(1, $records);
 
         return reset($records);
+    }
+
+    /**
+     * The rows for the attempts that did not answer, oldest first.
+     *
+     * @return \stdClass[] The rows.
+     */
+    protected function attempts(): array {
+        global $DB;
+
+        return array_values($DB->get_records(usage_logger::TABLE, ['counted' => 0], 'id ASC'));
     }
 
     public function test_a_successful_request_records_where_it_went(): void {
@@ -481,10 +495,19 @@ final class usage_logger_test extends \advanced_testcase {
             ]),
         ]);
 
+        // The request names the target that answered and what that one used.
         $row = $this->logged();
         $this->assertSame(2, (int) $row->attempts);
-        $this->assertSame(1010, (int) $row->prompttokens);
-        $this->assertSame(220, (int) $row->completiontokens);
+        $this->assertSame(10, (int) $row->prompttokens);
+        $this->assertSame(20, (int) $row->completiontokens);
+
+        // What the first target used is not lost, and is not attributed to the
+        // second: it has its own row, against the target that really used it.
+        $attempts = $this->attempts();
+        $this->assertCount(1, $attempts);
+        $this->assertSame(1000, (int) $attempts[0]->prompttokens);
+        $this->assertSame(200, (int) $attempts[0]->completiontokens);
+        $this->assertSame(7, (int) $attempts[0]->targetid);
     }
 
     public function test_it_is_still_one_request(): void {
@@ -498,7 +521,11 @@ final class usage_logger_test extends \advanced_testcase {
             $this->target(8, \aiprovider_mock\provider::SUCCESS, ['content' => 'Answered']),
         ]);
 
-        $this->assertSame(1, $DB->count_records(usage_logger::TABLE));
+        // Two rows, because two targets were asked and both used something. One
+        // request, because the person asked once and that is what a budget counted
+        // in requests must see.
+        $this->assertSame(2, $DB->count_records(usage_logger::TABLE));
+        $this->assertSame(1, $DB->count_records(usage_logger::TABLE, ['counted' => 1]));
     }
 
     public function test_each_attempt_is_priced_at_its_own_rate(): void {
@@ -531,7 +558,8 @@ final class usage_logger_test extends \advanced_testcase {
 
         // A fallback chain crosses providers and models, so the attempt that produced
         // nothing is priced against what produced it, not against what answered.
-        $this->assertEqualsWithDelta(11.0, (float) $this->logged()->cost, 0.000001);
+        $this->assertEqualsWithDelta(1.0, (float) $this->logged()->cost, 0.000001);
+        $this->assertEqualsWithDelta(10.0, (float) $this->attempts()[0]->cost, 0.000001);
     }
 
     public function test_a_cost_nobody_can_work_out_stays_unknown(): void {
@@ -554,9 +582,90 @@ final class usage_logger_test extends \advanced_testcase {
             ]),
         ]);
 
-        // Not 1.0. A total that quietly dropped the part it could not price would read
-        // as a smaller bill rather than an unmeasured one, and a budget reads these.
-        $this->assertNull($this->logged()->cost);
+        // The attempt nothing priced is unknown, and says so on its own row rather
+        // than making the answering target's cost unknown too. A budget adds what it
+        // can and reports that part of the period could not be priced.
+        $this->assertEqualsWithDelta(1.0, (float) $this->logged()->cost, 0.000001);
+        $this->assertNull($this->attempts()[0]->cost);
+    }
+
+    public function test_each_attempt_is_charged_to_the_key_that_paid_for_it(): void {
+        // The case that made this worth splitting into rows. Somebody holds a key at
+        // both targets. The first uses a great deal and answers with nothing; the
+        // second answers cheaply. Charging the first one's spending to the second
+        // key blocks a key that has spent almost nothing and lets through the one
+        // that has spent its whole limit.
+        $rate = new price();
+        $rate->set('provider', 'aiprovider_mock');
+        $rate->set('promptrate', 1.0);
+        $rate->create();
+
+        $this->add_byok('to seven', 7, rule::KEYSOURCE_USER);
+        $first = $this->bring_key(7, 'their-key-at-seven');
+        $second = $this->bring_key(8, 'their-key-at-eight');
+
+        $this->route(config: ['defaulttarget' => 8], instances: [
+            $this->target(7, \aiprovider_mock\provider::EMPTY_CONTENT, ['prompttokens' => 1000000]),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS, [
+                'content' => 'Answered',
+                'prompttokens' => 10000,
+            ]),
+        ]);
+
+        $attempts = $this->attempts();
+        $this->assertCount(1, $attempts);
+        $this->assertSame((int) $first->get('id'), (int) $attempts[0]->keyid);
+        $this->assertEqualsWithDelta(1.0, (float) $attempts[0]->cost, 0.000001);
+
+        $row = $this->logged();
+        $this->assertSame((int) $second->get('id'), (int) $row->keyid);
+        $this->assertEqualsWithDelta(0.01, (float) $row->cost, 0.000001);
+    }
+
+    public function test_an_attempt_that_reported_nothing_gets_no_row(): void {
+        global $DB;
+
+        // A row saying that a target used an unknown amount is a row about nothing.
+        $this->add('to seven', 7);
+        $this->route(config: ['defaulttarget' => 8], instances: [
+            $this->target(7, \aiprovider_mock\provider::EMPTY_CONTENT, [
+                'prompttokens' => 'plenty',
+                'completiontokens' => 'lots',
+            ]),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS, ['content' => 'Answered']),
+        ]);
+
+        $this->assertSame(1, $DB->count_records(usage_logger::TABLE));
+    }
+
+    public function test_a_model_name_too_long_for_the_column_does_not_take_the_row_with_it(): void {
+        global $DB;
+
+        // The name comes from outside and nothing checks it. One that will not fit
+        // used to make the insert fail, and the failure is swallowed so that
+        // recording can never break a request -- so the request happened and left no
+        // trace at all: no tokens, no cost, nothing for a budget to count.
+        $this->route([$this->target(7, \aiprovider_mock\provider::SUCCESS, [
+            'content' => 'Hi',
+            'model' => str_repeat('m', 101),
+            'prompttokens' => 120,
+        ])]);
+
+        $this->assertSame(1, $DB->count_records(usage_logger::TABLE));
+        $row = $this->logged();
+        // Not shortened. Two models whose names differ only past the hundredth
+        // character would become one, and the rate table matches on the name.
+        $this->assertNull($row->model);
+        $this->assertSame(120, (int) $row->prompttokens);
+    }
+
+    public function test_a_model_name_that_fits_is_kept(): void {
+        $this->route([$this->target(7, \aiprovider_mock\provider::SUCCESS, [
+            'content' => 'Hi',
+            'model' => str_repeat('m', 100),
+        ])]);
+
+        $this->assertSame(str_repeat('m', 100), $this->logged()->model);
     }
 
     public function test_a_history_that_cannot_be_written_does_not_stop_the_request(): void {

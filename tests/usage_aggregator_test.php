@@ -416,4 +416,36 @@ final class usage_aggregator_test extends \advanced_testcase {
         $this->assertSame(23 * HOURSECS, $next - $midnight);
         $this->assertSame($next, $aggregator->day_of($next + HOURSECS));
     }
+
+    public function test_a_purge_never_takes_history_a_budget_still_needs(): void {
+        global $DB;
+
+        // The settings form refuses this combination when it can see it, but a
+        // budget can be written after the retention was shortened and a limit on a
+        // brought key is set on a screen that knows about neither. Losing that
+        // history does not make the spending unknown, it makes it smaller, and a
+        // limit that had been reached comes back under the line.
+        set_config('summaryretentiondays', 2, 'aiprovider_router');
+        set_config('logretentiondays', 1, 'aiprovider_router');
+
+        $rule = new rule();
+        $rule->set('name', 'While there is money left');
+        $rule->set('targetid', 3);
+        (new rule_repository($DB))->save($rule, ['budget' => [
+            'scope' => spend_ledger::SCOPE_SITE,
+            'direction' => \aiprovider_router\condition\budget::DIRECTION_UNDER,
+            'metric' => spend_ledger::METRIC_COST,
+            'amount' => 100.0,
+            'period' => spend_ledger::PERIOD_MONTH,
+            'days' => 30,
+        ]]);
+
+        $this->log($this->day(10) + HOURSECS, ['cost' => 100.0]);
+        $this->aggregator->run($this->now);
+        $this->aggregator->purge_summaries($this->now);
+
+        // Ten days back is well past a two day retention and well inside a monthly
+        // budget, so it stays.
+        $this->assertSame(1, $DB->count_records(usage_aggregator::TABLE));
+    }
 }

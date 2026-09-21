@@ -60,6 +60,7 @@
         <FIELD NAME="errorcode" TYPE="int" LENGTH="4" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="reason" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false" COMMENT="Why it failed, in terms an administrator can act on: declined, every target failed, a target threw."/>
         <FIELD NAME="attempts" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="How many targets were tried, so that the fallback chain can be seen working."/>
+        <FIELD NAME="counted" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Whether this row is one of the site's requests. Zero for the record of a delegation attempt that did not answer: what it used was really used and has to be counted against the target and the key that paid for it, but the person made one request and a budget counted in requests must not see two."/>
         <FIELD NAME="prompttokens" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="completiontokens" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="cost" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Worked out when the row was written, never recalculated. Null when no price was known."/>

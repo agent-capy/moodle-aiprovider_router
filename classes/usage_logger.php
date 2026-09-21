@@ -65,27 +65,14 @@ class usage_logger {
      *
      * @param \stdClass $entry The row to write, without the cost.
      * @param int $images How many images the request produced, for actions costed per image.
-     * @param array|null $spilled What earlier attempts at the same request already used,
-     *                              as prompttokens, completiontokens and cost. Null where
-     *                              only one target was tried, which is the ordinary case.
      */
-    public function record(\stdClass $entry, int $images = 0, ?array $spilled = null): void {
+    public function record(\stdClass $entry, int $images = 0): void {
         try {
             $entry->currency = price_book::get_currency();
-            // Priced before the earlier attempts are folded in, because they were
-            // charged at their own provider's rate and this row's model is not theirs.
-            $cost = $this->cost($entry, $images);
-            if ($spilled !== null) {
-                $entry->prompttokens = self::added($entry->prompttokens ?? null, (int) $spilled['prompttokens']);
-                $entry->completiontokens = self::added(
-                    $entry->completiontokens ?? null,
-                    (int) $spilled['completiontokens'],
-                );
-            }
-            // Not ?? here. The whole point of that value is that it may be null,
-            // meaning "one of the earlier attempts could not be priced", and ?? would
-            // read that as nothing having been spent.
-            $entry->cost = $this->total_cost($cost, $spilled === null ? 0.0 : $spilled['cost']);
+            // Each row is priced against the provider and model named on it. A
+            // fallback chain crosses providers, so a request with more than one
+            // attempt has a row per attempt and each one is costed at its own rate.
+            $entry->cost = $this->cost($entry, $images);
             $entry->keysource = $entry->keysource ?? self::KEY_SITE;
             $this->db->insert_record(self::TABLE, $entry);
         } catch (\Throwable $e) {
@@ -94,69 +81,6 @@ class usage_logger {
                 DEBUG_NORMAL,
             );
         }
-    }
-
-    /**
-     * One token figure plus another, where the first may be unknown.
-     *
-     * @param int|null $counted What the answering target reported.
-     * @param int $spilled What the targets before it reported.
-     * @return int|null The total, or null when nothing at all was reported.
-     */
-    protected static function added(?int $counted, int $spilled): ?int {
-        if ($counted === null) {
-            return $spilled > 0 ? $spilled : null;
-        }
-
-        return $counted + $spilled;
-    }
-
-    /**
-     * The whole cost of a request, including the attempts that produced nothing.
-     *
-     * Unknown wins. This plugin keeps "nobody can say" apart from "nothing" everywhere
-     * else -- a budget refuses to route rather than read a missing rate as room to
-     * spend -- and a total that quietly dropped the part it could not price would be
-     * the one place that did not.
-     *
-     * @param float|null $answered What the target that answered cost.
-     * @param float|null $spent What the targets before it cost.
-     * @return float|null The total, or null when any part of it is unknown.
-     */
-    protected function total_cost(?float $answered, ?float $spent): ?float {
-        if ($answered === null || $spent === null) {
-            return null;
-        }
-
-        return $answered + $spent;
-    }
-
-    /**
-     * What one attempt cost, for an attempt whose answer is not the one being recorded.
-     *
-     * Priced against the provider and model that produced it rather than the one that
-     * finally answered, since a fallback chain crosses providers and their rates are
-     * not the same.
-     *
-     * @param string $provider The component the attempt went to.
-     * @param string|null $model The model that produced it.
-     * @param int $when When it happened.
-     * @param int|null $prompttokens Tokens it was charged for.
-     * @param int|null $completiontokens Tokens it generated.
-     * @param int $images Images it produced.
-     * @return float|null The cost, or null when no rate covered it.
-     */
-    public function attempt_cost(
-        string $provider,
-        ?string $model,
-        int $when,
-        ?int $prompttokens,
-        ?int $completiontokens,
-        int $images = 0,
-    ): ?float {
-        $price = $this->prices->find($provider, $model, $when);
-
-        return $price?->cost($prompttokens, $completiontokens, $images);
     }
 
     /**

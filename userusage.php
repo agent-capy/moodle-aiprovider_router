@@ -61,9 +61,10 @@ if (!in_array($days, $periods, true)) {
 
 $aggregator = new usage_aggregator($DB);
 $report = new user_report($DB, $aggregator);
-$currency = price_book::get_currency();
 $now = time();
 $from = $aggregator->add_days($aggregator->day_of($now), -($days - 1));
+// One answer for the whole screen, including the exported file.
+$currency = $report->currency_for($from, $now);
 
 $people = $report->get_people($from, $now);
 $names = user_report::get_names(array_column($people, 'userid'));

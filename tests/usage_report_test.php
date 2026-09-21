@@ -393,6 +393,52 @@ final class usage_report_test extends \advanced_testcase {
         $this->assertSame(['JPY', 'USD'], $found);
     }
 
+    public function test_a_period_in_one_currency_names_it(): void {
+        $this->log($this->day(1) + HOURSECS, ['currency' => 'JPY', 'cost' => 100.0]);
+
+        $this->assertSame('JPY', $this->report->currency_for($this->week(), $this->now));
+    }
+
+    public function test_a_period_in_two_currencies_names_none(): void {
+        // Null is the answer every table, the chart and the exported file read as
+        // "there is no figure to give". Decided once so that they cannot disagree.
+        $this->log($this->day(3) + HOURSECS, ['currency' => 'JPY', 'cost' => 1000.0]);
+        $this->log($this->day(1) + HOURSECS, ['currency' => 'USD', 'cost' => 10.0]);
+
+        $this->assertNull($this->report->currency_for($this->week(), $this->now));
+    }
+
+    public function test_a_period_that_priced_nothing_falls_back_to_the_sites_currency(): void {
+        $this->log($this->day(1) + HOURSECS, ['currency' => 'JPY', 'cost' => null]);
+
+        $this->assertSame(
+            price_book::get_currency(),
+            $this->report->currency_for($this->week(), $this->now),
+        );
+    }
+
+    public function test_the_part_of_a_shifted_day_that_was_never_summarised_is_counted(): void {
+        // Move the clock east and a day now begins before the point the summariser
+        // reached. Such a day holds a summarised part and a part that is still in
+        // the detail, and skipping it whole for beginning before that point lost the
+        // second: the chart said one thing and the breakdown beside it said another,
+        // with nothing on the screen to say which was right.
+        $this->log($this->day(1) + HOURSECS);
+        $this->aggregator->run($this->now);
+        $this->log($this->day(0) + HOURSECS);
+
+        self::setTimezone('Asia/Tokyo', 'Asia/Tokyo');
+        $moved = new usage_aggregator($GLOBALS['DB']);
+        $report = new usage_report($GLOBALS['DB'], $moved);
+        $from = $moved->add_days($moved->day_of($this->now), -6);
+
+        $series = $report->get_series($from, $this->now);
+        $breakdown = $report->get_breakdown(usage_report::BY_TARGET, $from, $this->now);
+
+        $this->assertSame(2, (int) usage_report::total($series)->requests);
+        $this->assertSame(2, (int) usage_report::total($breakdown)->requests);
+    }
+
     public function test_an_unknown_breakdown_is_a_coding_error(): void {
         $this->expectException(\coding_exception::class);
 
