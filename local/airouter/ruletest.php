@@ -49,7 +49,7 @@ $listurl = new moodle_url('/local/airouter/rules.php');
 $url = new moodle_url('/local/airouter/ruletest.php');
 admin_page::setup($PAGE, $url, get_string('ruletest:heading', 'local_airouter'), [
     get_string('rules:heading', 'local_airouter') => $listurl,
-]);
+], 'local_airouter_rules');
 
 $form = new rule_test_form($url);
 

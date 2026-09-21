@@ -19,14 +19,18 @@ namespace local_airouter;
 /**
  * Page setup shared by the administration screens this plugin adds.
  *
- * None of these pages is in the administration tree, because core never reads an
- * aiprovider plugin's settings.php. They are reached from the router's own settings
- * form and from the site status report. That leaves the breadcrumb as the only way
- * back, so it has to be a real one: naming the plugin as plain text, which is what
- * these pages did at first, is a trail that leads nowhere.
+ * These pages are in the administration tree, under Site administration > AI. They
+ * were not, for as long as the router was an aiprovider plugin: Moodle does not read
+ * an aiprovider plugin's settings.php and offers no hook for extending the tree, so
+ * every screen had to be reached from the provider's own settings form and carry a
+ * breadcrumb it had built itself. Registering them in settings.php replaces all of
+ * that with the navigation Moodle gives any other administration page.
  *
- * The instance name links to core's own form for it, carrying returnurl, so that
- * saving or cancelling there comes back to the page the administrator started from.
+ * A screen reached from another screen rather than from the tree is set up as its
+ * parent and then says where it is, which is what core's own nested pages do.
+ *
+ * The way back to the provider instance is kept while the instance still decides
+ * anything: it is where the settings of such a site actually live.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -39,24 +43,54 @@ class admin_page {
      * @param \moodle_page $page The page being built.
      * @param \moodle_url $url Where this page lives.
      * @param string $heading Its title and heading.
-     * @param array $trail Any pages between the router and this one, url keyed by label.
+     * @param array $trail Any pages between the section and this one, url keyed by label.
+     * @param string $section The administration tree page this screen belongs to.
      */
     public static function setup(
         \moodle_page $page,
         \moodle_url $url,
         string $heading,
         array $trail = [],
+        string $section = '',
     ): void {
+        if ($section !== '') {
+            global $CFG;
+
+            // A page script gets this only when something else has already pulled it
+            // in, which is not something to rely on: it was loaded here by the tests
+            // and not by the pages, so the pages failed and the tests did not.
+            require_once($CFG->libdir . '/adminlib.php');
+
+            // Every screen checks moodle/site:config before it gets here, and that is
+            // the same condition settings.php registers under, so a page that reaches
+            // this line with a section is a page the tree knows. Asking the tree first
+            // would mean building it, and building it renders settings that expect a
+            // page context this page has not set yet.
+            \admin_externalpage_setup($section, '', [], $url);
+            $page->set_title($heading);
+            $page->set_heading($heading);
+
+            // A screen of its own is already the last step. One reached from another
+            // says the steps between, and then itself.
+            foreach ($trail as $label => $link) {
+                $page->navbar->add($label, $link);
+            }
+            if ($trail !== []) {
+                $page->navbar->add($heading, $url);
+            }
+
+            return;
+        }
+
+        // Asked for without a tree page: the screen is one that has not been given
+        // one. It still checks the capability for itself, so it can be shown with the
+        // trail these screens carried while no tree would have them.
         $page->set_context(\context_system::instance());
         $page->set_url($url);
         $page->set_pagelayout('admin');
         $page->set_title($heading);
         $page->set_heading($heading);
 
-        $page->navbar->add(
-            get_string('aiproviders', 'core_ai'),
-            new \moodle_url('/admin/settings.php', ['section' => 'aiprovider']),
-        );
         self::add_router($page, $url);
 
         foreach ($trail as $label => $link) {
@@ -64,6 +98,7 @@ class admin_page {
         }
         $page->navbar->add($heading, $url);
     }
+
 
     /**
      * A button saying, in words, how to get back to the router's settings.

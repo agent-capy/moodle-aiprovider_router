@@ -47,7 +47,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/local/airouter/usage.php');
-admin_page::setup($PAGE, $url, get_string('usage:heading', 'local_airouter'));
+admin_page::setup($PAGE, $url, get_string('usage:heading', 'local_airouter'), section: 'local_airouter_usage');
 
 $periods = [7, 30, 90, 365];
 if (!in_array($days, $periods, true)) {

@@ -44,7 +44,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/local/airouter/rates.php');
-admin_page::setup($PAGE, $url, get_string('rates:heading', 'local_airouter'));
+admin_page::setup($PAGE, $url, get_string('rates:heading', 'local_airouter'), section: 'local_airouter_rates');
 
 $book = new price_book($DB);
 

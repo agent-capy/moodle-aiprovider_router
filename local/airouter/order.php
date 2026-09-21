@@ -47,7 +47,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/local/airouter/order.php');
-admin_page::setup($PAGE, $url, get_string('order:heading', 'local_airouter'));
+admin_page::setup($PAGE, $url, get_string('order:heading', 'local_airouter'), section: 'local_airouter_order');
 
 $manager = \core\di::get(\core_ai\manager::class);
 $inspector = new order_inspector($manager);

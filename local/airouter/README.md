@@ -12,9 +12,14 @@ delegates to it.
 > | `aiprovider_router` | `ai/provider/router` | The connector, with no logic of its own. |
 >
 > Moodle decides whether an AI action is enabled, and which actions a provider offers,
-> by testing whether the plugin's name begins with `aiprovider_`, so the part its AI
-> subsystem talks to has to be an `aiprovider` plugin. Everything else is better off
-> outside one, because Moodle never reads an `aiprovider` plugin's `settings.php`.
+> by testing whether the plugin's name begins with `aiprovider_`, so a router registered
+> as a provider instance has to be an `aiprovider` plugin. Everything else is better off
+> outside one, because Moodle never reads an `aiprovider` plugin's `settings.php`, which
+> is why the settings could not be in the administration tree until this split.
+>
+> A site that has no router provider instance is now routed by `local_airouter` alone,
+> which is where this is going. The connector stays while sites configured the old way
+> still depend on it.
 >
 > Install both. `aiprovider_router` declares a dependency on this plugin, so Moodle
 > will tell you if only one is present.
@@ -57,6 +62,23 @@ reference).
   course or person a budget is about, when one has been reached
 
 ## Settings
+
+The router's screens are at **Site administration > AI > AI Router**.
+
+| Page | What it is for |
+| --- | --- |
+| Routing policy | The operating mode, what happens when no rule matches, and the default delegation target |
+| Actions the AI Router must answer | Which actions Moodle brings to the router wherever it sits in the provider order |
+| Routing rules | The rules, in the order they are considered |
+| AI provider order | The site order, and the only page that changes it |
+| AI Router rates | What each model costs, which is what budgets are measured against |
+| Keys people bring | Whether a provider may be used with somebody's own key |
+| Usage | What was asked for, by whom, and what it cost |
+
+⚠ A site that created an AI Router **provider instance** before the settings moved here
+still uses that instance, settings and all, and the Routing policy page says so. Such a
+site configures the router on the provider instance form, as below. A site that has not
+created one uses the Routing policy page.
 
 A router instance has four settings, on the provider instance form.
 
@@ -146,10 +168,11 @@ The plugin reports this on *Site administration → Reports → System status*:
 | Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
 | Actions the router instance can carry | An action the router offers is not configured on its instance, so requests for it never reach the router. This happens when a plugin defining an action is installed after the router instance was made: the action list is read fresh every time, the instance's configuration is written once. ⚠ The provider settings screen cannot put it right for an action outside core, so recreating the instance is the fix. |
 
-None of this plugin's own pages is in the administration tree, because core never reads
-an aiprovider plugin's `settings.php`. Each of them therefore carries a **Back to AI
-Router settings** button as well as a breadcrumb that leads there, and the settings form
-is told to return to the page you came from when you save or cancel.
+These pages are in the administration tree, so they have the settings navigation and
+the breadcrumb Moodle gives any administration page. They were not while the router was
+an `aiprovider` plugin, because Moodle never reads such a plugin's `settings.php`; the
+**Back to AI Router settings** button they carry from that time still leads to the
+provider instance form, which is where a site that has one keeps its settings.
 
 Each check links to **AI provider order** (`/local/airouter/order.php`), which is the
 only page that changes the order. It shows the current order entry by entry, and what the
@@ -167,10 +190,9 @@ Two details are deliberate there:
 
 ## Rules
 
-Rules are managed at **Routing rules** (`/local/airouter/rules.php`), linked from the
-router's own settings form and from the site status report. Like the provider order page,
-it is not in the admin tree: Moodle never reads an `aiprovider` plugin's `settings.php`,
-so there is no admin tree entry to hang it on.
+Rules are managed at **Routing rules** (`/local/airouter/rules.php`), under
+**Site administration > AI > AI Router**, and linked from the router's own settings form
+and from the site status report.
 
 The list shows the rules in the order they are considered, with what each one requires,
 where it delegates, whose key pays for it, and buttons to reorder, copy, switch off or

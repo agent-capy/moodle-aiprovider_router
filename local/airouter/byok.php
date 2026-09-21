@@ -42,7 +42,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/local/airouter/byok.php');
-admin_page::setup($PAGE, $url, get_string('byok:heading', 'local_airouter'));
+admin_page::setup($PAGE, $url, get_string('byok:heading', 'local_airouter'), section: 'local_airouter_byok');
 
 $targets = [];
 foreach (\core\di::get(\core_ai\manager::class)->get_provider_instances() as $instance) {

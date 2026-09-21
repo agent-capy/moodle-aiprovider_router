@@ -46,7 +46,7 @@ $url = new moodle_url('/local/airouter/rule.php', $id ? ['id' => $id] : []);
 $heading = get_string($id ? 'rule:edit' : 'rule:add', 'local_airouter');
 admin_page::setup($PAGE, $url, $heading, [
     get_string('rules:heading', 'local_airouter') => $listurl,
-]);
+], 'local_airouter_rules');
 
 $repository = new rule_repository($DB);
 $existingconditions = [];

@@ -46,7 +46,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/local/airouter/managed.php');
-admin_page::setup($PAGE, $url, get_string('managed:heading', 'local_airouter'));
+admin_page::setup($PAGE, $url, get_string('managed:heading', 'local_airouter'), section: 'local_airouter_managed');
 
 $manager = \core\di::get(\core_ai\manager::class);
 

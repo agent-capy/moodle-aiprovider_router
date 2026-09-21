@@ -19,11 +19,14 @@ namespace local_airouter;
 use core_ai\aiactions\generate_text;
 
 /**
- * Tests for the breadcrumb on the pages this plugin adds.
+ * Tests for how the pages this plugin adds are set up.
  *
- * None of them is in the administration tree, so the breadcrumb is the only way back.
- * It was once plain text, which is a trail that leads nowhere, and an administrator
- * who opened the rules could not return to the settings they came from.
+ * They are in the administration tree now, and a page named there is set up as that
+ * page, which is where its navigation and its breadcrumb come from. What these cover
+ * is mostly the other branch: a page asked for without naming one, which falls back
+ * to the trail these screens carried while no tree would have them. It was once
+ * plain text, which is a trail that leads nowhere, and an administrator who opened
+ * the rules could not return to the settings they came from.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -123,14 +126,23 @@ final class admin_page_test extends \advanced_testcase {
         );
     }
 
-    public function test_the_provider_list_is_always_one_step_up(): void {
-        $this->add_router();
+    public function test_a_page_named_in_the_tree_is_set_up_as_that_page(): void {
+        global $PAGE;
 
-        $trail = $this->trail($this->build());
-        $providers = get_string('aiproviders', 'core_ai');
+        // The screens used to hang below the AI provider list, because that was the
+        // only thing above them that existed. Naming the tree page instead is what
+        // gives them the settings navigation every other administration page has.
+        $this->setAdminUser();
+        $url = new \moodle_url('/local/airouter/rules.php');
 
-        $this->assertArrayHasKey($providers, $trail);
-        $this->assertStringContainsString('section=aiprovider', (string) $trail[$providers]);
+        admin_page::setup($PAGE, $url, 'Routing rules', [], 'local_airouter_rules');
+
+        $this->assertSame('admin', $PAGE->pagelayout);
+        $this->assertSame($url->out(), $PAGE->url->out());
+        $this->assertArrayHasKey(
+            get_string('pluginname', 'local_airouter'),
+            $this->trail($PAGE),
+        );
     }
 
     public function test_a_site_with_no_router_yet_still_has_a_trail(): void {

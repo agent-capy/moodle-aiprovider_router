@@ -329,6 +329,22 @@ Both of these were introduced by the fixes above them.
     step towards removing the stored instance, not a switch that moves a configured
     site onto different settings without saying so.
 
+### Settings where settings go
+
+- The router's screens are in the administration tree, at **Site administration > AI >
+  AI Router**, with a **Routing policy** page for the operating mode, what happens when
+  no rule matches, and the default delegation target. Moodle does not read an
+  `aiprovider` plugin's `settings.php` and offers no hook for extending the tree, so
+  while the router was one, every screen had to be reached from the provider's own
+  settings form and carry a breadcrumb it had built itself.
+  - A site that created a router provider instance still uses that instance, and the
+    Routing policy page says so rather than offering settings that are not read.
+  - The screens keep the button back to the provider instance form, which is where such
+    a site's settings live.
+- *When no rule matches* no longer describes declining as handing the request to the
+  next AI provider without saying when. For an action placed under the router there is
+  no next provider, and the help said otherwise.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

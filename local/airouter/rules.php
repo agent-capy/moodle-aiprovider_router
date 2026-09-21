@@ -45,7 +45,7 @@ $context = context_system::instance();
 require_capability('moodle/site:config', $context);
 
 $url = new moodle_url('/local/airouter/rules.php');
-admin_page::setup($PAGE, $url, get_string('rules:heading', 'local_airouter'));
+admin_page::setup($PAGE, $url, get_string('rules:heading', 'local_airouter'), section: 'local_airouter_rules');
 
 $repository = new rule_repository($DB);
 
