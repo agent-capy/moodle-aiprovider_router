@@ -370,6 +370,45 @@ final class spend_ledger_test extends \advanced_testcase {
         $this->assertSame(30, spend_ledger::longest_reach_days($DB));
     }
 
+    public function test_a_recorded_amount_is_known_whatever_the_count_beside_it_says(): void {
+        global $DB;
+
+        // A summary written by an earlier version, holding a cost and a count of
+        // priced rows that was worked out a different way. Deciding whether there is
+        // a figure by reading that count is what let a budget through twice, so the
+        // amount answers for itself: an amount exists because something was priced.
+        $DB->insert_record(usage_aggregator::TABLE, (object) [
+            'daystart' => $this->day(1),
+            'courseid' => null,
+            'userid' => 5,
+            'actionname' => 'generate_text',
+            'targetid' => 1,
+            'targetname' => 'Target one',
+            'targetprovider' => 'aiprovider_openai',
+            'model' => 'gpt-4o',
+            'keysource' => usage_logger::KEY_SITE,
+            'currency' => 'USD',
+            'requests' => 1,
+            'failures' => 1,
+            'calls' => 1,
+            'prompttokens' => 0,
+            'completiontokens' => 0,
+            'cost' => 1.2,
+            'costedcalls' => 0,
+            'timecreated' => $this->now,
+        ]);
+        set_config(usage_aggregator::LAST_SETTING, $this->day(1), 'aiprovider_router');
+
+        [$from, $to] = $this->week();
+        $spend = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+
+        $this->assertTrue($spend->is_known());
+        $this->assertEqualsWithDelta(1.2, $spend->get_amount(), 0.000001);
+        $this->assertTrue($spend->has_reached(1.0));
+        // The count still says what it says, and what it says is the coverage.
+        $this->assertFalse($spend->is_complete());
+    }
+
     public function test_reaching_the_limit_counts_as_reaching_it(): void {
         $this->log($this->day(0) + HOURSECS, ['cost' => 10.0]);
 

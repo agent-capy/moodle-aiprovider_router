@@ -70,7 +70,7 @@ if ($action !== '' && $ruleid > 0) {
 
     if (in_array($action, ['up', 'down', 'enable', 'disable', 'duplicate'], true)) {
         require_sesskey();
-        match ($action) {
+        $refused = match ($action) {
             'up' => $repository->move($ruleid, -1),
             'down' => $repository->move($ruleid, 1),
             'enable' => $repository->set_enabled($ruleid, true),
@@ -80,6 +80,12 @@ if ($action !== '' && $ruleid > 0) {
                 get_string('rules:copyof', 'aiprovider_router', $rule->get('name')),
             ),
         };
+        if (is_string($refused)) {
+            // Switching a rule on is the same act as saving it switched on, so it can
+            // be refused for the same reasons. Said here rather than swallowed: a link
+            // that did nothing and explained nothing reads as a broken page.
+            redirect($url, $refused, null, \core\output\notification::NOTIFY_WARNING);
+        }
         redirect($url);
     }
 }

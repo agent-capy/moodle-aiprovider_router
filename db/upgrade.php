@@ -407,15 +407,58 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         $field = new xmldb_field('calls', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'failures');
         if (!$dbman->field_exists($table, $field)) {
             $dbman->add_field($table, $field);
-            // Every summary written before this held one row per request, because that
-            // is all there was: the attempts that answered with nothing were folded
-            // into the request rather than kept. So the calls of those days are their
-            // requests, and saying so is more accurate than leaving them at zero, which
-            // would read as a day whose cost covered nothing.
+            // A starting point only. Summaries written before 2026092101 held one row
+            // per request, so their calls are their requests; summaries written by
+            // 2026092101 itself already had rows that were not requests, and for those
+            // this figure is too low. The next step puts that right.
             $DB->execute('UPDATE {aiprovider_router_daily} SET calls = requests');
         }
 
         upgrade_plugin_savepoint(true, 2026092102, 'aiprovider', 'router');
+    }
+
+    if ($oldversion < 2026092103) {
+        // The step above renamed the column and left what was in it. What was in it,
+        // for any day summarised by 2026092101, is the count of priced rows among the
+        // requests -- the very figure that made a day holding a cost report that
+        // nothing in it had been priced. Renaming it carried the fault forward, so a
+        // site upgrading with such a day in its table went on letting spending through
+        // that its budget had been refusing.
+        //
+        // Two passes. The first is arithmetic and applies everywhere: a day with a
+        // cost on it had something priced, whatever the count says, so the count is
+        // lifted to the least it can honestly be. This is what saves the days that
+        // cannot be rebuilt.
+        $DB->execute(
+            'UPDATE {aiprovider_router_daily} SET costedcalls = 1
+              WHERE cost IS NOT NULL AND costedcalls = 0',
+        );
+        $DB->execute(
+            'UPDATE {aiprovider_router_daily} SET calls = costedcalls WHERE calls < costedcalls',
+        );
+
+        // The second pass rebuilds, which is exact, and is only done for a day whose
+        // detail rows are actually still there. Summarising a day that has no detail
+        // left would replace what is known about it with nothing, and the detail can
+        // be gone for reasons other than the daily purge -- somebody exercising their
+        // right to be forgotten, for one.
+        $aggregator = new \aiprovider_router\usage_aggregator($DB);
+        $days = $DB->get_fieldset_sql(
+            'SELECT DISTINCT daystart FROM {aiprovider_router_daily} ORDER BY daystart',
+        );
+        foreach ($days as $day) {
+            $day = (int) $day;
+            $holds = $DB->count_records_select(
+                'aiprovider_router_log',
+                'timecreated >= :from AND timecreated < :to',
+                ['from' => $day, 'to' => $aggregator->add_days($day, 1)],
+            );
+            if ($holds > 0) {
+                $aggregator->summarise_day($day);
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026092103, 'aiprovider', 'router');
     }
 
     return true;

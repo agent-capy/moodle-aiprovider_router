@@ -95,11 +95,16 @@ class spend {
      * worked out, so it is always known, including on a site that has entered no rates
      * at all and on one whose models cost nothing.
      *
-     * Asked of the calls rather than of the requests, because the calls are what the
-     * amount is the amount of. A request answered by its second provider is one request
-     * and two calls, and the call that was priced is the reason there is a figure here
-     * at all. Counting it against the requests made the answer depend on which of the
-     * two rows happened to be the one the request was counted on.
+     * Asked of the amount itself rather than of any count beside it. An amount exists
+     * because something was priced; that is what an amount is. Deciding it from a count
+     * of priced rows instead put the answer at the mercy of whether that count had been
+     * worked out the same way as the amount, and twice it had not: the count was taken
+     * over the requests while the amount was taken over every row, so a period could
+     * hold a cost of 1.20 and report that nothing in it had been priced. A budget
+     * reading that stopped refusing.
+     *
+     * The counts are still here, and they still say how much of the period the amount
+     * covers. What they no longer decide is whether there is an amount at all.
      *
      * @param string $metric Which figure is being asked about.
      * @return bool True when the figure can be compared against a limit.
@@ -112,7 +117,8 @@ class spend {
             return false;
         }
 
-        return $this->get_calls() === 0 || $this->costedcalls > 0;
+        // A period with nothing in it cost nothing, and that is known.
+        return $this->amount !== null || $this->get_calls() === 0;
     }
 
     /**

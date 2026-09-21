@@ -212,16 +212,46 @@ class rule_repository {
     /**
      * Turn a rule on or off without losing it.
      *
+     * Switching one on is the same act as saving it switched on, so it is held to the
+     * same conditions. The list offers it as a single link rather than a form, and a
+     * link that quietly put the site into a state the form refuses would be a way
+     * round the form: a budget looking back further than the site keeps its summaries
+     * measures part of its own period and reads lower than the spending was.
+     *
+     * Switching one off is never refused. Whatever is wrong with a rule, turning it
+     * off is the direction that stops it happening.
+     *
      * @param int $id The rule id.
      * @param bool $enabled The state to set.
+     * @return string|null Null when done, or why it was refused.
      */
-    public function set_enabled(int $id, bool $enabled): void {
+    public function set_enabled(int $id, bool $enabled): ?string {
         $rule = $this->get($id);
         if ($rule === null) {
-            return;
+            return null;
+        }
+        if ($enabled) {
+            $problem = $this->why_not_enabled($id);
+            if ($problem !== null) {
+                return $problem;
+            }
         }
         $rule->set('enabled', $enabled);
         $rule->update();
+
+        return null;
+    }
+
+    /**
+     * Why this rule cannot be switched on as the site stands, if it cannot.
+     *
+     * @param int $id The rule id.
+     * @return string|null The problem to show somebody, or null when there is none.
+     */
+    public function why_not_enabled(int $id): ?string {
+        $config = $this->get_conditions($id)[budget::get_type()] ?? null;
+
+        return $config === null ? null : budget::stored_retention_problem($config);
     }
 
     /**

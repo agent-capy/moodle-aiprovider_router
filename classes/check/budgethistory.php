@@ -1,0 +1,120 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+namespace aiprovider_router\check;
+
+use aiprovider_router\rule_repository;
+use aiprovider_router\spend_ledger;
+use aiprovider_router\usage_aggregator;
+use aiprovider_router\usage_logger;
+use core\check\result;
+
+/**
+ * Says when a budget is looking back further than the site can remember.
+ *
+ * A budget is worked out from what is still stored. The history a budget needs is
+ * protected from the purge and cannot be thrown away while the budget exists, and a
+ * budget longer than the site keeps its summaries is refused when it is written. What
+ * none of that can do is bring back history that had already gone when the budget was
+ * written: a site that ran with a short retention, then lengthened it and set a
+ * thirty day budget, has a budget counting thirty days over a table that holds three.
+ *
+ * The figure it produces is not unknown, and must not be made unknown -- a budget that
+ * cannot be measured stops restricting anything, which is the opposite of what somebody
+ * setting a limit wanted. It is simply smaller than the spending was, and it stays that
+ * way until the history catches up. Nothing can fix that. This is where it gets said,
+ * with the date the counting really starts from, so that an administrator reading a
+ * budget at forty per cent knows whether to believe it.
+ *
+ * @package    aiprovider_router
+ * @copyright  2026 UDAGAWA Mitsuru
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+class budgethistory extends base {
+    #[\Override]
+    public function get_action_link(): ?\action_link {
+        return new \action_link(
+            new \moodle_url('/ai/provider/router/rules.php'),
+            get_string('rules:heading', 'aiprovider_router'),
+        );
+    }
+
+    #[\Override]
+    protected function check_router(): result {
+        global $DB;
+
+        $budgets = (new rule_repository($DB))->get_budgets(null, true);
+        if (!$budgets) {
+            return new result(result::NA, get_string('check:budgethistory:nobudget', 'aiprovider_router'));
+        }
+
+        $from = self::earliest_record($DB);
+        if ($from === null) {
+            // Nothing has been recorded at all. A site that has not used its AI yet is
+            // not a site missing history; it is a site with none to miss.
+            return new result(result::NA, get_string('check:budgethistory:norecords', 'aiprovider_router'));
+        }
+
+        $aggregator = new usage_aggregator($DB);
+        $ledger = new spend_ledger($DB, $aggregator, false);
+        $now = time();
+        $shortest = null;
+        foreach ($budgets as $budget) {
+            [$start] = $ledger->get_window((string) $budget->period, (int) $budget->days, $now);
+            if ($start >= $from) {
+                continue;
+            }
+            $missing = (int) round(($from - $start) / DAYSECS);
+            $shortest = max($shortest ?? 0, $missing);
+        }
+
+        if ($shortest === null) {
+            return new result(result::OK, get_string('check:budgethistory:ok', 'aiprovider_router', userdate($from)));
+        }
+
+        return new result(
+            result::WARNING,
+            get_string('check:budgethistory:missing', 'aiprovider_router', [
+                'from' => userdate($from),
+                'days' => $shortest,
+            ]),
+            get_string('check:budgethistory:missing_details', 'aiprovider_router'),
+        );
+    }
+
+    /**
+     * The earliest moment the site still has any record of.
+     *
+     * Both tables, because a report reads the summaries for the older part of a period
+     * and the detail for the newer, and a budget does the same.
+     *
+     * @param \moodle_database $db The database to read.
+     * @return int|null The moment, or null when nothing is recorded at all.
+     */
+    public static function earliest_record(\moodle_database $db): ?int {
+        $found = [];
+        $detail = $db->get_field_sql('SELECT MIN(timecreated) FROM {' . usage_logger::TABLE . '}');
+        if (!empty($detail)) {
+            $found[] = (int) $detail;
+        }
+        $summary = $db->get_field_sql('SELECT MIN(daystart) FROM {' . usage_aggregator::TABLE . '}');
+        if (!empty($summary)) {
+            $found[] = (int) $summary;
+        }
+
+        return $found ? min($found) : null;
+    }
+}

@@ -205,6 +205,55 @@ final class rule_repository_test extends \advanced_testcase {
         )));
     }
 
+    public function test_a_budget_the_site_cannot_measure_cannot_be_switched_back_on(): void {
+        // Switching a rule on is the same act as saving it switched on. The list does
+        // it with a link rather than a form, and that link was a way round the check
+        // the form makes: a rule disabled while the retention was long could be
+        // switched on after the retention had been shortened and the history it needs
+        // thrown away, and it then reported a limit as having room left.
+        $rule = $this->add('budgeted', 7, ['budget' => [
+            'scope' => spend_ledger::SCOPE_SITE,
+            'direction' => 'under',
+            'metric' => spend_ledger::METRIC_COST,
+            'amount' => 100.0,
+            'period' => spend_ledger::PERIOD_ROLLING,
+            'days' => 30,
+        ]]);
+        $id = (int) $rule->get('id');
+        $this->assertNull($this->repository->set_enabled($id, false));
+
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'aiprovider_router');
+
+        $refused = $this->repository->set_enabled($id, true);
+        $this->assertIsString($refused);
+        $this->assertNotSame('', $refused);
+        $this->assertSame(0, (int) $this->repository->get($id)->get('enabled'));
+        $this->assertSame([], $this->repository->get_budgets(time(), true));
+
+        // Lengthening the retention is what makes it measurable, and then it goes on.
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 60, 'aiprovider_router');
+        $this->assertNull($this->repository->set_enabled($id, true));
+        $this->assertSame(1, (int) $this->repository->get($id)->get('enabled'));
+    }
+
+    public function test_switching_a_rule_off_is_never_refused(): void {
+        $rule = $this->add('budgeted', 7, ['budget' => [
+            'scope' => spend_ledger::SCOPE_SITE,
+            'direction' => 'under',
+            'metric' => spend_ledger::METRIC_COST,
+            'amount' => 100.0,
+            'period' => spend_ledger::PERIOD_ROLLING,
+            'days' => 30,
+        ]]);
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'aiprovider_router');
+
+        // Whatever is wrong with a rule, turning it off is the direction that stops it
+        // happening. Refusing that would leave somebody unable to stop a rule they can
+        // see is wrong.
+        $this->assertNull($this->repository->set_enabled((int) $rule->get('id'), false));
+        $this->assertSame(0, (int) $this->repository->get((int) $rule->get('id'))->get('enabled'));
+    }
+
     public function test_only_enabled_rules_inside_their_window_are_evaluated(): void {
         $now = 1000;
         $enabled = $this->add('enabled');

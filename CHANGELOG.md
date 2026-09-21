@@ -158,6 +158,38 @@ row per attempt had left the two sides of that seam counting different things.
   converts between currencies, and a limit cannot be weighed against a figure
   in another one.
 
+### Finished off again
+
+The same review checked what an upgrade does to figures a site already has, and what
+the rules list can do that the rule form cannot.
+
+- Upgrading a site that already had daily summaries now migrates what is in them, not
+  only the name of the column holding it. The previous release renamed the count of
+  priced rows and left the count itself alone, which is the count that made a day
+  holding a cost report that nothing in it had been priced -- so a site upgrading with
+  such a day went on letting through spending its budget had been refusing. Days whose
+  detail rows are still here are summarised again, which is exact. Days whose detail
+  has gone keep their money: an amount exists because something was priced, whatever
+  the count beside it says, and the count is lifted to the least it can honestly be. A
+  day with no detail left is never summarised again, because that would replace what is
+  known about it with nothing.
+- Whether a period's cost is known is decided by the amount rather than by a count of
+  priced rows beside it. Twice now the count and the amount have been worked out
+  differently and a real cost has been reported as no cost at all, with a budget
+  falling open behind it. The counts still say how much of the period the amount
+  covers, which is all they were ever needed for.
+- Switching a rule back on from the list is held to the same conditions as saving it
+  switched on. A rule disabled while the retention was long could be switched on after
+  the retention had been shortened and the history its budget needs thrown away, and
+  it then reported a limit that had been reached as a limit with room left. Switching
+  a rule off is never refused, whatever is wrong with it.
+- A new status check, **Budget history**, says when a budget is counting a period
+  longer than the site can remember. History removed before the budget was written
+  cannot be brought back, and treating the figure as unknown would stop the budget
+  restricting anything at all -- which is the failure above, in the other direction. So
+  the figure is given and the check says to read it as a lower bound, with the date the
+  counting really starts from.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

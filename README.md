@@ -268,6 +268,17 @@ whatever comes after them. The **Rates for budget conditions** status check says
 a site routes by budget and its rates do not cover what is being used. None of this
 applies to a budget counted in requests, and that check leaves those alone.
 
+**A budget can only count the history the site still holds.** The history a budget
+needs is protected from the purge, and a budget longer than the site keeps its
+summaries is refused when it is written or switched on. None of that can bring back
+history that had already gone: a site that ran with a short retention, lengthened it
+and then set a thirty day budget has a budget counting thirty days over a table
+holding three. The figure it gives is real and too small, and it corrects itself as
+the missing days pass out of the period. The **Budget history** status check says when
+a site is in that state, and from what date the counting really begins. It is never
+turned into "unknown", because a budget that cannot be measured stops restricting
+anything, which is the opposite of what somebody setting a limit wanted.
+
 **A limit is accurate to about a minute.** Adding up the history on every AI request
 would be too much work for the path a request takes, so the figures are held briefly. A
 burst of requests can therefore carry spending a little past a limit. Making the window
@@ -497,7 +508,9 @@ from its first day, and those days are in the table now. The settings screen ref
 retention shorter than the longest limit, the rule screen refuses a budget longer than the
 summaries are kept for, and the purge itself refuses whatever the settings say. What none
 of them can do is bring back history that was already gone when the budget was written,
-so lengthen the retention before writing a long budget rather than after.
+so lengthen the retention before writing a long budget rather than after, and where
+that was not done, the **Budget history** check says so rather than leaving a figure
+that looks complete.
 
 Days are the site's days, in the server timezone, and are counted through the calendar, so
 the boundaries stay in place when a timezone changes offset.

@@ -54,6 +54,7 @@ require_once(__DIR__ . '/../fixtures/fixture_unconfigured_provider.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(byokkeys::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(byokeligibility::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(budgetrates::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(budgethistory::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(staleactions::class)]
 final class check_test extends \advanced_testcase {
     #[\Override]
@@ -259,8 +260,49 @@ final class check_test extends \advanced_testcase {
         $this->assertStringContainsString('1', $result->get_summary());
     }
 
+    public function test_a_budget_over_history_the_site_no_longer_has_is_reported(): void {
+        // The site ran with a short retention, lost the older part of the month, and a
+        // thirty day budget is now counting what is left. Nothing else says so: the
+        // budget reads a real figure, and the figure is smaller than the spending was.
+        $this->budget_rule();
+        $this->request(1.0);
+
+        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::WARNING, $result->get_status());
+        $this->assertNotSame('', $result->get_details());
+    }
+
+    public function test_a_budget_whose_period_the_history_covers_is_not_reported(): void {
+        global $DB;
+        $this->budget_rule();
+        $this->request(1.0);
+        $DB->set_field(usage_logger::TABLE, 'timecreated', time() - 40 * DAYSECS);
+
+        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::OK, $result->get_status());
+    }
+
+    public function test_no_budget_and_no_history_are_both_nothing_to_report(): void {
+        global $DB;
+        $inspector = $this->inspector([5 => $this->router(5)], ',5');
+
+        // Usage but no budget: nothing has to reach back anywhere.
+        $this->request(1.0);
+        $this->assertSame(result::NA, (new budgethistory($inspector))->get_result()->get_status());
+
+        // A budget but no usage at all. A site that has not used its AI yet is not a
+        // site missing history; it is a site with none to miss.
+        $this->budget_rule();
+        $DB->delete_records(usage_logger::TABLE);
+        $this->assertSame(result::NA, (new budgethistory($inspector))->get_result()->get_status());
+    }
+
     /**
      * Give the site a rule that routes by budget.
+     *
+     * @param string $metric What the budget counts.
      */
     protected function budget_rule(string $metric = spend_ledger::METRIC_COST): void {
         global $DB;
