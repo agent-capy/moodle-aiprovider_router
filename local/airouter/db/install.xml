@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="local/airouter/db" VERSION="20260919" COMMENT="XMLDB file for the AI Router routing rules"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
+>
+  <TABLES>
+    <TABLE NAME="local_airouter_rule" COMMENT="Routing rules, evaluated in sortorder and then id order until one matches.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false" COMMENT="Administrator facing name. Never shown to end users."/>
+        <FIELD NAME="enabled" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Disabled rules are skipped without being deleted."/>
+        <FIELD NAME="sortorder" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Priority. Lowest is evaluated first, and is renumbered from zero on every write."/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance to delegate to. Deliberately not a foreign key, so that deleting a provider instance in core cannot fail."/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Whose key pays for requests this rule claims: site, user or course. A column rather than a condition, because it says what to do once the rule has matched, which is the same side of the rule as the target. Holding a key is still a requirement for the rule to apply, and that is checked where the target is resolved."/>
+        <FIELD NAME="timestart" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Rule is not evaluated before this time. Zero means no start."/>
+        <FIELD NAME="timeend" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Rule is not evaluated after this time. Zero means no end."/>
+        <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="sortorder" UNIQUE="false" FIELDS="sortorder"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_condition" COMMENT="Conditions of a rule. All of them must be met, and each one is satisfied by any of the values it holds.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="ruleid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="type" TYPE="char" LENGTH="50" NOTNULL="true" SEQUENCE="false" COMMENT="Condition type, such as course or promptlength. One of each type per rule at most."/>
+        <FIELD NAME="configdata" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="JSON understood only by the condition type named above."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="ruleid" TYPE="foreign" FIELDS="ruleid" REFTABLE="local_airouter_rule" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="ruleid-type" UNIQUE="true" FIELDS="ruleid, type"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_log" COMMENT="One row per AI request the router handled, including the ones it turned down.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="contextid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Resolved the same way the rule engine resolves it. Null when the request came from outside any course."/>
+        <FIELD NAME="actionname" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="The action basename, matching what core records, so the two logs can be compared."/>
+        <FIELD NAME="placement" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="ruleid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="The rule that chose the target, if one did."/>
+        <FIELD NAME="rulename" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Copied because rules get renamed and deleted, and a log nobody can read is not a log."/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="targetname" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Copied for the same reason as the rule name."/>
+        <FIELD NAME="targetprovider" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false" COMMENT="The component of the instance delegated to, which is what prices are looked up by."/>
+        <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="success" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="errorcode" TYPE="int" LENGTH="4" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="reason" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false" COMMENT="Why it failed, in terms an administrator can act on: declined, every target failed, a target threw."/>
+        <FIELD NAME="attempts" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="How many targets were tried, so that the fallback chain can be seen working."/>
+        <FIELD NAME="counted" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Whether this row is one of the site's requests. Zero for the record of a delegation attempt that did not answer: what it used was really used and has to be counted against the target and the key that paid for it, but the person made one request and a budget counted in requests must not see two."/>
+        <FIELD NAME="prompttokens" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="completiontokens" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="cost" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Worked out when the row was written, never recalculated. Null when no price was known."/>
+        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Who paid: the site, the person who asked, or the course they asked in."/>
+        <FIELD NAME="keyid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Which brought key paid, so that a key whose provider keeps refusing it can be found. Null for the site's own key. Deliberately not carried into the daily summary: a user key belongs to one person, so summarising by it would be summarising by user."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="userid" TYPE="foreign" FIELDS="userid" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="timecreated" UNIQUE="false" FIELDS="timecreated"/>
+        <INDEX NAME="courseid-timecreated" UNIQUE="false" FIELDS="courseid, timecreated"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_daily" COMMENT="A day of the log, summarised, so that reports outlive the detail rows the purge removes. Names the user, because a site asked to account for its AI spending has to be able to say who spent it long after the detail has gone. Removing one person from it is a row deletion rather than a rebuild, which is what makes naming them affordable.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="daystart" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Midnight of the day summarised, in the server timezone. Not named day, because core already uses that name for a day of the month."/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Null for requests made outside any course, exactly as in the log."/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Who made the requests. Null means the summary was written before this column existed, which is not the same as nobody. Summaries name people so that a site can report on its own AI spending; anonymity is a property of the screens that read this, not of the table."/>
+        <FIELD NAME="actionname" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Null for requests that reached no target at all, which is how refusals and total failures are counted."/>
+        <FIELD NAME="targetname" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Carried over from the log for the same reason it is kept there: once the detail rows are purged this is the only readable name left."/>
+        <FIELD NAME="targetprovider" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Who paid. Grouped on, so that what people spent out of their own pocket is never added into what the site spent: a total mixing the two would be nobody's expenditure."/>
+        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Grouped on, so that changing the site currency splits the summary instead of adding unlike figures together."/>
+        <FIELD NAME="requests" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="failures" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="calls" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="How many times a provider was asked, which is not how many requests were made: a request that fell through to a second provider is one request and two calls. The cost is the cost of the calls, so this is what the cost is weighed against."/>
+        <FIELD NAME="prompttokens" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="completiontokens" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="cost" TYPE="number" LENGTH="16" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="The costs recorded at the time added up, never recalculated. Null when no request that day had a rate."/>
+        <FIELD NAME="costedcalls" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="How many of the calls had a cost. Without it a total cannot be told apart from a total of the few calls a rate happened to cover."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the summary was written, which is not the day it describes."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="daystart" UNIQUE="false" FIELDS="daystart"/>
+        <INDEX NAME="courseid-daystart" UNIQUE="false" FIELDS="courseid, daystart"/>
+        <INDEX NAME="userid-daystart" UNIQUE="false" FIELDS="userid, daystart"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_price" COMMENT="What a provider charges, as the administrator has entered it, with the date each rate took effect.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="provider" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Provider component. Rates belong to a provider and a model, not to an instance, since two instances of the same provider are charged alike."/>
+        <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Empty means this rate covers any model of that provider which has no rate of its own. Declared without a default, because XMLDB refuses an empty string as one."/>
+        <FIELD NAME="promptrate" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Per million prompt tokens, in the site currency."/>
+        <FIELD NAME="completionrate" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Per million completion tokens."/>
+        <FIELD NAME="imagerate" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Per image, since image actions carry no token counts."/>
+        <FIELD NAME="timefrom" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When this rate took effect. A request is costed with the latest rate in force at the time."/>
+        <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="provider-model-timefrom" UNIQUE="true" FIELDS="provider, model, timefrom"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_target" COMMENT="Per delegation target settings for bring your own key: where a key goes, and whether the site lets anybody bring one here. The name of the field a key goes in differs from provider to provider, so it is guessed and then confirmed by an administrator rather than assumed.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance. Not a foreign key, so that deleting a provider instance in core cannot fail."/>
+        <FIELD NAME="keyfield" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Which of the instance config keys holds the key. Empty means the administrator has confirmed this provider takes no key at all, which is different from not having been asked yet. Declared without a default, because XMLDB refuses an empty string as one."/>
+        <FIELD NAME="byokmode" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="allowed" SEQUENCE="false" COMMENT="Whether this site lets people bring a key to this provider: allowed, disallowed, or only, meaning the provider may be reached with a brought key and not with the site's own. Separate from keyfield, which says where a key goes and is a fact about the provider rather than a decision of the site's."/>
+        <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="targetid" UNIQUE="true" FIELDS="targetid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_key" COMMENT="Keys brought by a user or registered for a course, encrypted with the site key. One key per subject and delegation target. Carries the limit the owner has put on their own spending, which is theirs to set and nobody else's.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="scope" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="Whose key it is: user or course."/>
+        <FIELD NAME="scopeid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The user id or the course id, according to the scope."/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance this key is for. Keys belong to an instance rather than to a provider plugin, because two instances of one plugin can point at different endpoints."/>
+        <FIELD NAME="secret" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="The key, encrypted with core\encryption. Never logged, never exported and never shown again."/>
+        <FIELD NAME="hint" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="The last few characters, so that the owner can recognise which key this is without anything being decrypted. Deliberately the end of the key: the beginning is often a fixed prefix. Declared without a default, because XMLDB refuses an empty string as one."/>
+        <FIELD NAME="timeverified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the key was last tested against the provider. Zero means never."/>
+        <FIELD NAME="verifystatus" TYPE="char" LENGTH="20" NOTNULL="false" SEQUENCE="false" COMMENT="What that test said."/>
+        <FIELD NAME="capamount" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="A limit the owner has set on their own spending at this key, in the site currency. Null means they have set none. Estimated from the site rate table, not from what the provider actually billed."/>
+        <FIELD NAME="capperiod" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="month" SEQUENCE="false" COMMENT="How the limit is counted: a calendar month, or a rolling number of days."/>
+        <FIELD NAME="capdays" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="How many days a rolling limit counts. Ignored for a calendar month."/>
+        <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Who registered it. For a course key this is the only personal data in the row, and it is what a deletion request clears."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="scope-scopeid-targetid" UNIQUE="true" FIELDS="scope, scopeid, targetid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_notice" COMMENT="What has already been said about a budget or a key limit, so that a daily task does not say it again every day. A row exists while a threshold is over; it is removed once the spending falls back under it, which is what makes a new month start the count again without anything having to know about months.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="kind" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="What the limit is about: the site, a course, a person, or one brought key."/>
+        <FIELD NAME="subjectid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The course, person or key. Zero for the site, which has only one."/>
+        <FIELD NAME="metric" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="cost" SEQUENCE="false" COMMENT="What the limit counted: money, or requests. Part of the key, because the same subject can be held to a limit of each kind and they are reached at different moments."/>
+        <FIELD NAME="limitamount" TYPE="number" LENGTH="12" NOTNULL="true" SEQUENCE="false" DECIMALS="6" COMMENT="The limit this was about. Part of the key, because one subject can have several budgets set on it by different rules."/>
+        <FIELD NAME="threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="100" SEQUENCE="false" COMMENT="Which share of the limit was crossed, as a percentage. An early warning and the limit itself are told apart by this."/>
+        <FIELD NAME="periodstart" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The start of the stretch of time the limit was about, for a limit measured over a calendar month. Zero for a rolling period, whose start moves every day and would otherwise make this say something new each morning. Part of the key, so that February gets its own answer rather than inheriting January's."/>
+        <FIELD NAME="perioddays" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="How many days a rolling period covers. Zero for a calendar month. Part of the key, because the same subject can be held to the same amount over two different stretches of time and they are reached at different moments."/>
+        <FIELD NAME="timenotified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="kind-subjectid-metric-limitamount-threshold-periodstart-perioddays" UNIQUE="true" FIELDS="kind, subjectid, metric, limitamount, threshold, periodstart, perioddays"/>
+      </INDEXES>
+    </TABLE>
+  </TABLES>
+</XMLDB>

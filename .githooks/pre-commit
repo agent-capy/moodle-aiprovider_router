@@ -77,38 +77,49 @@ else
 fi
 
 say "── 3. テスト ────────────────────────────────────"
-if [ ! -d "$REPO_ROOT/tests" ]; then
-  skip "tests/ がまだ存在しない（WP6 で追加予定）"
+# ⚠ このリポジトリは複数コンポーネントを持つ（local/airouter と ai/provider/router）。
+#   置き場所は各コンポーネントの .moodlepath が持っているので、そこから数える。
+mapfile -t COMPONENTS < <(
+  find "$REPO_ROOT" -name .moodlepath -not -path '*/.git/*' -printf '%h\n' | sort |
+  while read -r dir; do
+    sed -n "s/^\$plugin->component *= *'\([^']*\)'.*/\1/p" "$dir/version.php" 2>/dev/null
+  done
+)
+# ⚠ Moodle はテストを持つコンポーネントぶんしか testsuite を作らない。
+#   持たないものを並べると phpunit がその場で失敗する。
+mapfile -t SUITES < <(
+  find "$REPO_ROOT" -name .moodlepath -not -path '*/.git/*' -printf '%h\n' | sort |
+  while read -r dir; do
+    [ -d "$dir/tests" ] || continue
+    c="$(sed -n "s/^\$plugin->component *= *'\([^']*\)'.*/\1/p" "$dir/version.php" 2>/dev/null)"
+    [ -n "$c" ] && echo "${c}_testsuite"
+  done
+)
+
+if [ ${#COMPONENTS[@]} -eq 0 ]; then
+  fail "コンポーネントが見つかりません（.moodlepath と version.php を確認してください）"
 else
-  # Moodle の PHPUnit は Moodle 本体側の phpunit.xml と初期化済み DB を必要とする。
-  # 実行先は2つ: ①MOODLE_DIRROOT が指定されていればローカル
-  #             ②なければ .13 上の podman コンテナ（dev/テスト環境_podman.md）
-  COMPONENT="$(basename "$REPO_ROOT" | sed 's/^moodle-//')"
+  # ⚠⚠ 作業ツリーをコンテナへ同期してから実行する。同期しないまま「通った」と
+  #   報告した失敗が 2026-09-21 にあった（dev/実機検証メモ.md）。
+  SYNC="$REPO_ROOT/../../deploy/sync-test.sh"
   TESTHOST="${MAJ_TESTHOST:-root@192.168.11.13}"
-  if [ -n "${MOODLE_DIRROOT:-}" ] && [ -x "$MOODLE_DIRROOT/vendor/bin/phpunit" ]; then
-    if (cd "$MOODLE_DIRROOT" && vendor/bin/phpunit --testsuite "${COMPONENT}_testsuite"); then
-      ok "PHPUnit green (ローカル)"
-    else
-      fail "PHPUnit 失敗"
-    fi
-  elif ssh -o ConnectTimeout=5 -o BatchMode=yes "$TESTHOST" true 2>/dev/null; then
-    # 作業ツリーをコンテナへ同期してから実行する。コミット対象と実行対象を一致させるため。
-    say "     $TESTHOST の podman で実行します（作業ツリーを同期）"
-    rsync -az --delete --exclude '.git' --exclude '.moodlepath' \
-      "$REPO_ROOT/" "$TESTHOST:/opt/maj-test/plugins/${COMPONENT#aiprovider_}/" >/dev/null || \
-      fail "同期に失敗しました"
-    if ssh "$TESTHOST" "podman pod start majtest >/dev/null 2>&1;
-        rm -rf /opt/maj-test/moodle50/ai/provider/${COMPONENT#aiprovider_} &&
-        cp -r /opt/maj-test/plugins/${COMPONENT#aiprovider_} /opt/maj-test/moodle50/ai/provider/${COMPONENT#aiprovider_} &&
-        podman exec -w /var/www/html majtest-php vendor/bin/phpunit --testsuite ${COMPONENT}_testsuite" ; then
+  if [ ! -x "$SYNC" ]; then
+    fail "deploy/sync-test.sh が見つかりません"
+  elif ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$TESTHOST" true 2>/dev/null; then
+    fail "テスト環境に到達できません（$TESTHOST / podman majtest）"
+    say  "     （テストを実行せずにコミットしないこと）"
+  elif ! "$SYNC" >/dev/null; then
+    fail "テストコンテナへの同期に失敗しました"
+  else
+    ok "同期しました: ${COMPONENTS[*]}"
+    suites="$(IFS=,; echo "${SUITES[*]}")"
+    if [ -z "$suites" ]; then
+      skip "テストを持つコンポーネントがありません"
+    elif ssh "$TESTHOST" "podman exec -w /var/www/html majtest-php vendor/bin/phpunit --testsuite $suites"; then
       ok "PHPUnit green (${TESTHOST} / podman)"
     else
       fail "PHPUnit 失敗"
     fi
-  else
-    fail "tests/ はあるが実行環境に到達できません"
-    say  "     MOODLE_DIRROOT を指定するか、$TESTHOST（podman majtest）へ到達できる状態にしてください"
-    say  "     （テストを実行せずにコミットしないこと。どうしても必要なら --no-verify）"
   fi
 fi
 
