@@ -238,7 +238,7 @@ Both of these were introduced by the fixes above them.
 - The Behat step that checks a pasted picture's address waits for it instead of
   reading it once. A pasted picture enters the editor as a blob and is uploaded
   afterwards, so the address changes at a moment nothing announces, and the step was
-  relying on that happening within the gap between two steps. It usually did.
+  relying on that having happened by the time it looked. It usually had.
 
 ### Closing the same door properly
 
