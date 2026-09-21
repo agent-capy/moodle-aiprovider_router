@@ -79,6 +79,8 @@ $string['check:managedboundary:ok'] = 'Requests for {$a} reach the AI Router wha
 $string['check:managedboundary:replaced'] = 'Another plugin has taken over the AI manager, so actions placed under the AI Router no longer reach it.';
 $string['check:managedboundary:unreachable'] = 'No enabled AI Router instance can carry {$a}, so requests for it are refused rather than sent to another provider.';
 $string['check:norouter'] = 'No AI Router instance has been created yet, so there is nothing to check.';
+$string['check:ordernotused'] = 'Every action the AI Router carries has been placed under it, so the provider order no longer decides any of them.';
+$string['check:orderpartial'] = 'This applies to the actions that still go through the provider order: {$a}. The others have been placed under the router and reach it whatever the order says.';
 $string['check:routerfirst'] = 'AI Router position in the provider order';
 $string['check:routerfirst:coexist'] = 'The AI Router is not the first provider Moodle tries. In "Alongside other providers" mode this may be intended.';
 $string['check:routerfirst:details'] = 'The router is number {$a->position} of {$a->total} provider instances.';
@@ -256,10 +258,14 @@ $string['keysource:all'] = 'Every key';
 $string['keysource:course'] = 'A key registered for the course';
 $string['keysource:site'] = 'The site\'s own key';
 $string['keysource:user'] = 'A key the person asking has brought';
+$string['managed:coexist'] = 'This AI Router instance is set to run alongside other providers, which means letting them answer whatever no rule claimed. An action placed under the router cannot do that: nothing else is offered the request. Set the router to answer everything, or take these actions back out.';
+$string['managed:confirmstuck'] = 'No enabled AI Router instance can currently carry {$a}. Placing it under the router means requests for it are refused rather than passed to another provider, so this will stop it working across the site until the router can carry it. Save anyway?';
 $string['managed:heading'] = 'Actions the AI Router must answer';
 $string['managed:intro'] = 'Moodle tries AI providers in the site order and takes the first answer, so a provider above the router answers before any rule, budget or key somebody brought has been looked at. An action chosen here is brought to the router instead, wherever the router happens to sit in that order, and no other provider is offered the request afterwards. Two things follow from that, and both are worth knowing before you choose. A refusal becomes an ordinary failed request, so Moodle records it the way it records any other failure, including the prompt - until now a refusal had to be raised as an error to stop the next provider answering, and nothing was recorded at all. And if the router is turned off, deleted or not configured for the action, requests for it are refused rather than passed to another provider: that is the whole point of choosing it here, but it does mean that turning the router off turns the action off.';
 $string['managed:manage'] = 'Choose which actions go through the router';
 $string['managed:saved'] = 'Saved which actions go through the router.';
+$string['managed:unmanage'] = 'Take this action back out';
+$string['managed:unmanaged'] = 'The {$a} action no longer goes through the router.';
 $string['managed:unreachable'] = 'Requests for {$a} are being refused, because no enabled AI Router instance can carry it. Either configure the router for it, or take it off this list.';
 $string['messageprovider:budget'] = 'An AI budget has been reached';
 $string['messageprovider:keycap'] = 'A limit on your own AI key has been reached';
@@ -513,7 +519,7 @@ $string['strictdecline_help'] = 'Moodle tries each AI provider in the site order
 
 With this on, a refusal of that kind raises an error instead, which stops Moodle going any further. The person who made the request sees an error message rather than a quiet failure, and Moodle does not record the request in its own AI log; the router records it either way, so the usage reports here are unaffected.
 
-This applies only to refusals the site decided on. A target that was unreachable, or that broke, is still passed over so that another provider can try, which is what the fallback is for.';
+This applies only to refusals the site decided on. A target that was unreachable, or that broke, is still passed over so that another provider can try, which is what the fallback is for. This setting has no effect on an action the site has placed under the router: nothing else is offered the request, so a refusal is final whichever way this is set. It still decides what happens to every action that has not been placed there.';
 $string['task:notifybudgets'] = 'Notify about AI Router budgets';
 $string['task:notifybudgets:done'] = 'Weighed {$a->checked} threshold(s), sent {$a->sent} notice(s) and cleared {$a->cleared} that had eased off.';
 $string['task:summariseusage'] = 'Summarise AI Router usage';

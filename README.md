@@ -85,13 +85,25 @@ nothing is unchanged.
 Two consequences to decide about before turning this on:
 
 - **Refused requests are now stored.** Moodle records a refusal as it records any other
-  failed request, prompt included. Previously the error path stored nothing at all.
+  failed request, prompt included. Previously the error path stored nothing at all. The
+  prompt is not shown in the standard AI usage report, which lists token counts rather
+  than text, and it is covered by the Privacy API for export and deletion. ⚠ Moodle has
+  no retention setting for these records, so they are kept indefinitely.
+- ⚠ **It does not fit *Alongside other providers* mode.** Running alongside means
+  letting the others answer whatever no rule claimed, and an action placed under the
+  router cannot do that. Either set the router to answer everything, or leave that
+  action out. The page says so when the two are set against each other.
 - ⚠ **Only one plugin can do this at a time.** The router takes its place by defining
   the AI manager in Moodle's dependency injection container. If another plugin defines
   the same entry, whichever is registered last wins and nothing warns about it - the
   site would go on displaying its rules and budgets with none of them consulted. The
   *Actions placed under the AI Router* status check exists for that: it reports an error
   when the manager in use is not this plugin's.
+
+The three status checks that ask about the provider order - whether the router is
+first, what is ahead of it, and who is behind it to pick up a refusal - stand down for
+an action placed under the router, because such a request never reaches the order. They
+name the actions they still cover when only some have been placed there.
 
 This is the newer of two ways to run the router and it does not replace the older one.
 Sites that leave actions unmanaged keep the arrangement described next, where the

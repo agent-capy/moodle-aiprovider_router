@@ -32,6 +32,11 @@ use core\check\result;
  */
 class routerfirst extends base {
     #[\Override]
+    protected function depends_on_provider_order(): bool {
+        return true;
+    }
+
+    #[\Override]
     protected function check_router(): result {
         if ($this->inspector->is_router_first()) {
             return new result(result::OK, get_string('check:routerfirst:ok', 'aiprovider_router'));

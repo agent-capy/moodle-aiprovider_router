@@ -16,7 +16,10 @@
 
 namespace aiprovider_router;
 
+use aiprovider_router\check\actionconflict;
+use aiprovider_router\check\declinereach;
 use aiprovider_router\check\managedboundary;
+use aiprovider_router\check\routerfirst;
 use aiprovider_router\condition\budget;
 use core_ai\aiactions\generate_text;
 use core_ai\aiactions\responses\response_base;
@@ -53,6 +56,7 @@ require_once(__DIR__ . '/fixtures/mock/process_generate_text.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(managed_policy::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(response_factory::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(managedboundary::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(\aiprovider_router\check\base::class)]
 final class routing_manager_test extends \advanced_testcase {
     /** @var manager The manager a placement would be given. */
     protected manager $manager;
@@ -270,6 +274,14 @@ final class routing_manager_test extends \advanced_testcase {
         $record = reset($records);
         $this->assertEquals(0, $record->success);
         $this->assertSame($router->get_name(), $record->provider);
+
+        // And what core records includes the prompt, because that is what its own
+        // storage does with any request that failed. Nothing was sent anywhere, so
+        // nothing came back, but the asking is now written down where it never was.
+        $stored = $DB->get_records('ai_action_generate_text');
+        $this->assertCount(1, $stored);
+        $this->assertSame('Hello', reset($stored)->prompt);
+        $this->assertNull(reset($stored)->generatedcontent);
     }
 
     public function test_keeping_core_behaviour_no_longer_opens_a_way_round_the_budget(): void {
@@ -359,6 +371,42 @@ final class routing_manager_test extends \advanced_testcase {
         \core\di::set(manager::class, new manager($DB));
 
         $this->assertSame(\core\check\result::ERROR, (new managedboundary())->get_result()->get_status());
+    }
+
+    public function test_the_order_checks_stand_down_when_every_action_is_managed(): void {
+        // Three of the checks are questions about the provider order: is the router
+        // first, is something in front of it, and who is behind it to pick up a
+        // refusal. A request that no longer goes through the order cannot be answered
+        // by any of them, and reporting the order as a fault anyway would be telling an
+        // administrator to fix something that has stopped deciding anything.
+        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
+        $this->add_working_router();
+        managed_policy::set_managed_actions(provider::get_action_list());
+
+        $inspector = new order_inspector();
+        foreach ([routerfirst::class, actionconflict::class, declinereach::class] as $class) {
+            $result = (new $class($inspector))->get_result();
+            $this->assertSame(\core\check\result::OK, $result->get_status(), $class);
+            $this->assertSame(
+                get_string('check:ordernotused', 'aiprovider_router'),
+                $result->get_summary(),
+                $class,
+            );
+        }
+    }
+
+    public function test_the_order_checks_say_which_actions_they_still_cover(): void {
+        // With only some placed under the router, the order still decides the rest, so
+        // the finding stands -- but it is now about fewer actions than it looks.
+        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
+        $this->add_working_router();
+        $this->manage_text();
+
+        $result = (new routerfirst(new order_inspector()))->get_result();
+
+        $this->assertSame(\core\check\result::ERROR, $result->get_status());
+        $this->assertStringContainsString('summarise_text', $result->get_details());
+        $this->assertStringNotContainsString('generate_text', $result->get_details());
     }
 
     public function test_an_action_the_router_does_not_carry_is_left_alone(): void {

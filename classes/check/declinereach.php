@@ -36,6 +36,11 @@ use core\check\result;
  */
 class declinereach extends base {
     #[\Override]
+    protected function depends_on_provider_order(): bool {
+        return true;
+    }
+
+    #[\Override]
     protected function check_router(): result {
         $following = $this->inspector->get_following_instances();
         if (!$following) {

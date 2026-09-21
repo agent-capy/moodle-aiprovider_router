@@ -16,7 +16,9 @@
 
 namespace aiprovider_router\check;
 
+use aiprovider_router\managed_policy;
 use aiprovider_router\order_inspector;
+use aiprovider_router\provider;
 use core\check\check;
 use core\check\result;
 
@@ -64,7 +66,61 @@ abstract class base extends check {
             return new result(result::NA, get_string('check:norouter', 'aiprovider_router'));
         }
 
-        return $this->check_router();
+        if (!$this->depends_on_provider_order()) {
+            return $this->check_router();
+        }
+
+        // An action the site has placed under the router does not go through the
+        // provider order at all, so a check about that order has nothing to say about
+        // it. Reporting the order as a problem anyway would be telling an administrator
+        // to fix something that no longer decides anything.
+        $unmanaged = $this->unmanaged_actions();
+        if ($unmanaged === []) {
+            return new result(result::OK, get_string('check:ordernotused', 'aiprovider_router'));
+        }
+
+        $result = $this->check_router();
+        if (!managed_policy::is_active()) {
+            return $result;
+        }
+
+        // Some go through the order and some do not, so say which ones this is about.
+        $names = implode(', ', array_map(
+            static fn(string $action): string => $action::get_basename(),
+            $unmanaged,
+        ));
+
+        return new result(
+            $result->get_status(),
+            $result->get_summary(),
+            trim($result->get_details() . ' ' . get_string('check:orderpartial', 'aiprovider_router', $names)),
+        );
+    }
+
+    /**
+     * Whether this check is asking a question about the provider order.
+     *
+     * Those checks stop applying to an action the site has placed under the router,
+     * because such a request never reaches the order.
+     *
+     * @return bool True when the finding depends on where the router sits.
+     */
+    protected function depends_on_provider_order(): bool {
+        return false;
+    }
+
+    /**
+     * The actions the router carries that still go through the provider order.
+     *
+     * @return string[] Action class names.
+     */
+    protected function unmanaged_actions(): array {
+        $managed = managed_policy::managed_actions();
+
+        return array_values(array_filter(
+            array_map(static fn(string $action): string => ltrim($action, '\\'), provider::get_action_list()),
+            static fn(string $action): bool => !in_array($action, $managed, true),
+        ));
     }
 
     /**

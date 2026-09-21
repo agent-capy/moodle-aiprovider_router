@@ -27,6 +27,17 @@ the same code.
   cannot reach the router: no enabled instance carries it, or another plugin has
   defined Moodle's AI manager and silently displaced this one.
 
+### Changed
+
+- The status checks about the provider order - whether the router is first, what is
+  ahead of it, and who is behind it - stand down for an action placed under the router,
+  and name the actions they still cover when only some have been placed there. Such a
+  request does not reach the order, so reporting the order as a fault would be asking
+  an administrator to fix something that no longer decides anything.
+- *Make refusals final* now says in its help that it has no effect on an action placed
+  under the router. Nothing else is offered those requests, so a refusal is final
+  whichever way the setting is left. It still governs every action not placed there.
+
 ### Fixed
 
 - A rule that routes by budget no longer ends the request unless the budget has

@@ -31,6 +31,11 @@ use core\check\result;
  */
 class actionconflict extends base {
     #[\Override]
+    protected function depends_on_provider_order(): bool {
+        return true;
+    }
+
+    #[\Override]
     protected function check_router(): result {
         $intercepting = $this->inspector->get_intercepting_instances();
         if (!$intercepting) {
