@@ -60,13 +60,16 @@ class usage_aggregator {
     public const DEFAULT_SUMMARY_RETENTION = 0;
 
     /**
-     * Config holding the first moment the site can still vouch for.
+     * Config holding the first moment the site can account for in full.
      *
      * Raised whenever summaries are discarded, and never lowered. Without it there is
      * no way to tell a site that has never used its AI from a site whose history was
      * thrown away: both have two empty tables, and the difference between them is the
      * difference between a budget that is measuring everything and a budget that is
      * measuring what is left.
+     *
+     * Zero means the site can account for everything back to the day it was installed,
+     * which is the ordinary state and the state a new site starts in.
      *
      * @var string The setting name.
      */
@@ -293,6 +296,49 @@ class usage_aggregator {
     protected function record_history_from(int $from): void {
         if ($from > $this->get_history_from()) {
             set_config(self::HISTORY_SETTING, $from, 'aiprovider_router');
+        }
+    }
+
+    /**
+     * Work out a starting point for a site that was running before this was recorded.
+     *
+     * Everything a site discards from now on is written down as it goes, but what an
+     * older version discarded was not, and there is nothing left to find it by: a day
+     * that has been removed leaves no trace in either table. So the site is credited
+     * with what it can still show and nothing earlier. That is the truthful answer
+     * under uncertainty -- from before the oldest thing it holds, it cannot account
+     * for its AI use, whether that is because the usage was discarded or because
+     * there was none.
+     *
+     * Reading the current retention setting instead was wrong twice over. A site that
+     * discarded a month under a finite setting and then set it back to unlimited was
+     * credited with a complete record it does not have, and the setting says nothing
+     * about what was in force when the purge actually ran.
+     *
+     * A site with nothing stored and no sign of ever having summarised anything is
+     * left alone. It has not lost history; it has not made any.
+     */
+    public function seed_history_from(): void {
+        if ($this->get_history_from() > 0) {
+            return;
+        }
+
+        $oldest = $this->db->get_field_sql('SELECT MIN(daystart) FROM {' . self::TABLE . '}');
+        if (empty($oldest)) {
+            $oldest = $this->db->get_field_sql(
+                'SELECT MIN(timecreated) FROM {' . usage_logger::TABLE . '}',
+            );
+        }
+        if (empty($oldest)) {
+            // Nothing is left to date it by. The summariser having reached a day at
+            // all says there was something here once, and everything up to that day
+            // has gone.
+            $last = (int) get_config('aiprovider_router', self::LAST_SETTING);
+            $oldest = $last > 0 ? $this->add_days($last, 1) : 0;
+        }
+
+        if (!empty($oldest)) {
+            $this->record_history_from((int) $oldest);
         }
     }
 

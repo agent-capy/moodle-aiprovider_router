@@ -46,6 +46,13 @@ use core\check\result;
  * has never used its AI, and this said that nothing had been recorded yet and moved
  * on. The one site that most needed telling was the one told there was nothing wrong.
  *
+ * What the mark means is "this site can account for its AI use from here", and it is
+ * not only the purge that sets it. A site upgrading from a version that kept no such
+ * mark is credited with what it can still show and nothing earlier, because a day
+ * that was removed by an older version leaves nothing to find it by. So the warning
+ * says what can be said -- that the period before that date cannot be accounted for
+ * -- rather than asserting how it came to be that way.
+ *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -71,11 +78,11 @@ class budgethistory extends base {
         $aggregator = new usage_aggregator($DB);
         $from = $aggregator->get_history_from();
         if ($from === 0) {
-            // Nothing has ever been discarded, so whatever is stored is the whole of
-            // what happened, and every budget is counting all of it. Said as a fact
-            // about the purge rather than guessed from the rows: an empty table is
-            // the same shape whether the site has never used its AI or has had its
-            // history taken away.
+            // This site can account for the whole of its own history: it has never
+            // discarded anything, and it has been keeping the mark since it was
+            // installed. Said as a fact about what happened rather than guessed from
+            // the rows, which cannot tell a site that never used its AI from a site
+            // whose history was taken away.
             $earliest = self::earliest_record($DB);
 
             return new result(result::OK, $earliest === null

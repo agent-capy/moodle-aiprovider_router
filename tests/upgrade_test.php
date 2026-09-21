@@ -210,6 +210,72 @@ final class upgrade_test extends \advanced_testcase {
         $this->assertSame(0, (int) $row->costedcalls);
     }
 
+    public function test_losing_an_unpriced_attempt_does_not_make_a_day_fully_priced(): void {
+        global $DB;
+
+        // An attempt that answered with nothing and had no rate is counted as no
+        // request and carries no cost, so losing one leaves the requests and the cost
+        // of the day exactly as they were. Proving the rebuild by those two alone let
+        // such a day go quietly from half priced to fully priced, and the note saying
+        // the cost was incomplete disappeared with it.
+        $this->summary([
+            'failures' => 0,
+            'requests' => 1,
+            'calls' => 2,
+            'costedcalls' => 1,
+            'cost' => 1.0,
+            'prompttokens' => 0,
+            'completiontokens' => 0,
+        ]);
+        $this->log(['cost' => 1.0, 'prompttokens' => 0, 'completiontokens' => 0]);
+
+        $this->upgrade();
+
+        $totals = $DB->get_record_sql(
+            'SELECT SUM(requests) AS requests, SUM(calls) AS calls,
+                    SUM(costedcalls) AS costedcalls, SUM(cost) AS cost
+               FROM {' . usage_aggregator::TABLE . '} WHERE daystart = :day',
+            ['day' => $this->day],
+        );
+        $this->assertSame(1, (int) $totals->requests);
+        $this->assertSame(2, (int) $totals->calls);
+        $this->assertSame(1, (int) $totals->costedcalls);
+        $this->assertEqualsWithDelta(1.0, (float) $totals->cost, 0.000001);
+    }
+
+    public function test_a_site_that_had_already_discarded_history_is_given_a_starting_point(): void {
+        // An older version discarded a month and wrote nothing down, and the site has
+        // since put its retention back to unlimited. Reading the retention setting
+        // said the site had discarded nothing, which is a claim about the past made
+        // from a setting that only describes the present.
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 0, 'aiprovider_router');
+        set_config(usage_aggregator::LAST_SETTING, $this->day, 'aiprovider_router');
+        $this->log();
+
+        $this->upgrade();
+
+        // What it can still show, and nothing earlier.
+        $this->assertSame($this->day + HOURSECS, $this->aggregator->get_history_from());
+    }
+
+    public function test_a_site_with_a_starting_point_already_keeps_it(): void {
+        $earlier = $this->aggregator->add_days($this->day, -5);
+        set_config(usage_aggregator::HISTORY_SETTING, $earlier, 'aiprovider_router');
+        $this->log();
+
+        $this->upgrade();
+
+        $this->assertSame($earlier, $this->aggregator->get_history_from());
+    }
+
+    public function test_a_site_that_has_never_used_its_ai_is_left_alone(): void {
+        $this->upgrade();
+
+        // No history to be missing, so nothing to mark. Saying otherwise would warn
+        // every fresh install about a period in which nothing happened.
+        $this->assertSame(0, $this->aggregator->get_history_from());
+    }
+
     public function test_a_day_left_alone_by_one_pass_is_not_disturbed_by_the_other(): void {
         global $DB;
 

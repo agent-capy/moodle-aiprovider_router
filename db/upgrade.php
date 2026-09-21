@@ -450,10 +450,18 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         // right to be forgotten.
         //
         // Rather than work out where a purge boundary once fell, the rebuild is asked
-        // to prove itself: the rows that are here must add up to the requests and the
-        // cost already recorded for that day. Both are worked out the same way in
-        // every version, so agreement means nothing is missing, and disagreement means
-        // the day keeps what it has and lives with the arithmetic above.
+        // to prove itself, and the rule it has to satisfy is that it may add to what
+        // is known about a day and may never take anything away. The requests and the
+        // cost have to come out exactly as recorded, because those two are worked out
+        // the same way in every version. The calls and the priced calls have only to
+        // come out no lower, because raising them off the floor the step above set is
+        // the whole reason for rebuilding at all.
+        //
+        // Matching the requests and the cost is not on its own proof that nothing is
+        // missing. An attempt that answered with nothing and had no rate is counted as
+        // no request and carries no cost, so losing one leaves both figures untouched
+        // while the day quietly goes from half priced to fully priced. Refusing to let
+        // any figure fall covers that, and covers whatever else has the same shape.
         $aggregator = new \aiprovider_router\usage_aggregator($DB);
         $days = $DB->get_fieldset_sql(
             'SELECT DISTINCT daystart FROM {aiprovider_router_daily} ORDER BY daystart',
@@ -461,17 +469,25 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         foreach ($days as $day) {
             $day = (int) $day;
             $stored = $DB->get_record_sql(
-                'SELECT SUM(requests) AS requests, SUM(cost) AS cost
+                'SELECT SUM(requests) AS requests, SUM(calls) AS calls,
+                        SUM(costedcalls) AS costedcalls, SUM(cost) AS cost
                    FROM {aiprovider_router_daily} WHERE daystart = :day',
                 ['day' => $day],
             );
             $held = $DB->get_record_sql(
-                'SELECT COUNT(1) AS held, SUM(counted) AS requests, SUM(cost) AS cost
+                'SELECT COUNT(1) AS calls, SUM(counted) AS requests, SUM(cost) AS cost,
+                        SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedcalls
                    FROM {aiprovider_router_log}
                   WHERE timecreated >= :from AND timecreated < :to',
                 ['from' => $day, 'to' => $aggregator->add_days($day, 1)],
             );
-            if ((int) $held->held === 0 || (int) $held->requests !== (int) $stored->requests) {
+            if ((int) $held->calls === 0 || (int) $held->requests !== (int) $stored->requests) {
+                continue;
+            }
+            if ((int) $held->calls < (int) $stored->calls) {
+                continue;
+            }
+            if ((int) $held->costedcalls < (int) $stored->costedcalls) {
                 continue;
             }
             if (($held->cost === null) !== ($stored->cost === null)) {
@@ -492,32 +508,27 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         // its history taken away, and only one of those is a site whose budgets are
         // measuring less than was spent.
         //
-        // Nothing wrote it down before, so a site that has already discarded
-        // something has to be given a starting point rather than be assumed innocent.
-        // Only a site that discards summaries can have lost anything: keeping every
-        // summary is the default, and the detail is only ever removed from days a
-        // summary already covers.
-        $aggregator = new \aiprovider_router\usage_aggregator($DB);
-        if ($aggregator->get_summary_retention_days() > 0 && $aggregator->get_history_from() === 0) {
-            $oldest = $DB->get_field_sql('SELECT MIN(daystart) FROM {aiprovider_router_daily}');
-            if (empty($oldest)) {
-                $oldest = $DB->get_field_sql('SELECT MIN(timecreated) FROM {aiprovider_router_log}');
-            }
-            if (empty($oldest)) {
-                // Nothing left to date it by. The summariser having run at all is
-                // what says there was something here once.
-                $oldest = (int) get_config('aiprovider_router', \aiprovider_router\usage_aggregator::LAST_SETTING);
-            }
-            if (!empty($oldest)) {
-                set_config(
-                    \aiprovider_router\usage_aggregator::HISTORY_SETTING,
-                    (int) $oldest,
-                    'aiprovider_router',
-                );
-            }
-        }
+        // A site that was running before that was recorded has to be given a starting
+        // point. See seed_history_from(): it is what the site can still show, and
+        // nothing earlier, because a day that was removed leaves no trace to find it
+        // by. The step is repeated below, where it is written correctly.
+        (new \aiprovider_router\usage_aggregator($DB))->seed_history_from();
 
         upgrade_plugin_savepoint(true, 2026092104, 'aiprovider', 'router');
+    }
+
+    if ($oldversion < 2026092105) {
+        // The step above first decided whether to set a starting point by reading the
+        // current summary retention, on the grounds that a site keeping every summary
+        // has discarded nothing. It says no such thing: a site that ran with a finite
+        // retention for a month, discarded that month and then set the retention back
+        // to unlimited was recorded as having a complete history, and the new check
+        // told it so in as many words. Run again, now that the question is asked of
+        // what the site holds rather than of how it is configured. It does nothing on
+        // a site that already has a starting point.
+        (new \aiprovider_router\usage_aggregator($DB))->seed_history_from();
+
+        upgrade_plugin_savepoint(true, 2026092105, 'aiprovider', 'router');
     }
 
     return true;

@@ -212,6 +212,34 @@ Both of these were introduced by the fixes above them.
   upgrade step gives a starting point to sites that were already discarding summaries
   before this was recorded.
 
+### And once more
+
+- The upgrade may now add to what is known about a day and may never take anything
+  away. Proving a rebuild by the requests and the cost alone was not enough: an
+  attempt that answered with nothing and had no rate is counted as no request and
+  carries no cost, so losing one left both figures untouched while the day quietly
+  went from half priced to fully priced and the note saying the cost was incomplete
+  disappeared with it. The requests and the cost still have to match exactly; the
+  calls and the priced calls have only to come out no lower.
+- Where a site's record begins is worked out from what the site can still show rather
+  than from how it is configured. Reading the current summary retention treated a site
+  that had discarded a month under a finite setting and then put the setting back to
+  unlimited as a site that had never discarded anything, and the Budget history check
+  said so in as many words.
+- That check no longer says how a gap came about, because it cannot always know. A
+  starting point worked out at upgrade time means only that the site cannot account
+  for what came before it -- the usage may have been discarded, or there may never
+  have been any. It says that, and lists both, and keeps the flat statement that
+  nothing has been discarded for the case where the mark has been kept since the
+  plugin was installed.
+
+### Testing
+
+- The Behat step that checks a pasted picture's address waits for it instead of
+  reading it once. A pasted picture enters the editor as a blob and is uploaded
+  afterwards, so the address changes at a moment nothing announces, and the step was
+  relying on that happening within the gap between two steps. It usually did.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

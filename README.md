@@ -280,7 +280,10 @@ turned into "unknown", because a budget that cannot be measured stops restrictin
 anything, which is the opposite of what somebody setting a limit wanted. What the check
 reads is what the purge wrote down as it discarded each day, not the oldest row that
 happens to be left: a site whose history has gone entirely looks exactly like a site
-that has never used its AI, and those are not the same site.
+that has never used its AI, and those are not the same site. On a site that was already
+running before that was written down, the starting point is whatever it can still show;
+the check then says only that the period before it cannot be accounted for, without
+claiming whether the usage was discarded or never happened.
 
 **A limit is accurate to about a minute.** Adding up the history on every AI request
 would be too much work for the path a request takes, so the figures are held briefly. A
