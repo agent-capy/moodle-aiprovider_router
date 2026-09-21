@@ -35,6 +35,7 @@ function aiprovider_router_status_checks(): array {
     $inspector = new \aiprovider_router\order_inspector();
 
     return [
+        new \aiprovider_router\check\managedboundary(),
         new \aiprovider_router\check\singleinstance($inspector),
         new \aiprovider_router\check\routerlisted($inspector),
         new \aiprovider_router\check\routerfirst($inspector),

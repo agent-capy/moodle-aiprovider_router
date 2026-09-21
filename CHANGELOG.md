@@ -5,7 +5,27 @@ release, and versions follow [semantic versioning](https://semver.org/).
 
 ## Unreleased
 
-Fixes from a second independent review of the same code.
+A second way of connecting to Moodle, and fixes from a second independent review of
+the same code.
+
+### Added
+
+- A site can place an action **under the router**, on *Actions the AI Router must
+  answer*. Moodle brings that action to the router wherever the router sits in the
+  provider order, and offers the request to nobody else afterwards. The order decides
+  which provider Moodle prefers; it cannot decide which one answers, so until now a
+  provider placed above the router answered before any rule, budget or brought key had
+  been looked at.
+  - A refusal comes back as an ordinary failed request rather than an error, so Moodle
+    records it in its own AI action log for the first time. The prompt of a refused
+    request is stored with it, as it is for a request that failed any other way.
+  - An action placed there and not answerable is refused, not passed to another
+    provider. Turning the router off turns that action off.
+  - Nothing is placed there until the site says so, and unmanaged actions are handled
+    exactly as before.
+- A status check, *Actions placed under the AI Router*, reports when a managed action
+  cannot reach the router: no enabled instance carries it, or another plugin has
+  defined Moodle's AI manager and silently displaced this one.
 
 ### Fixed
 

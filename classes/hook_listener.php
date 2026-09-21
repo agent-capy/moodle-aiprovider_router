@@ -16,6 +16,7 @@
 
 namespace aiprovider_router;
 
+use core\hook\di_configuration;
 use core_ai\hook\after_ai_provider_form_hook;
 use core_course\hook\before_course_deleted;
 
@@ -27,6 +28,34 @@ use core_course\hook\before_course_deleted;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class hook_listener {
+    /**
+     * Put this plugin's manager in front of the AI subsystem.
+     *
+     * Every entry point core has for starting an AI request asks the container for a
+     * manager, so a definition registered here is what decides which requests the
+     * router is allowed to answer. Being first in the provider order is not the same
+     * thing: an order says which provider is preferred, and a provider above the router
+     * answers before any rule, budget or key of somebody's has been looked at.
+     *
+     * The definition is registered whether or not the site manages anything. Whether an
+     * action is managed can change between one request and the next, and the container
+     * is built once, so the question is asked when the request arrives instead. With
+     * nothing managed the class behaves exactly as core's own manager does.
+     *
+     * The definition is a closure, so nothing is built while the container is being
+     * assembled and the manager cannot end up depending on itself.
+     *
+     * @param di_configuration $hook The hook being handled.
+     */
+    public static function configure_di(di_configuration $hook): void {
+        $hook->add_definition(
+            id: \core_ai\manager::class,
+            definition: static function (\moodle_database $db): \core_ai\manager {
+                return new routing_manager($db);
+            },
+        );
+    }
+
     /**
      * Add the router settings to the provider instance form.
      *
@@ -87,6 +116,16 @@ class hook_listener {
         );
         $mform->setDefault('strictdecline', 1);
         $mform->addHelpButton('strictdecline', 'strictdecline', 'aiprovider_router');
+
+        $mform->addElement(
+            'static',
+            'managedlink',
+            get_string('managed:heading', 'aiprovider_router'),
+            \html_writer::link(
+                new \moodle_url('/ai/provider/router/managed.php'),
+                get_string('managed:manage', 'aiprovider_router'),
+            ),
+        );
 
         // The rules are a separate page because core never reads an aiprovider plugin's
         // settings.php, so there is no admin tree entry to reach them from. This form is

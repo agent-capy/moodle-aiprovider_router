@@ -55,6 +55,48 @@ A router instance has four settings, on the provider instance form.
 Only one router instance can exist on a site. The form refuses a second one, and if a
 second is created another way it stands down rather than competing with the first.
 
+## Actions the site places under the router
+
+The provider order says which provider Moodle *prefers*. It cannot say which provider
+answers: whichever comes first and succeeds is the answer, so a provider above the
+router answers before any rule, budget or key somebody brought has been looked at. For a
+site using the router to decide where requests go and who pays for them, that is the
+difference between a policy and a hope.
+
+A site can instead place an action **under** the router, on **Actions the AI Router must
+answer** (`/ai/provider/router/managed.php`). Moodle then brings that action to the
+router wherever the router sits in the order, and offers the request to nobody else
+afterwards:
+
+- a refusal -- no rule claimed the request, the budget has run out, the key somebody
+  brought was refused -- comes back as an ordinary failed request. The placement shows
+  what it shows for any failure, and **Moodle records it in its own AI action log**,
+  which it never could before: stopping the next provider used to require raising an
+  error, and an error means core writes nothing down.
+- a target that merely breaks is still retried, among the targets the rules allow, and
+  nowhere else.
+- if no enabled router instance can carry the action, the request is refused rather
+  than passed on. That is the point of choosing it here, and it has a cost worth stating
+  plainly: **turning the router off turns that action off**.
+
+Actions not chosen here behave exactly as they always did, and a site that chooses
+nothing is unchanged.
+
+Two consequences to decide about before turning this on:
+
+- **Refused requests are now stored.** Moodle records a refusal as it records any other
+  failed request, prompt included. Previously the error path stored nothing at all.
+- ⚠ **Only one plugin can do this at a time.** The router takes its place by defining
+  the AI manager in Moodle's dependency injection container. If another plugin defines
+  the same entry, whichever is registered last wins and nothing warns about it - the
+  site would go on displaying its rules and budgets with none of them consulted. The
+  *Actions placed under the AI Router* status check exists for that: it reports an error
+  when the manager in use is not this plugin's.
+
+This is the newer of two ways to run the router and it does not replace the older one.
+Sites that leave actions unmanaged keep the arrangement described next, where the
+router is one provider among several and refusals are made final by raising an error.
+
 ## Provider order
 
 Moodle tries AI providers in the order configured for the site and returns the first
@@ -66,6 +108,7 @@ The plugin reports this on *Site administration → Reports → System status*:
 
 | Check | Reports |
 | --- | --- |
+| Actions placed under the AI Router | An action the site placed under the router cannot reach it, either because no enabled instance carries it or because another plugin has taken over Moodle's AI manager. Reported only where at least one action has been placed there. |
 | Number of AI Router instances | More than one router instance exists. Only the lowest numbered one is used; delete the rest from the AI provider list. |
 | AI Router in the provider order | The router is absent from the order, so it is tried only after every other provider has refused the request. |
 | AI Router position in the provider order | The router is not tried first. An error in *Router only* mode; in *Alongside other providers* mode this may be deliberate, so it is reported for information only. |
@@ -75,11 +118,6 @@ The plugin reports this on *Site administration → Reports → System status*:
 | Leftover entries in the provider order | The order still names instances that have been deleted. Moving providers up and down works on positions in that list, so leftovers can make reordering appear to do nothing. |
 | Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
 | Actions the router instance can carry | An action the router offers is not configured on its instance, so requests for it never reach the router. This happens when a plugin defining an action is installed after the router instance was made: the action list is read fresh every time, the instance's configuration is written once. ⚠ The provider settings screen cannot put it right for an action outside core, so recreating the instance is the fix. |
-
-None of this plugin's own pages is in the administration tree, because core never
-reads an aiprovider plugin's `settings.php`. Each of them therefore carries a **Back
-to AI Router settings** button and a breadcrumb that leads there, and the settings
-form is told to return to the page you came from when you save or cancel.
 
 None of this plugin's own pages is in the administration tree, because core never reads
 an aiprovider plugin's `settings.php`. Each of them therefore carries a **Back to AI
