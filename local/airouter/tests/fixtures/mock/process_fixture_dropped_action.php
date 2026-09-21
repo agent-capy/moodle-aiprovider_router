@@ -14,20 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+namespace aiprovider_mock;
+
 /**
- * Version details for aiprovider_router.
+ * Mock processor for the action the router has stopped declaring.
  *
- * @package    aiprovider_router
+ * It answers, so that a request escaping the router is visible as a success rather
+ * than as core running out of providers. Without it the leak would look the same as
+ * a site with nothing configured.
+ *
+ * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
-defined('MOODLE_INTERNAL') || die();
-
-$plugin->component = 'aiprovider_router';
-$plugin->version = 2026092200;
-$plugin->requires = 2025041400;
-$plugin->dependencies = ['local_airouter' => 2026092200];
-$plugin->supported = [500, 502];
-$plugin->maturity = MATURITY_BETA;
-$plugin->release = '0.1.0';
+class process_fixture_dropped_action extends abstract_processor {
+    #[\Override]
+    protected function get_content_key(): ?string {
+        return 'generatedcontent';
+    }
+}

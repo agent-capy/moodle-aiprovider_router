@@ -35,7 +35,10 @@ use local_airouter\order_inspector;
 use local_airouter\provider;
 use local_airouter\routing_manager;
 
-$unmanage = optional_param('unmanage', '', PARAM_ALPHANUMEXT);
+// Action class names, which carry separators. Nothing is built from these: they
+// are only compared against lists this plugin holds, and anything that matches
+// nothing falls out.
+$unmanage = optional_param('unmanage', '', PARAM_RAW_TRIMMED);
 $confirmed = optional_param('confirmactions', null, PARAM_RAW);
 
 require_login();
@@ -60,17 +63,25 @@ if ($unmanage !== '') {
     require_sesskey();
     $keep = array_values(array_filter(
         managed_policy::managed_actions(),
-        static fn(string $action): bool => $action::get_basename() !== $unmanage,
+        static fn(string $action): bool => $action !== ltrim($unmanage, '\\'),
     ));
     managed_policy::set_managed_actions($keep);
 
     redirect(
         $url,
-        get_string('managed:unmanaged', 'local_airouter', $unmanage),
+        get_string('managed:unmanaged', 'local_airouter', managed_policy::basename_for(ltrim($unmanage, '\\'))),
         null,
         \core\output\notification::NOTIFY_SUCCESS,
     );
 }
+
+// An action the router no longer declares has no checkbox on the form below, so
+// saving the form would drop it and quietly hand its requests back to the provider
+// order. It stays until somebody takes it out on purpose, which is what the warning
+// above the form is for.
+$keepunsupported = static function (array $chosen): array {
+    return array_values(array_unique(array_merge($chosen, managed_policy::unsupported_actions())));
+};
 
 // Store the chosen list of action class names and return to this page.
 $save = function (array $chosen) use ($url): never {
@@ -87,12 +98,15 @@ $save = function (array $chosen) use ($url): never {
 // Coming back from the confirmation below, with the same list that was asked about.
 if ($confirmed !== null) {
     require_sesskey();
-    $wanted = array_filter(array_map('trim', explode(',', $confirmed)));
-    $chosen = array_values(array_filter(
-        array_map(static fn(string $action): string => ltrim($action, '\\'), provider::get_action_list()),
-        static fn(string $action): bool => in_array($action::get_basename(), $wanted, true),
+    $wanted = array_filter(array_map(
+        static fn(string $action): string => ltrim(trim($action), '\\'),
+        explode(',', $confirmed),
     ));
-    $save($chosen);
+    $chosen = array_values(array_filter(
+        managed_policy::declared_actions(),
+        static fn(string $action): bool => in_array($action, $wanted, true),
+    ));
+    $save($keepunsupported($chosen));
 }
 
 $form = new managed_actions_form($url);
@@ -103,9 +117,9 @@ if ($form->is_cancelled()) {
 
 if ($data = $form->get_data()) {
     $chosen = [];
-    foreach (provider::get_action_list() as $action) {
-        if (!empty($data->{managed_actions_form::field_name(ltrim($action, '\\'))})) {
-            $chosen[] = ltrim($action, '\\');
+    foreach (managed_policy::declared_actions() as $action) {
+        if (!empty($data->{managed_actions_form::field_name($action)})) {
+            $chosen[] = $action;
         }
     }
 
@@ -115,20 +129,20 @@ if ($data = $form->get_data()) {
     $stuck = array_values(array_filter($chosen, static fn(string $action): bool => !$answerable($action)));
     if ($stuck !== []) {
         $names = implode(', ', array_map(static fn(string $action): string => $action::get_name(), $stuck));
-        $basenames = implode(',', array_map(static fn(string $action): string => $action::get_basename(), $chosen));
+        $classes = implode(',', $chosen);
 
         echo $OUTPUT->header();
         echo $OUTPUT->heading(get_string('managed:heading', 'local_airouter'));
         echo $OUTPUT->confirm(
             get_string('managed:confirmstuck', 'local_airouter', $names),
-            new moodle_url($url, ['confirmactions' => $basenames, 'sesskey' => sesskey()]),
+            new moodle_url($url, ['confirmactions' => $classes, 'sesskey' => sesskey()]),
             $url,
         );
         echo $OUTPUT->footer();
         die;
     }
 
-    $save($chosen);
+    $save($keepunsupported($chosen));
 }
 
 echo $OUTPUT->header();
@@ -142,8 +156,9 @@ foreach (managed_policy::managed_actions() as $action) {
         continue;
     }
     echo $OUTPUT->notification(
-        get_string('managed:unreachable', 'local_airouter', $action::get_name()) . ' ' . \html_writer::link(
-            new moodle_url($url, ['unmanage' => $action::get_basename(), 'sesskey' => sesskey()]),
+        get_string('managed:unreachable', 'local_airouter', managed_policy::label_for($action))
+        . ' ' . \html_writer::link(
+            new moodle_url($url, ['unmanage' => $action, 'sesskey' => sesskey()]),
             get_string('managed:unmanage', 'local_airouter'),
         ),
         \core\output\notification::NOTIFY_WARNING,

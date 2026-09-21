@@ -301,6 +301,20 @@ Both of these were introduced by the fixes above them.
 - The rule lives with the table it is about, as `resummarise_intact_days()`, rather
   than in the upgrade file, and both upgrade steps that need it call it.
 
+### Holding the boundary after the list changes
+
+- An action a site has placed under the router stays there when the router stops
+  declaring it. The stored policy was being read back through the list of actions the
+  router can carry today, so an upgrade that changed that list took the action out of
+  the policy without anybody choosing to, and its requests went back to the provider
+  order with the site's rules, budgets and brought keys unread. It is now refused, the
+  way any managed action the router cannot answer is refused, and the management
+  screen and the status check both name it and offer one click to release it.
+  - Those two screens no longer ask a managed action for its own name, so a site that
+    has uninstalled the plugin defining an action can still see it and take it out.
+  - Saving the settings form no longer drops such an action. It has no checkbox there,
+    and losing it by saving something else would have been the same silent release.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

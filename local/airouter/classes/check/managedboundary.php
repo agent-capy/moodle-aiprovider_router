@@ -60,8 +60,10 @@ class managedboundary extends check {
             return new result(result::NA, get_string('check:managedboundary:none', 'local_airouter'));
         }
 
+        // A managed action whose class has gone is still managed, and this is one of
+        // the two places that says so, so nothing here may ask the class anything.
         $names = implode(', ', array_map(
-            static fn(string $action): string => $action::get_basename(),
+            static fn(string $action): string => managed_policy::basename_for($action),
             $managed,
         ));
 
@@ -85,7 +87,7 @@ class managedboundary extends check {
             return new result(
                 result::ERROR,
                 get_string('check:managedboundary:unreachable', 'local_airouter', implode(', ', array_map(
-                    static fn(string $action): string => $action::get_basename(),
+                    static fn(string $action): string => managed_policy::basename_for($action),
                     $unreachable,
                 ))),
             );

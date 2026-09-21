@@ -62,6 +62,9 @@ class provider extends \core_ai\provider {
             \core_ai\aiactions\generate_image::class,
             \core_ai\aiactions\summarise_text::class,
             \core_ai\aiactions\explain_text::class,
+            // An action the router does not declare, so that a request escaping the
+            // managed boundary has somewhere to escape to.
+            \local_airouter\fixture_dropped_action::class,
         ];
     }
 

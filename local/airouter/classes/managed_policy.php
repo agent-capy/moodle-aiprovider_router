@@ -41,9 +41,17 @@ class managed_policy {
     /**
      * The action classes this site has placed under the router.
      *
-     * Classes the router does not declare are dropped. An action the router could never
-     * carry is not a routing decision the site can make: managing it would refuse every
-     * request for it and offer nothing in return.
+     * What is stored is returned, including any class the router no longer declares.
+     * Filtering the stored list against what the router can carry today was the one
+     * thing this class says it must not do: an action would stop being managed the
+     * moment it left that list, and the requests the site meant to hold inside the
+     * router would go back to the provider order without anybody being told. Removing
+     * an action from the policy is something an administrator does on purpose.
+     *
+     * An action that is managed and cannot be carried is refused when it is asked for,
+     * and said out loud by the status check and the management screen. Callers that
+     * display these names must not assume the class is still installed; label_for()
+     * and basename_for() are safe when it is not.
      *
      * @return string[] Fully qualified action class names, without a leading separator.
      */
@@ -53,16 +61,62 @@ class managed_policy {
             return [];
         }
 
-        $declared = array_map(
+        $wanted = array_filter(array_map(
+            static fn(string $action): string => ltrim(trim($action), '\\'),
+            explode(',', (string) $stored),
+        ));
+
+        return array_values(array_unique($wanted));
+    }
+
+    /**
+     * The action classes the router declares it can carry.
+     *
+     * @return string[] Fully qualified action class names, without a leading separator.
+     */
+    public static function declared_actions(): array {
+        return array_map(
             static fn(string $action): string => ltrim($action, '\\'),
             provider::get_action_list(),
         );
-        $wanted = array_map(
-            static fn(string $action): string => ltrim(trim($action), '\\'),
-            explode(',', (string) $stored),
-        );
+    }
 
-        return array_values(array_intersect($wanted, $declared));
+    /**
+     * Managed actions the router no longer declares.
+     *
+     * These still hold their requests inside the router, which refuses them. Both the
+     * management screen and the status check exist to make sure that is never a
+     * surprise, and to offer the way out in one click.
+     *
+     * @return string[] Fully qualified action class names, without a leading separator.
+     */
+    public static function unsupported_actions(): array {
+        $declared = self::declared_actions();
+
+        return array_values(array_filter(
+            self::managed_actions(),
+            static fn(string $action): bool => !in_array($action, $declared, true),
+        ));
+    }
+
+    /**
+     * The name to show for an action, even one whose class has gone.
+     *
+     * @param string $actionclass The action class.
+     * @return string The action name, or the class name when nothing can be asked.
+     */
+    public static function label_for(string $actionclass): string {
+        return method_exists($actionclass, 'get_name') ? $actionclass::get_name() : $actionclass;
+    }
+
+    /**
+     * The short name to show for an action, even one whose class has gone.
+     *
+     * @param string $actionclass The action class.
+     * @return string The basename, or the class name when nothing can be asked.
+     */
+    public static function basename_for(string $actionclass): string {
+        return method_exists($actionclass, 'get_basename') ? $actionclass::get_basename() : $actionclass;
     }
 
     /**

@@ -31,6 +31,8 @@ defined('MOODLE_INTERNAL') || die();
 require_once(__DIR__ . '/fixtures/mock/provider.php');
 require_once(__DIR__ . '/fixtures/mock/abstract_processor.php');
 require_once(__DIR__ . '/fixtures/mock/process_generate_text.php');
+require_once(__DIR__ . '/fixtures/fixture_dropped_action.php');
+require_once(__DIR__ . '/fixtures/mock/process_fixture_dropped_action.php');
 
 /**
  * What happens when the site, rather than the provider order, decides who answers.
@@ -409,14 +411,57 @@ final class routing_manager_test extends \advanced_testcase {
         $this->assertStringNotContainsString('generate_text', $result->get_details());
     }
 
-    public function test_an_action_the_router_does_not_carry_is_left_alone(): void {
-        // Naming an action the router cannot carry would otherwise refuse every request
-        // for it while offering nothing in its place.
+    public function test_an_action_the_router_stopped_declaring_stays_managed(): void {
+        // The policy is a decision the site made. Reading it back through what the
+        // router can carry today would undo that decision the moment a plugin upgrade
+        // changed the list, and undo it silently, which is the one way the boundary
+        // can be lost without anybody choosing to lose it.
+        $this->add_router();
+        managed_policy::set_managed_actions([fixture_dropped_action::class, generate_text::class]);
+
+        $this->assertContains(fixture_dropped_action::class, managed_policy::managed_actions());
+        $this->assertTrue(managed_policy::is_managed(fixture_dropped_action::class));
+        $this->assertSame([fixture_dropped_action::class], managed_policy::unsupported_actions());
+    }
+
+    public function test_a_request_for_an_action_the_router_stopped_declaring_is_refused(): void {
+        // The provider ahead of the router answers this action perfectly well, which
+        // is what makes the leak worth closing: the request would succeed, on the
+        // site's own key, with no rule and no budget consulted, and look like success.
+        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
+        $this->add_working_router();
+        managed_policy::set_managed_actions([fixture_dropped_action::class]);
+
+        $response = $this->manager->process_action(
+            new fixture_dropped_action(\context_system::instance()->id),
+        );
+
+        // The provider ahead would have answered with its own content, so a refusal
+        // carrying none of it is the evidence that nothing outside was asked.
+        $this->assertFalse($response->get_success());
+        $this->assertSame(503, $response->get_errorcode());
+        $this->assertNull($response->get_response_data()['generatedcontent']);
+    }
+
+    public function test_the_status_check_names_an_action_whose_class_has_gone(): void {
+        // A managed class can be uninstalled outright. The screen and the check are
+        // where an administrator finds out, so neither may ask the class anything.
+        $this->add_working_router();
+        managed_policy::set_managed_actions(['local_airouter\\action_that_was_uninstalled']);
+
+        $result = (new managedboundary())->get_result();
+
+        $this->assertSame(\core\check\result::ERROR, $result->get_status());
+        $this->assertStringContainsString('action_that_was_uninstalled', $result->get_summary());
+    }
+
+    public function test_an_unmanaged_action_is_still_left_alone(): void {
+        // The other half: what the site did not place under the router keeps working
+        // through the provider order exactly as it did before.
         $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
         $this->add_router();
-        managed_policy::set_managed_actions(['core_ai\\aiactions\\futureaction']);
+        managed_policy::set_managed_actions([fixture_dropped_action::class]);
 
-        $this->assertSame([], managed_policy::managed_actions());
         $this->assertTrue($this->ask()->get_success());
     }
 }
