@@ -160,10 +160,11 @@ class usage_aggregator {
                 'currency' => $row->currency,
                 'requests' => (int) $row->requests,
                 'failures' => (int) $row->failures,
+                'calls' => (int) $row->calls,
                 'prompttokens' => (int) $row->prompttokens,
                 'completiontokens' => (int) $row->completiontokens,
                 'cost' => $row->cost === null ? null : (float) $row->cost,
-                'costedrequests' => (int) $row->costedrequests,
+                'costedcalls' => (int) $row->costedcalls,
                 'timecreated' => $now,
             ];
         }
@@ -345,8 +346,17 @@ class usage_aggregator {
      * every report adds the rows of a day together anyway.
      *
      * Costs are added with SUM, which ignores the rows that have none, so a day where
-     * only some requests were covered by a rate reports the part that was known rather
+     * only some calls were covered by a rate reports the part that was known rather
      * than treating the rest as free. How many rows that was is counted beside it.
+     *
+     * Two counts come out of this and they are not the same count. A request is what
+     * somebody asked for, and a request that fell through to a second provider is
+     * still one of those; the counted column says which row carries it. A call is one
+     * provider being asked, which is one row, and a call is what has a price. The cost
+     * here is summed over every row, so the count that says whether the cost is known
+     * has to be over every row as well. Counting the priced rows among the requests
+     * instead left a day holding a cost of 1.20 and saying nothing had been priced,
+     * and a budget reading that let the spending through.
      *
      * Who paid is one of the groups. Money somebody spent out of their own pocket is not
      * the site's expenditure, and a figure that added the two together would answer
@@ -363,10 +373,11 @@ class usage_aggregator {
         return 'SELECT courseid, userid, actionname, targetid, targetname, targetprovider, model, keysource, currency,
                        SUM(counted) AS requests,
                        SUM(CASE WHEN counted = 1 AND success = 0 THEN 1 ELSE 0 END) AS failures,
+                       COUNT(1) AS calls,
                        SUM(CASE WHEN prompttokens IS NULL THEN 0 ELSE prompttokens END) AS prompttokens,
                        SUM(CASE WHEN completiontokens IS NULL THEN 0 ELSE completiontokens END) AS completiontokens,
                        SUM(cost) AS cost,
-                       SUM(CASE WHEN counted = 1 AND cost IS NOT NULL THEN 1 ELSE 0 END) AS costedrequests
+                       SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedcalls
                   FROM {' . usage_logger::TABLE . '}
                  WHERE timecreated >= :start AND timecreated < :end
               GROUP BY courseid, userid, actionname, targetid, targetname, targetprovider, model,

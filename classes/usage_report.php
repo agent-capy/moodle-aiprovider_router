@@ -61,14 +61,24 @@ class usage_report {
         self::BY_USER => ['userid', 'keysource'],
     ];
 
-    /** @var string[] The figures every row of every report carries. */
+    /**
+     * The figures every row of every report carries.
+     *
+     * Requests and calls are both here because they are different counts. One request
+     * that fell through to a second provider is one request and two calls, and the
+     * money is on the calls. Reading the cost against the request count made a period
+     * mean one thing before it was summarised and another afterwards.
+     *
+     * @var string[] The metric names.
+     */
     protected const METRICS = [
         'requests',
         'failures',
+        'calls',
         'prompttokens',
         'completiontokens',
         'cost',
-        'costedrequests',
+        'costedcalls',
     ];
 
     /**
@@ -441,8 +451,9 @@ class usage_report {
                     SUM(failures) AS failures,
                     SUM(prompttokens) AS prompttokens,
                     SUM(completiontokens) AS completiontokens,
+                    SUM(calls) AS calls,
                     SUM(cost) AS cost,
-                    SUM(costedrequests) AS costedrequests
+                    SUM(costedcalls) AS costedcalls
                FROM {' . usage_aggregator::TABLE . '}
               WHERE ' . $where . $group,
             $params,
@@ -451,6 +462,13 @@ class usage_report {
 
     /**
      * Read the same grouped figures out of the detail rows.
+     *
+     * Counted exactly as the summary counts them. A delegation attempt that did not
+     * answer has a row of its own so that what it spent lands on the key that paid for
+     * it, and that row is a call rather than a request: it is not a second thing
+     * somebody asked for, and it did not fail -- the request it belonged to was
+     * answered by the next provider. Two of these read the same rows, and a figure
+     * that changed the day the rows were summarised would be worse than either answer.
      *
      * @param string[] $fields The columns to group on.
      * @param string $where The period clause.
@@ -474,11 +492,12 @@ class usage_report {
         return $this->rows(
             'SELECT ' . $select . '
                     SUM(counted) AS requests,
-                    SUM(CASE WHEN success = 1 THEN 0 ELSE 1 END) AS failures,
+                    SUM(CASE WHEN counted = 1 AND success = 0 THEN 1 ELSE 0 END) AS failures,
+                    COUNT(1) AS calls,
                     SUM(CASE WHEN prompttokens IS NULL THEN 0 ELSE prompttokens END) AS prompttokens,
                     SUM(CASE WHEN completiontokens IS NULL THEN 0 ELSE completiontokens END) AS completiontokens,
                     SUM(cost) AS cost,
-                    SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedrequests
+                    SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedcalls
                FROM {' . usage_logger::TABLE . '}
               WHERE ' . $where . $group,
             $params,

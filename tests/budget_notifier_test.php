@@ -598,6 +598,35 @@ final class budget_notifier_test extends \advanced_testcase {
         $this->assertCount(0, $sink->get_messages());
     }
 
+    public function test_a_category_holding_no_courses_restricts_the_rule_to_no_course(): void {
+        global $DB;
+        $empty = $this->getDataGenerator()->create_category();
+        $other = $this->getDataGenerator()->create_category();
+        $outside = $this->getDataGenerator()->create_course(['category' => $other->id]);
+
+        // An empty category is a rule that matches no course, which is not a rule
+        // that names no courses. Dropping the restriction because the list came back
+        // empty turned the first into the second, and a budget meant for one empty
+        // category announced itself to every course on the site.
+        $this->budget_rule(
+            spend_ledger::SCOPE_COURSE,
+            10.0,
+            conditions: ['category' => ['categoryids' => [(int) $empty->id]]],
+        );
+        $this->spent(10.0, ['courseid' => (int) $outside->id]);
+        set_config(budget_notifier::SHARE_SETTING, 0, 'aiprovider_router');
+
+        $budgets = (new rule_repository($DB))->get_budgets();
+        $this->assertCount(1, $budgets);
+        $this->assertSame([], $budgets[0]->courseids);
+
+        $sink = $this->redirectMessages();
+        $result = $this->notifier->run($this->now);
+
+        $this->assertSame(0, $result['sent']);
+        $this->assertCount(0, $sink->get_messages());
+    }
+
     public function test_a_course_under_the_named_category_is_still_told(): void {
         $watched = $this->getDataGenerator()->create_category();
         $child = $this->getDataGenerator()->create_category(['parent' => $watched->id]);

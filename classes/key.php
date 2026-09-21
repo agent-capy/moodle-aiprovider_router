@@ -162,7 +162,9 @@ class key extends \core\persistent {
      *
      * Unknown spending does not reach a limit. The direction is the opposite of a
      * budget condition's on purpose: this is somebody's own key, and a site that has
-     * entered no rates would otherwise silently stop every brought key it holds.
+     * entered no rates would otherwise silently stop every brought key it holds. A
+     * period recorded in a currency the limit is not written in is unknown in the same
+     * way, because nothing here converts between currencies.
      *
      * @param spend_ledger $ledger The ledger to measure with.
      * @param int $now The moment the period ends at.

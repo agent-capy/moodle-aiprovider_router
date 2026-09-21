@@ -80,7 +80,8 @@ class key_formatter {
      *
      * @param key $key The key.
      * @param spend_ledger|null $ledger The ledger, for what the key has spent.
-     * @param string $currency The site currency.
+     * @param string $currency The currency the limit itself is written in, which is
+     *                         whatever the site currency is now.
      * @return string HTML.
      */
     public static function cap(key $key, ?spend_ledger $ledger, string $currency): string {
@@ -102,6 +103,21 @@ class key_formatter {
             return $output;
         }
         $spend = $key->get_cap_spend($ledger, time());
+        if (!$spend->is_comparable()) {
+            // Spent in a currency the limit is not written in, because the site
+            // changed its own currency partway through the period. The figure is
+            // real and is shown in the currency it was recorded in, but it cannot be
+            // put next to the limit: nothing here converts between currencies, and a
+            // share worked out from two of them would be a number about nothing.
+            return $output . \html_writer::div(
+                get_string('keys:cap:othercurrency', 'aiprovider_router', [
+                    'amount' => $spend->mixedcurrency
+                        ? get_string('usage:cost:mixed', 'aiprovider_router')
+                        : format_float($spend->get_amount(), 2, true) . ' ' . $spend->currency,
+                ]),
+                'text-muted small',
+            );
+        }
         if (!$spend->is_known()) {
             // This site prices nothing, so nothing can be measured against the limit.
             // The key keeps working, which is the direction that does not punish
@@ -112,12 +128,14 @@ class key_formatter {
             );
         }
 
-        // The owner's own money, so the bar carries the figures with it.
+        // The owner's own money, so the bar carries the figures with it. In the
+        // currency the costs were recorded in, which is the site's own here: a
+        // period holding any other is not comparable and was answered above.
         $output .= usage_formatter::progress(
             $spend->get_amount() / $key->get_cap_amount(),
             get_string('keys:cap', 'aiprovider_router'),
             get_string('keys:cap:spent', 'aiprovider_router', [
-                'amount' => format_float($spend->get_amount(), 2, true) . ' ' . $currency,
+                'amount' => format_float($spend->get_amount(), 2, true) . ' ' . $spend->currency,
             ]),
         );
         if ($spend->has_reached($key->get_cap_amount())) {

@@ -331,20 +331,29 @@ class rule_repository {
      * the course spent, which is what the budget condition itself measures.
      *
      * @param int|null $now The moment to test rule windows against, or null for now.
+     * @param bool $upcoming Whether to include rules that have not started yet. They
+     *                       set no budget today, but what they will measure on their
+     *                       first day is the history sitting in the table now, which
+     *                       is the one thing that has to survive until then.
      * @return \stdClass[] Rows of scope, metric, amount, period and days, each with the
-     *                     courses it is limited to or null where it is limited to none.
+     *                     courses it is limited to, or null where it is limited to none
+     *                     and an empty array where it is limited to no course at all.
      */
-    public function get_budgets(?int $now = null): array {
+    public function get_budgets(?int $now = null, bool $upcoming = false): array {
         $now ??= time();
         $budgets = [];
+        $started = $upcoming ? '' : ' AND (r.timestart = 0 OR r.timestart <= :startnow)';
+        $params = ['type' => budget::get_type(), 'endnow' => $now];
+        if (!$upcoming) {
+            $params['startnow'] = $now;
+        }
         $records = $this->db->get_records_sql(
             'SELECT c.id, c.ruleid, c.configdata
                FROM {' . self::CONDITION_TABLE . '} c
                JOIN {' . rule::TABLE . '} r ON r.id = c.ruleid
-              WHERE c.type = :type AND r.enabled = 1
-                AND (r.timestart = 0 OR r.timestart <= :startnow)
+              WHERE c.type = :type AND r.enabled = 1' . $started . '
                 AND (r.timeend = 0 OR r.timeend > :endnow)',
-            ['type' => budget::get_type(), 'startnow' => $now, 'endnow' => $now],
+            $params,
         );
         if (!$records) {
             return [];
@@ -401,7 +410,10 @@ class rule_repository {
      * is what the budget condition itself measures.
      *
      * @param int[] $ruleids The rules to look at.
-     * @return array<int, int[]> Course ids keyed by rule id, for those rules only.
+     * @return array<int, int[]> Course ids keyed by rule id, for those rules only. A
+     *                           rule that restricts itself to no course at all is
+     *                           present with an empty list, which is not the same as
+     *                           being absent.
      */
     protected function courses_by_rule(array $ruleids): array {
         if (!$ruleids) {
@@ -424,11 +436,12 @@ class rule_repository {
             $ids = (string) $record->type === category_condition::get_type()
                 ? self::courses_in_categories(array_map('intval', (array) ($config['categoryids'] ?? [])))
                 : array_map('intval', (array) ($config['courseids'] ?? []));
-            if (!$ids) {
-                continue;
-            }
 
-            // Both conditions on one rule narrow it to what satisfies both.
+            // An empty set is kept, and is the whole point of keeping it. A rule
+            // pointed at a category that holds no courses is a rule that matches no
+            // course, which is not the same as a rule that names no courses at all.
+            // Dropping it turned the first into the second, and a budget meant for
+            // one category announced itself to every course on the site.
             $courses[$ruleid] = isset($courses[$ruleid])
                 ? array_values(array_intersect($courses[$ruleid], $ids))
                 : $ids;

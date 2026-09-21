@@ -233,19 +233,26 @@ class user_report extends usage_report {
                 'keysource' => $record->keysource,
                 'requests' => 0,
                 'failures' => 0,
+                'calls' => 0,
                 'prompttokens' => 0,
                 'completiontokens' => 0,
                 'cost' => null,
-                'costedrequests' => 0,
+                'costedcalls' => 0,
             ];
             $row = $rows[$key];
-            $row->requests++;
-            $row->failures += $record->success ? 0 : 1;
+            // One row is one call, and only the row the request was counted on is a
+            // request. Counting every row as one showed somebody two requests for the
+            // one thing they asked for, until the day was summarised and it became
+            // one again.
+            $counted = (int) $record->counted === 1;
+            $row->requests += $counted ? 1 : 0;
+            $row->failures += $counted && !$record->success ? 1 : 0;
+            $row->calls++;
             $row->prompttokens += (int) $record->prompttokens;
             $row->completiontokens += (int) $record->completiontokens;
             if ($record->cost !== null) {
                 $row->cost = (float) ($row->cost ?? 0) + (float) $record->cost;
-                $row->costedrequests++;
+                $row->costedcalls++;
             }
         }
         $recordset->close();

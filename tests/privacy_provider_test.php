@@ -69,10 +69,11 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
             'currency' => 'USD',
             'requests' => 4,
             'failures' => 0,
+            'calls' => 4,
             'prompttokens' => 100,
             'completiontokens' => 50,
             'cost' => 0.5,
-            'costedrequests' => 4,
+            'costedcalls' => 4,
             'timecreated' => time(),
         ]));
     }

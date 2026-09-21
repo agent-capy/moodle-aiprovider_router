@@ -33,6 +33,13 @@ namespace aiprovider_router;
  * rather than worked out. It is the figure a budget falls back on where money cannot be
  * said: a model somebody runs themselves, or an allowance a provider writes in requests.
  *
+ * Money and requests are counted over different things, and the difference shows once a
+ * request has been through more than one provider. A request is what somebody asked
+ * for, and there is one of those however many providers it took. A call is one provider
+ * being asked, and a call is what carries a price. So the amount here is the amount of
+ * the calls, and whether it is known is a question about the calls; the request count
+ * stands on its own beside it.
+ *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -41,21 +48,25 @@ class spend {
     /**
      * Constructor.
      *
-     * @param float|null $amount What the costed requests came to, or null when none had a rate.
+     * @param float|null $amount What the costed calls came to, or null when none had a rate.
      * @param int $requests How many requests the period held.
-     * @param int $costedrequests How many of them a rate covered.
+     * @param int $costedcalls How many calls a rate covered.
      * @param int $from The first moment counted.
      * @param int $to The first moment not counted.
      * @param string $currency The currency the amount is in.
      * @param bool $mixedcurrency Whether costs in more than one currency were found.
+     * @param int|null $calls How many calls the period held, or null to read it off
+     *                        the request count. Figures written before calls were
+     *                        counted apart hold one call per request, which is what
+     *                        they were.
      */
     public function __construct(
-        /** @var float|null What the costed requests came to. */
+        /** @var float|null What the costed calls came to. */
         public readonly ?float $amount,
         /** @var int How many requests the period held. */
         public readonly int $requests,
-        /** @var int How many of them a rate covered. */
-        public readonly int $costedrequests,
+        /** @var int How many calls a rate covered. */
+        public readonly int $costedcalls,
         /** @var int The first moment counted. */
         public readonly int $from,
         /** @var int The first moment not counted. */
@@ -64,6 +75,8 @@ class spend {
         public readonly string $currency,
         /** @var bool Whether costs in more than one currency were found. */
         public readonly bool $mixedcurrency = false,
+        /** @var int|null How many calls the period held, or null when only requests were counted. */
+        public readonly ?int $calls = null,
     ) {
     }
 
@@ -82,6 +95,12 @@ class spend {
      * worked out, so it is always known, including on a site that has entered no rates
      * at all and on one whose models cost nothing.
      *
+     * Asked of the calls rather than of the requests, because the calls are what the
+     * amount is the amount of. A request answered by its second provider is one request
+     * and two calls, and the call that was priced is the reason there is a figure here
+     * at all. Counting it against the requests made the answer depend on which of the
+     * two rows happened to be the one the request was counted on.
+     *
      * @param string $metric Which figure is being asked about.
      * @return bool True when the figure can be compared against a limit.
      */
@@ -89,15 +108,44 @@ class spend {
         if ($metric === spend_ledger::METRIC_REQUESTS) {
             return true;
         }
+        if (!$this->is_comparable()) {
+            return false;
+        }
+
+        return $this->get_calls() === 0 || $this->costedcalls > 0;
+    }
+
+    /**
+     * Whether the amount is in the currency this site's limits are written in.
+     *
+     * Nothing here converts between currencies, and every limit -- a budget on a rule,
+     * a cap somebody put on a key they brought -- is a figure in whatever the site
+     * currency is now. An amount recorded before the currency was changed is a number
+     * in the old one, and weighing that against a limit in the new one compares two
+     * different things while looking exactly like a comparison.
+     *
+     * @return bool True when the amount and the site's limits are in one currency.
+     */
+    public function is_comparable(): bool {
         if ($this->mixedcurrency) {
             return false;
         }
 
-        return $this->requests === 0 || $this->costedrequests > 0;
+        return $this->amount === null || $this->currency === price_book::get_currency();
     }
 
     /**
-     * Whether every request in the period was priced.
+     * How many calls the period held.
+     *
+     * @return int The calls, falling back on the request count for a figure recorded
+     *             before the two were counted apart, where they were the same thing.
+     */
+    public function get_calls(): int {
+        return $this->calls ?? $this->requests;
+    }
+
+    /**
+     * Whether every call in the period was priced.
      *
      * A partly priced period gives a known figure that is an understatement, which is
      * worth saying out loud wherever the figure is shown.
@@ -105,7 +153,7 @@ class spend {
      * @return bool True when nothing is missing from the amount.
      */
     public function is_complete(): bool {
-        return $this->requests === $this->costedrequests;
+        return $this->get_calls() === $this->costedcalls;
     }
 
     /**
@@ -163,15 +211,15 @@ class spend {
     }
 
     /**
-     * The share of requests a rate covered.
+     * The share of calls a rate covered.
      *
-     * @return float|null Between zero and one, or null when there were no requests.
+     * @return float|null Between zero and one, or null when there were no calls.
      */
     public function get_coverage(): ?float {
-        if ($this->requests === 0) {
+        if ($this->get_calls() === 0) {
             return null;
         }
 
-        return $this->costedrequests / $this->requests;
+        return $this->costedcalls / $this->get_calls();
     }
 }

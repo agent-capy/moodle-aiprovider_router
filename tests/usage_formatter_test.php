@@ -81,10 +81,11 @@ final class usage_formatter_test extends \advanced_testcase {
         return (object) [
             'requests' => 5,
             'failures' => 0,
+            'calls' => 5,
             'prompttokens' => 100,
             'completiontokens' => 50,
             'cost' => $cost,
-            'costedrequests' => 5,
+            'costedcalls' => 5,
         ];
     }
 

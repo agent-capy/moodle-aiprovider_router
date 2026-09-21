@@ -121,6 +121,43 @@ problems they were for. These finish them.
 - The rule tester no longer says a request would be sent when the key it needs
   is registered and cannot be read. It says what would really happen.
 
+### Finished off
+
+A second pass over the same review checked the day after the figures were
+summarised as well as the moment they were recorded, and found that writing a
+row per attempt had left the two sides of that seam counting different things.
+
+- A budget still refuses the request the morning after. The daily summary
+  counted the priced rows among the requests while adding up the cost of every
+  row, so a day could hold a cost of 1.20 and report that nothing in it had
+  been priced; a budget reading that found the spending unmeasurable, stopped
+  refusing, and the next provider answered on the site's own key. Requests and
+  provider calls are now separate counts, and the money is counted against the
+  calls -- which is what carries a price -- everywhere it is read.
+- One request that fell through to a second provider is one request, and no
+  failures, whether the day it happened has been summarised or not. Read from
+  the detail it had been two requests and one failure, and a person's own
+  listing showed them twice for the once they asked.
+- How much of a period a rate covered is a share of the provider calls rather
+  than of the requests, so it can no longer exceed the whole.
+- History that a budget starting later will need is no longer thrown away
+  before it starts. A rule written today to begin next week looks back over its
+  whole period from its first day, and those days are in the table now.
+- A budget cannot be given a period longer than the site keeps its daily
+  summaries. The settings screen already refused the other direction; a budget
+  written afterwards was measured against part of its own period and read
+  lower than the spending had been.
+- A rule about a category that holds no courses restricts itself to no course,
+  rather than to none. An empty list was being dropped and read as "no course
+  restriction", so a budget meant for one empty category announced itself to
+  every course on the site.
+- What a brought key has spent is shown in the currency it was recorded in. A
+  site that changed its own currency was showing yen relabelled as dollars,
+  next to a limit written in dollars. Where the two differ the figure is given
+  on its own without a bar, and the key goes on being used: nothing here
+  converts between currencies, and a limit cannot be weighed against a figure
+  in another one.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

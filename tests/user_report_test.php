@@ -158,6 +158,29 @@ final class user_report_test extends \advanced_testcase {
         $this->assertSame(1, (int) $days[1]->requests);
     }
 
+    public function test_one_persons_fallen_through_request_is_one_request_on_both_sides(): void {
+        // Somebody asked once and the first provider answered with nothing, so there
+        // are two rows. Their own day listing counted rows, so it showed them two
+        // requests and one failure until the day was summarised and it became one
+        // request and none. The same day, read twice, is the same day.
+        $this->log($this->day(1) + HOURSECS, ['userid' => 5, 'counted' => 0, 'success' => 0]);
+        $this->log($this->day(1) + 2 * HOURSECS, ['userid' => 5]);
+
+        $before = $this->report->get_days(5, $this->week(), $this->now);
+        $this->assertCount(1, $before);
+        $this->assertSame(1, (int) $before[0]->requests);
+        $this->assertSame(0, (int) $before[0]->failures);
+        $this->assertSame(2, (int) $before[0]->calls);
+
+        $this->aggregator->run($this->now);
+
+        $after = $this->report->get_days(5, $this->week(), $this->now);
+        $this->assertCount(1, $after);
+        $this->assertSame(1, (int) $after[0]->requests);
+        $this->assertSame(0, (int) $after[0]->failures);
+        $this->assertSame(2, (int) $after[0]->calls);
+    }
+
     public function test_one_persons_days_leave_everybody_else_out(): void {
         $this->log($this->day(0) + HOURSECS, ['userid' => 5]);
         $this->log($this->day(0) + HOURSECS, ['userid' => 6]);
@@ -193,10 +216,11 @@ final class user_report_test extends \advanced_testcase {
             'currency' => 'USD',
             'requests' => 7,
             'failures' => 0,
+            'calls' => 7,
             'prompttokens' => 10,
             'completiontokens' => 5,
             'cost' => 1.0,
-            'costedrequests' => 7,
+            'costedcalls' => 7,
             'timecreated' => $this->now,
         ]);
         set_config(usage_aggregator::LAST_SETTING, $this->day(1), 'aiprovider_router');

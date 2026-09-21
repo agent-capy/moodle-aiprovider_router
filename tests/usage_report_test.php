@@ -164,6 +164,31 @@ final class usage_report_test extends \advanced_testcase {
         $this->assertEquals(0.1, $rows[1]->cost);
     }
 
+    public function test_a_fallen_through_request_reads_the_same_on_both_sides_of_the_seam(): void {
+        // One request that took two providers: the first answered with nothing and
+        // has a row so that what it spent lands on the right target, the second
+        // answered. The detail read that as two requests and one failure while the
+        // summary read it as one request and no failures, so the figures changed
+        // under the reader the morning after.
+        $this->log($this->day(1) + HOURSECS, ['counted' => 0, 'success' => 0, 'cost' => 0.5]);
+        $this->log($this->day(1) + 2 * HOURSECS, ['cost' => 0.5]);
+
+        $before = usage_report::total($this->report->get_series($this->day(6), $this->now));
+        $this->assertSame(1, $before->requests);
+        $this->assertSame(0, $before->failures);
+        $this->assertSame(2, $before->calls);
+        $this->assertSame(2, $before->costedcalls);
+
+        $this->aggregator->run($this->now);
+
+        $after = usage_report::total($this->report->get_series($this->day(6), $this->now));
+        $this->assertSame(1, $after->requests);
+        $this->assertSame(0, $after->failures);
+        $this->assertSame(2, $after->calls);
+        $this->assertSame(2, $after->costedcalls);
+        $this->assertEqualsWithDelta(1.0, (float) $after->cost, 0.000001);
+    }
+
     public function test_a_period_nothing_priced_has_no_cost_rather_than_a_cost_of_nothing(): void {
         $this->log($this->day(0) + HOURSECS, ['cost' => null]);
 
@@ -171,7 +196,7 @@ final class usage_report_test extends \advanced_testcase {
 
         $this->assertSame(1, $totals->requests);
         $this->assertNull($totals->cost);
-        $this->assertSame(0, $totals->costedrequests);
+        $this->assertSame(0, $totals->costedcalls);
     }
 
     public function test_a_course_sees_only_itself(): void {

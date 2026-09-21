@@ -176,7 +176,7 @@ final class spend_ledger_test extends \advanced_testcase {
         $this->assertFalse($spend->is_known());
         $this->assertNull($spend->has_reached(0.5));
         $this->assertSame(1, $spend->requests);
-        $this->assertSame(0, $spend->costedrequests);
+        $this->assertSame(0, $spend->costedcalls);
     }
 
     public function test_a_count_of_requests_is_known_even_where_the_money_is_not(): void {
@@ -213,7 +213,7 @@ final class spend_ledger_test extends \advanced_testcase {
         $this->assertFalse($spend->has_reached(0.5));
         // And the requests are counted whether or not anything was paid for them.
         $this->assertSame(2, $spend->requests);
-        $this->assertSame(2, $spend->costedrequests);
+        $this->assertSame(2, $spend->costedcalls);
     }
 
     public function test_free_requests_do_not_hide_paid_ones(): void {
@@ -264,6 +264,110 @@ final class spend_ledger_test extends \advanced_testcase {
         $this->assertTrue($spend->mixedcurrency);
         $this->assertFalse($spend->is_known());
         $this->assertNull($spend->has_reached(2.0));
+    }
+
+    public function test_a_costed_attempt_still_counts_once_the_day_is_summarised(): void {
+        // One request that fell through. The attempt that spent the money answered
+        // with nothing, so it is a call and not a request; the row that carries the
+        // request reached no target at all and has no cost of its own. Read from the
+        // detail, the period is priced and over the limit. It has to still be after
+        // the day has been summarised, and it was not: the summary counted the priced
+        // rows among the requests, found none, and reported a period holding 1.20
+        // that nobody had priced. The budget it was stopping opened again.
+        $this->log($this->day(1) + HOURSECS, ['cost' => 1.2, 'counted' => 0, 'success' => 0]);
+        $this->log($this->day(1) + 2 * HOURSECS, [
+            'cost' => null,
+            'success' => 0,
+            'targetid' => null,
+            'targetname' => null,
+            'targetprovider' => null,
+            'model' => null,
+        ]);
+
+        [$from, $to] = $this->week();
+        $before = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+        $this->assertTrue($before->is_known());
+        $this->assertSame(1, $before->requests);
+        $this->assertSame(2, $before->get_calls());
+        $this->assertTrue($before->has_reached(1.0));
+
+        $this->aggregator->run($this->now);
+
+        $after = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+        $this->assertTrue($after->is_known());
+        $this->assertSame(1, $after->requests);
+        $this->assertSame(2, $after->get_calls());
+        $this->assertEqualsWithDelta(1.2, $after->get_amount(), 0.000001);
+        $this->assertTrue($after->has_reached(1.0));
+    }
+
+    public function test_coverage_is_a_share_of_the_calls_rather_than_of_the_requests(): void {
+        // The same request twice over: an attempt that was priced and a second one
+        // that answered and was not. Counting the priced calls against the request
+        // count made this period 100 per cent covered before the day was summarised
+        // and said one of one, when one of two calls had a rate.
+        $this->log($this->day(1) + HOURSECS, ['cost' => 1.2, 'counted' => 0, 'success' => 0]);
+        $this->log($this->day(1) + 2 * HOURSECS, ['cost' => null]);
+
+        [$from, $to] = $this->week();
+        $before = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+        $this->assertFalse($before->is_complete());
+        $this->assertSame(0.5, $before->get_coverage());
+
+        $this->aggregator->run($this->now);
+
+        $after = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+        $this->assertFalse($after->is_complete());
+        $this->assertSame(0.5, $after->get_coverage());
+    }
+
+    public function test_money_recorded_in_another_currency_is_not_weighed_against_a_limit(): void {
+        $this->log($this->day(0) + HOURSECS, ['cost' => 1000.0, 'currency' => 'JPY']);
+        set_config('currency', 'USD', 'aiprovider_router');
+
+        [$from, $to] = $this->week();
+        $spend = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
+
+        // Every limit on this site is a figure in the site currency, and this is not
+        // a figure in the site currency. Weighing 1000 yen against a limit of 100
+        // dollars compares two different things while looking like a comparison.
+        $this->assertSame('JPY', $spend->currency);
+        $this->assertFalse($spend->is_comparable());
+        $this->assertFalse($spend->is_known());
+        $this->assertNull($spend->has_reached(100.0));
+    }
+
+    public function test_a_budget_that_has_not_started_yet_still_needs_its_history(): void {
+        global $DB;
+
+        // A rule written today to start next week looks back over its whole period
+        // from the moment it starts, and the days it will need are the days sitting
+        // in the table now. Asking only about the rules in force reported no reach at
+        // all, and the summaries were thrown away before the budget ever ran.
+        $rule = new rule(0, (object) [
+            'name' => 'Next week',
+            'targetid' => 1,
+            'enabled' => 1,
+            // Measured from the real clock, because that is what the purge reads.
+            'timestart' => time() + WEEKSECS,
+            'sortorder' => 0,
+        ]);
+        $rule->save();
+        $DB->insert_record(rule_repository::CONDITION_TABLE, (object) [
+            'ruleid' => $rule->get('id'),
+            'type' => 'budget',
+            'configdata' => json_encode([
+                'scope' => spend_ledger::SCOPE_SITE,
+                'direction' => 'under',
+                'metric' => spend_ledger::METRIC_COST,
+                'amount' => 100.0,
+                'period' => spend_ledger::PERIOD_ROLLING,
+                'days' => 30,
+            ]),
+        ]);
+
+        $this->assertSame([], (new rule_repository($DB))->get_budgets(time()));
+        $this->assertSame(30, spend_ledger::longest_reach_days($DB));
     }
 
     public function test_reaching_the_limit_counts_as_reaching_it(): void {

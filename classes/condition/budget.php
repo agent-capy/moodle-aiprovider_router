@@ -19,6 +19,7 @@ namespace aiprovider_router\condition;
 use aiprovider_router\evaluation_context;
 use aiprovider_router\price_book;
 use aiprovider_router\spend_ledger;
+use aiprovider_router\usage_aggregator;
 
 /**
  * Restricts a rule by how much has been spent already.
@@ -298,6 +299,8 @@ class budget extends base {
 
     #[\Override]
     public static function validate_form(array $data): array {
+        global $DB;
+
         $scope = (string) ($data['budgetscope'] ?? '');
         $amount = trim((string) ($data['budgetamount'] ?? ''));
         if ($scope === '' && $amount === '') {
@@ -315,6 +318,27 @@ class budget extends base {
         if ($metric === spend_ledger::METRIC_REQUESTS && (float) $amount !== floor((float) $amount)) {
             // Half a request is not a thing anybody can make.
             return ['budgetgroup' => get_string('condition:budget:error:requests', 'aiprovider_router')];
+        }
+
+        // A budget is worked out from what is still stored, so one that looks back
+        // further than the site keeps its summaries is measured against part of its
+        // own period. The figure that comes out is not unknown, which is the state
+        // this plugin is careful about everywhere else -- it is simply too small, and
+        // a limit that has been reached reads as a limit with room left. The retention
+        // screen already refuses the other direction, and refusing this one is what
+        // makes the pair hold: the history a budget needs cannot be thrown away, and a
+        // budget cannot ask for history the site is not keeping.
+        $reach = spend_ledger::reach_of(
+            (string) ($data['budgetperiod'] ?? spend_ledger::PERIOD_ROLLING),
+            (int) ($data['budgetdays'] ?? self::DEFAULT_DAYS),
+        );
+        $kept = (new usage_aggregator($DB))->get_summary_retention_days();
+        if ($kept > 0 && $reach > $kept) {
+            return ['budgetgroup' => get_string(
+                'condition:budget:error:retention',
+                'aiprovider_router',
+                ['reach' => $reach, 'kept' => $kept],
+            )];
         }
 
         return [];

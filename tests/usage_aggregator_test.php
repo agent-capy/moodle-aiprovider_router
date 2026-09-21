@@ -113,7 +113,7 @@ final class usage_aggregator_test extends \advanced_testcase {
         $this->assertSame(200, (int) $row->prompttokens);
         $this->assertSame(100, (int) $row->completiontokens);
         $this->assertEquals(1.0, (float) $row->cost);
-        $this->assertSame(2, (int) $row->costedrequests);
+        $this->assertSame(2, (int) $row->costedcalls);
         $this->assertSame('Target one', $row->targetname);
     }
 
@@ -189,7 +189,7 @@ final class usage_aggregator_test extends \advanced_testcase {
         $this->assertNull($row->targetid);
         $this->assertSame(0, (int) $row->prompttokens);
         $this->assertNull($row->cost);
-        $this->assertSame(0, (int) $row->costedrequests);
+        $this->assertSame(0, (int) $row->costedcalls);
     }
 
     public function test_a_day_only_partly_covered_by_rates_says_so(): void {
@@ -205,7 +205,7 @@ final class usage_aggregator_test extends \advanced_testcase {
         // the count beside it says how much of the day that total covers.
         $this->assertEquals(0.25, (float) $row->cost);
         $this->assertSame(2, (int) $row->requests);
-        $this->assertSame(1, (int) $row->costedrequests);
+        $this->assertSame(1, (int) $row->costedcalls);
     }
 
     public function test_days_with_nothing_in_them_are_passed_over(): void {

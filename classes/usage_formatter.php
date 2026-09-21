@@ -99,16 +99,18 @@ class usage_formatter {
      * @return string HTML.
      */
     public static function coverage(\stdClass $totals): string {
-        $requests = (int) $totals->requests;
-        $costed = (int) $totals->costedrequests;
-        if ($requests === 0 || $costed === $requests) {
+        // Against the calls rather than the requests. The cost is the cost of the
+        // calls, and a request that went through two providers has two of them.
+        $calls = (int) ($totals->calls ?? $totals->requests);
+        $costed = (int) $totals->costedcalls;
+        if ($calls === 0 || $costed === $calls) {
             return '';
         }
 
         $key = $costed === 0 ? 'usage:cost:none' : 'usage:cost:partial';
 
         return \html_writer::div(
-            get_string($key, 'aiprovider_router', (object) ['costed' => $costed, 'requests' => $requests]),
+            get_string($key, 'aiprovider_router', (object) ['costed' => $costed, 'calls' => $calls]),
             'text-muted',
         );
     }

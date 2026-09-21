@@ -64,6 +64,80 @@ final class key_formatter_test extends \advanced_testcase {
         $this->assertStringContainsString('action=delete', $actions);
     }
 
+    public function test_a_limit_is_shown_beside_what_was_spent_against_it(): void {
+        global $DB;
+
+        (new key_repository($DB))->set_cap($this->key, 2000.0, spend_ledger::PERIOD_MONTH, 30);
+        $this->spend(1000.0, 'USD');
+
+        $html = key_formatter::cap($this->key, new spend_ledger($DB, null, false), 'USD');
+
+        $this->assertStringContainsString(format_float(1000.0, 2, true) . ' USD', $html);
+        $this->assertStringContainsString('progress-bar', $html);
+    }
+
+    public function test_money_spent_in_another_currency_is_not_relabelled_as_this_one(): void {
+        global $DB;
+
+        // The site was in yen when this was spent and is in dollars now. Handing the
+        // current currency to the figure printed 1000.00 USD for 1000 yen, next to
+        // the limit, as though the two could be compared.
+        (new key_repository($DB))->set_cap($this->key, 2000.0, spend_ledger::PERIOD_MONTH, 30);
+        $this->spend(1000.0, 'JPY');
+        set_config('currency', 'USD', 'aiprovider_router');
+
+        $html = key_formatter::cap($this->key, new spend_ledger($DB, null, false), 'USD');
+
+        $this->assertStringContainsString(format_float(1000.0, 2, true) . ' JPY', $html);
+        $this->assertStringNotContainsString(format_float(1000.0, 2, true) . ' USD', $html);
+        // No bar either: a share worked out from two currencies is about nothing.
+        $this->assertStringNotContainsString('progress-bar', $html);
+    }
+
+    public function test_a_key_is_not_stopped_by_money_counted_in_another_currency(): void {
+        global $DB;
+
+        (new key_repository($DB))->set_cap($this->key, 500.0, spend_ledger::PERIOD_MONTH, 30);
+        $this->spend(1000.0, 'JPY');
+        set_config('currency', 'USD', 'aiprovider_router');
+
+        // 1000 yen is not 1000 dollars, and it is not over a limit of 500 dollars
+        // either. The direction for somebody's own key is to keep using it.
+        $this->assertFalse($this->key->is_spent(new spend_ledger($DB, null, false), time()));
+    }
+
+    /**
+     * Record something spent against the key under test.
+     *
+     * @param float $cost What it cost.
+     * @param string $currency What that is in.
+     */
+    protected function spend(float $cost, string $currency): void {
+        global $DB;
+
+        $DB->insert_record(usage_logger::TABLE, (object) [
+            // A minute ago. The period a limit is measured over ends at the moment it
+            // is asked about, and that moment is not counted.
+            'timecreated' => time() - MINSECS,
+            'userid' => 7,
+            'contextid' => 0,
+            'courseid' => null,
+            'actionname' => 'generate_text',
+            'targetid' => 3,
+            'targetname' => 'Target one',
+            'targetprovider' => 'aiprovider_openai',
+            'model' => 'gpt-4o',
+            'currency' => $currency,
+            'success' => 1,
+            'attempts' => 1,
+            'prompttokens' => 100,
+            'completiontokens' => 50,
+            'cost' => $cost,
+            'keysource' => 'user',
+            'keyid' => (int) $this->key->get('id'),
+        ]);
+    }
+
     public function test_the_table_carries_the_same_answer_through(): void {
         $table = key_formatter::table(
             [3 => $this->key],

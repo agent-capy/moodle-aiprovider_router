@@ -163,6 +163,12 @@ class spend_ledger extends usage_report {
      * on keys they brought. Asked in one place, because three separate screens can
      * each create the mismatch and only one of them is about retention.
      *
+     * Rules that have not started yet count too. A rule written today to start next
+     * week looks back over its whole period from the moment it starts, and the days
+     * it will need are the days sitting in the table now. Asking only about the rules
+     * in force meant the history was thrown away in the meantime, and the budget began
+     * its first day already measuring less than had been spent.
+     *
      * A calendar month is counted as 31 days, which is the most one can be.
      *
      * @param \moodle_database $db The database to read.
@@ -171,7 +177,7 @@ class spend_ledger extends usage_report {
     public static function longest_reach_days(\moodle_database $db): int {
         $days = 0;
 
-        foreach ((new rule_repository($db))->get_budgets() as $budget) {
+        foreach ((new rule_repository($db))->get_budgets(null, true) as $budget) {
             $days = max($days, self::reach_of((string) $budget->period, (int) $budget->days));
         }
 
@@ -190,7 +196,7 @@ class spend_ledger extends usage_report {
      * @param int $length How many days a rolling period counts.
      * @return int The days.
      */
-    protected static function reach_of(string $period, int $length): int {
+    public static function reach_of(string $period, int $length): int {
         return $period === self::PERIOD_MONTH ? 31 : max(1, $length);
     }
 
@@ -389,11 +395,12 @@ class spend_ledger extends usage_report {
             return new spend(
                 amount: $held['amount'],
                 requests: $held['requests'],
-                costedrequests: $held['costedrequests'],
+                costedcalls: $held['costedcalls'],
                 from: $from,
                 to: $to,
                 currency: $held['currency'],
                 mixedcurrency: $held['mixedcurrency'],
+                calls: $held['calls'],
             );
         }
 
@@ -401,9 +408,10 @@ class spend_ledger extends usage_report {
         $cache->set($cachekey, [
             'amount' => $spend->amount,
             'requests' => $spend->requests,
-            'costedrequests' => $spend->costedrequests,
+            'costedcalls' => $spend->costedcalls,
             'currency' => $spend->currency,
             'mixedcurrency' => $spend->mixedcurrency,
+            'calls' => $spend->get_calls(),
         ]);
 
         return $spend;
@@ -475,11 +483,12 @@ class spend_ledger extends usage_report {
         return new spend(
             amount: $total->cost === null ? null : (float) $total->cost,
             requests: (int) $total->requests,
-            costedrequests: (int) $total->costedrequests,
+            costedcalls: (int) $total->costedcalls,
             from: $from,
             to: $to,
             currency: count($currencies) === 1 ? (string) array_key_first($currencies) : price_book::get_currency(),
             mixedcurrency: count($currencies) > 1,
+            calls: (int) $total->calls,
         );
     }
 }

@@ -389,5 +389,34 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092101, 'aiprovider', 'router');
     }
 
+    if ($oldversion < 2026092102) {
+        // The summaries counted the priced rows among the requests, while the cost
+        // beside them was summed over every row. A day could therefore hold a cost and
+        // say that nothing in it had been priced, and a budget reading that day let
+        // spending through that it had been stopping the day before. The two counts are
+        // separated here: requests are what people asked for, calls are what was asked
+        // of a provider, and the money is on the calls.
+        $table = new xmldb_table('aiprovider_router_daily');
+
+        // Named in full because a rename is an ALTER that restates the column.
+        $field = new xmldb_field('costedrequests', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'cost');
+        if ($dbman->field_exists($table, $field)) {
+            $dbman->rename_field($table, $field, 'costedcalls');
+        }
+
+        $field = new xmldb_field('calls', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'failures');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+            // Every summary written before this held one row per request, because that
+            // is all there was: the attempts that answered with nothing were folded
+            // into the request rather than kept. So the calls of those days are their
+            // requests, and saying so is more accurate than leaving them at zero, which
+            // would read as a day whose cost covered nothing.
+            $DB->execute('UPDATE {aiprovider_router_daily} SET calls = requests');
+        }
+
+        upgrade_plugin_savepoint(true, 2026092102, 'aiprovider', 'router');
+    }
+
     return true;
 }

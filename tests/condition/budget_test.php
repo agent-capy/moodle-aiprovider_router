@@ -20,6 +20,7 @@ use aiprovider_router\evaluation_context;
 use aiprovider_router\rule;
 use aiprovider_router\spend_ledger;
 use aiprovider_router\token_estimator;
+use aiprovider_router\usage_aggregator;
 use aiprovider_router\usage_logger;
 use core_ai\aiactions\generate_text;
 
@@ -256,6 +257,35 @@ final class budget_test extends \advanced_testcase {
             'budgetscope' => spend_ledger::SCOPE_SITE,
             'budgetamount' => '100.5',
         ]));
+    }
+
+    public function test_a_budget_may_not_look_further_back_than_the_site_keeps(): void {
+        // Keeping every summary is the default, and a budget of any length is
+        // measurable on such a site.
+        $long = [
+            'budgetscope' => spend_ledger::SCOPE_SITE,
+            'budgetamount' => '100',
+            'budgetperiod' => spend_ledger::PERIOD_ROLLING,
+            'budgetdays' => 30,
+        ];
+        $this->assertSame([], budget::validate_form($long));
+
+        // Two days of summaries, and a budget that counts thirty. The older part of
+        // its period would be thrown away while the budget was still counting it, so
+        // the spending reads lower than it was and a limit already reached comes back
+        // under the line. The retention screen refuses the other direction; this is
+        // the half that was missing.
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'aiprovider_router');
+        $this->assertArrayHasKey('budgetgroup', budget::validate_form($long));
+
+        // A budget that fits inside what is kept is fine.
+        $this->assertSame([], budget::validate_form(['budgetdays' => 2] + $long));
+
+        // So is one counted in requests over a period that fits. What is counted does
+        // not change how far back the counting reaches.
+        $this->assertArrayHasKey('budgetgroup', budget::validate_form(
+            ['budgetmetric' => spend_ledger::METRIC_REQUESTS, 'budgetamount' => '500'] + $long,
+        ));
     }
 
     public function test_a_budget_survives_the_trip_through_the_form(): void {

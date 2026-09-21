@@ -339,6 +339,14 @@ means something quite different.
 Failing to write this history never fails the request. A monitor is a tool for running a
 site, not an obstacle on the path of every AI request.
 
+**Requests and provider calls are counted separately.** A request that fell through to a
+second provider is one request and two calls, and both were recorded: the call that
+answered with nothing has a row of its own so that what it spent lands against the
+provider and the key that spent it. Every count of requests on these screens counts
+requests, so somebody who asked once appears once. What money there is, is the money of
+the calls, so anything about cost -- the total, how much of a period a rate covered,
+whether a budget has been reached -- is counted against the calls.
+
 ### The dashboard
 
 **AI Router usage** (`/ai/provider/router/usage.php`) shows a period — the last 7, 30, 90
@@ -479,6 +487,17 @@ summary is never removed while the day it describes still has detail rows.
 Nothing is ever removed that has not been summarised first, whatever the retention period
 says. A site whose cron has been stopped for a month catches up on the days it missed
 before anything is deleted.
+
+Nothing a limit still reaches back into is removed either. Budgets are worked out from
+what is still stored, so throwing away history inside a budget's period does not make the
+figure unknown -- it makes it smaller, and a limit that had been reached comes back under
+the line. Limits people put on brought keys count, and so do budgets on rules that have
+not started yet: a rule written today to begin next week looks back over its whole period
+from its first day, and those days are in the table now. The settings screen refuses a
+retention shorter than the longest limit, the rule screen refuses a budget longer than the
+summaries are kept for, and the purge itself refuses whatever the settings say. What none
+of them can do is bring back history that was already gone when the budget was written,
+so lengthen the retention before writing a long budget rather than after.
 
 Days are the site's days, in the server timezone, and are counted through the calendar, so
 the boundaries stay in place when a timezone changes offset.
@@ -653,7 +672,11 @@ carries on billing the same account either way.
 rates the site has entered, so a site that has entered none measures nothing; a budget
 condition treats that as a reason not to route, but a limit on somebody's own key treats
 it as a reason to carry on. The opposite would let a site's missing rates silently
-disable every key it holds.
+disable every key it holds. Spending recorded in a currency the limit is not written in
+counts as unmeasurable for the same reason: the limit is a figure in whatever the site
+currency is now, nothing here converts between currencies, and 1000 yen is neither above
+nor below a limit of 500 dollars. The key page shows the figure in the currency it was
+recorded in and leaves out the bar, rather than relabelling it as the current one.
 
 ⚠ The figures are what the site's rates say the requests would have cost, not what the
 provider actually billed. The real figure is on the provider's own bill.
