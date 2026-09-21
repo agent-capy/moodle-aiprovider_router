@@ -60,6 +60,19 @@ class usage_aggregator {
     public const DEFAULT_SUMMARY_RETENTION = 0;
 
     /**
+     * Config holding the first moment the site can still vouch for.
+     *
+     * Raised whenever summaries are discarded, and never lowered. Without it there is
+     * no way to tell a site that has never used its AI from a site whose history was
+     * thrown away: both have two empty tables, and the difference between them is the
+     * difference between a budget that is measuring everything and a budget that is
+     * measuring what is left.
+     *
+     * @var string The setting name.
+     */
+    public const HISTORY_SETTING = 'historyfrom';
+
+    /**
      * Constructor.
      *
      * @param \moodle_database $db The database to work on.
@@ -250,9 +263,37 @@ class usage_aggregator {
         $count = $this->db->count_records_select(self::TABLE, 'daystart < :cutoff', $params);
         if ($count > 0) {
             $this->db->delete_records_select(self::TABLE, 'daystart < :cutoff', $params);
+            // What has gone, has gone, and afterwards nothing in either table says it
+            // was ever there. Written down here, where it is still known, so that a
+            // budget counting a period that reaches back past this point can be told
+            // it is counting less than was spent.
+            $this->record_history_from($cutoff);
         }
 
         return $count;
+    }
+
+    /**
+     * The first moment this site can still vouch for having a full record of.
+     *
+     * @return int The moment, or zero where nothing has ever been discarded.
+     */
+    public function get_history_from(): int {
+        return max(0, (int) get_config('aiprovider_router', self::HISTORY_SETTING));
+    }
+
+    /**
+     * Note that everything before a moment has been discarded.
+     *
+     * Only ever moves forward. Two purges under different retention settings must not
+     * let the later, shorter one say the site remembers more than it does.
+     *
+     * @param int $from The first moment still covered.
+     */
+    protected function record_history_from(int $from): void {
+        if ($from > $this->get_history_from()) {
+            set_config(self::HISTORY_SETTING, $from, 'aiprovider_router');
+        }
     }
 
     /**

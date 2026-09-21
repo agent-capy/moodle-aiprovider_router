@@ -22,6 +22,7 @@ use aiprovider_router\key;
 use aiprovider_router\rule;
 use aiprovider_router\rule_repository;
 use aiprovider_router\spend_ledger;
+use aiprovider_router\usage_aggregator;
 use aiprovider_router\usage_logger;
 use aiprovider_router\key_repository;
 use aiprovider_router\order_inspector;
@@ -260,12 +261,27 @@ final class check_test extends \advanced_testcase {
         $this->assertStringContainsString('1', $result->get_summary());
     }
 
-    public function test_a_budget_over_history_the_site_no_longer_has_is_reported(): void {
-        // The site ran with a short retention, lost the older part of the month, and a
-        // thirty day budget is now counting what is left. Nothing else says so: the
-        // budget reads a real figure, and the figure is smaller than the spending was.
-        $this->budget_rule();
+    public function test_a_budget_over_history_the_site_discarded_is_reported(): void {
+        global $DB;
+
+        // The site ran with a short retention, the purge threw the older part away,
+        // and only afterwards was a thirty day budget written. That order is the
+        // whole of it: once the budget exists the purge protects what it needs, so
+        // the only way to lose the history is to lose it first. The budget then reads
+        // a real figure that is smaller than the spending was, and nothing else on
+        // the site says so.
         $this->request(1.0);
+        $DB->set_field(usage_logger::TABLE, 'timecreated', time() - 10 * DAYSECS);
+        set_config(usage_aggregator::RETENTION_SETTING, 1, 'aiprovider_router');
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'aiprovider_router');
+        (new usage_aggregator($DB))->run(time());
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 60, 'aiprovider_router');
+        $this->budget_rule();
+
+        // Both tables are empty now, which is the shape of a site that has never used
+        // its AI at all. It is not one.
+        $this->assertSame(0, $DB->count_records(usage_logger::TABLE));
+        $this->assertSame(0, $DB->count_records(usage_aggregator::TABLE));
 
         $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
 
@@ -273,30 +289,39 @@ final class check_test extends \advanced_testcase {
         $this->assertNotSame('', $result->get_details());
     }
 
-    public function test_a_budget_whose_period_the_history_covers_is_not_reported(): void {
-        global $DB;
+    public function test_a_site_that_has_discarded_nothing_is_not_reported(): void {
         $this->budget_rule();
         $this->request(1.0);
-        $DB->set_field(usage_logger::TABLE, 'timecreated', time() - 40 * DAYSECS);
+
+        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        // One day of history and a thirty day budget. Nothing is missing: the site
+        // has everything that ever happened, which is all a budget can ask for.
+        $this->assertSame(result::OK, $result->get_status());
+    }
+
+    public function test_a_budget_inside_what_the_site_still_covers_is_not_reported(): void {
+        global $DB;
+
+        // Something was discarded, but long enough ago that no budget reaches it.
+        $this->budget_rule();
+        $this->request(1.0);
+        $DB->set_field(usage_logger::TABLE, 'timecreated', time() - 200 * DAYSECS);
+        set_config(usage_aggregator::RETENTION_SETTING, 1, 'aiprovider_router');
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'aiprovider_router');
+        (new usage_aggregator($DB))->run(time() - 150 * DAYSECS);
 
         $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
 
         $this->assertSame(result::OK, $result->get_status());
     }
 
-    public function test_no_budget_and_no_history_are_both_nothing_to_report(): void {
-        global $DB;
-        $inspector = $this->inspector([5 => $this->router(5)], ',5');
-
-        // Usage but no budget: nothing has to reach back anywhere.
+    public function test_without_a_budget_there_is_nothing_to_report(): void {
         $this->request(1.0);
-        $this->assertSame(result::NA, (new budgethistory($inspector))->get_result()->get_status());
 
-        // A budget but no usage at all. A site that has not used its AI yet is not a
-        // site missing history; it is a site with none to miss.
-        $this->budget_rule();
-        $DB->delete_records(usage_logger::TABLE);
-        $this->assertSame(result::NA, (new budgethistory($inspector))->get_result()->get_status());
+        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::NA, $result->get_status());
     }
 
     /**

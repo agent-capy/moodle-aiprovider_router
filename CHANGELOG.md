@@ -190,6 +190,28 @@ the rules list can do that the rule form cannot.
   the figure is given and the check says to read it as a lower bound, with the date the
   counting really starts from.
 
+### Finished off once more
+
+Both of these were introduced by the fixes above them.
+
+- The upgrade no longer rebuilds a day that has lost only part of its detail. Having
+  some detail for a day is not having all of it: the purge removes everything before a
+  midnight in the timezone in force when it ran, and after a site changes timezone that
+  midnight falls inside an older day, taking the morning and leaving the evening.
+  Rebuilding such a day from what is left replaced a figure that was right with one
+  that was short, and a budget that had been refusing fell open. Rather than work out
+  where a purge boundary once fell, the rebuild is now asked to prove itself: the rows
+  that are here must add up to the requests and the cost already recorded for that day,
+  and where they do not, the day keeps what it has.
+- Discarding summaries is written down as it happens, and the **Budget history** check
+  reads that rather than guessing from the oldest surviving row. A site whose history
+  has been discarded entirely has two empty tables, exactly like a site that has never
+  used its AI at all, and the check was reporting the first as the second -- telling
+  the one site that most needed the warning that there was nothing wrong. It can now
+  also say, as a fact rather than a guess, when nothing has ever been discarded. An
+  upgrade step gives a starting point to sites that were already discarding summaries
+  before this was recorded.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

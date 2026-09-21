@@ -170,6 +170,29 @@ final class upgrade_test extends \advanced_testcase {
         $this->assertTrue($spend->has_reached(1.0));
     }
 
+    public function test_a_day_that_has_lost_only_part_of_its_detail_is_left_alone(): void {
+        global $DB;
+
+        // Having some detail for a day is not having all of it. The purge removes
+        // everything before a midnight in the timezone in force when it ran, and
+        // after a change of timezone that midnight falls inside an older day: the
+        // morning goes and the evening stays. Rebuilding such a day from what is left
+        // replaces a figure that was right with one that is short, and a budget that
+        // had been refusing falls open.
+        $this->summary(['failures' => 0, 'requests' => 2, 'calls' => 2, 'costedcalls' => 2, 'cost' => 3.0]);
+        $this->log(['timecreated' => $this->day + 20 * HOURSECS, 'cost' => 2.0]);
+
+        $this->upgrade();
+
+        $totals = $DB->get_record_sql(
+            'SELECT SUM(requests) AS requests, SUM(cost) AS cost
+               FROM {' . usage_aggregator::TABLE . '} WHERE daystart = :day',
+            ['day' => $this->day],
+        );
+        $this->assertSame(2, (int) $totals->requests);
+        $this->assertEqualsWithDelta(3.0, (float) $totals->cost, 0.000001);
+    }
+
     public function test_a_day_whose_detail_has_gone_is_not_blanked(): void {
         global $DB;
 

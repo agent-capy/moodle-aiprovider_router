@@ -277,7 +277,10 @@ holding three. The figure it gives is real and too small, and it corrects itself
 the missing days pass out of the period. The **Budget history** status check says when
 a site is in that state, and from what date the counting really begins. It is never
 turned into "unknown", because a budget that cannot be measured stops restricting
-anything, which is the opposite of what somebody setting a limit wanted.
+anything, which is the opposite of what somebody setting a limit wanted. What the check
+reads is what the purge wrote down as it discarded each day, not the oldest row that
+happens to be left: a site whose history has gone entirely looks exactly like a site
+that has never used its AI, and those are not the same site.
 
 **A limit is accurate to about a minute.** Adding up the history on every AI request
 would be too much work for the path a request takes, so the figures are held briefly. A

@@ -39,6 +39,13 @@ use core\check\result;
  * with the date the counting really starts from, so that an administrator reading a
  * budget at forty per cent knows whether to believe it.
  *
+ * Which date that is comes from what the purge wrote down when it discarded something,
+ * not from the oldest row that happens to be left. The two are not the same question,
+ * and reading the second as the first got the worst case backwards: a site whose
+ * history had been discarded entirely has two empty tables, exactly like a site that
+ * has never used its AI, and this said that nothing had been recorded yet and moved
+ * on. The one site that most needed telling was the one told there was nothing wrong.
+ *
  * @package    aiprovider_router
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -61,14 +68,21 @@ class budgethistory extends base {
             return new result(result::NA, get_string('check:budgethistory:nobudget', 'aiprovider_router'));
         }
 
-        $from = self::earliest_record($DB);
-        if ($from === null) {
-            // Nothing has been recorded at all. A site that has not used its AI yet is
-            // not a site missing history; it is a site with none to miss.
-            return new result(result::NA, get_string('check:budgethistory:norecords', 'aiprovider_router'));
+        $aggregator = new usage_aggregator($DB);
+        $from = $aggregator->get_history_from();
+        if ($from === 0) {
+            // Nothing has ever been discarded, so whatever is stored is the whole of
+            // what happened, and every budget is counting all of it. Said as a fact
+            // about the purge rather than guessed from the rows: an empty table is
+            // the same shape whether the site has never used its AI or has had its
+            // history taken away.
+            $earliest = self::earliest_record($DB);
+
+            return new result(result::OK, $earliest === null
+                ? get_string('check:budgethistory:noneyet', 'aiprovider_router')
+                : get_string('check:budgethistory:complete', 'aiprovider_router', userdate($earliest)));
         }
 
-        $aggregator = new usage_aggregator($DB);
         $ledger = new spend_ledger($DB, $aggregator, false);
         $now = time();
         $shortest = null;

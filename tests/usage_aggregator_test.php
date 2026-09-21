@@ -96,6 +96,39 @@ final class usage_aggregator_test extends \advanced_testcase {
         return $DB->get_records(usage_aggregator::TABLE, ['daystart' => $day]);
     }
 
+    public function test_discarding_summaries_writes_down_what_was_discarded(): void {
+        global $DB;
+
+        // Once a summary has gone, nothing in either table says it was ever there,
+        // and a site whose history was taken away looks exactly like a site that has
+        // never used its AI. The difference matters to a budget, so it is written
+        // down at the moment it is still known.
+        $this->assertSame(0, $this->aggregator->get_history_from());
+
+        $this->log($this->day(10) + HOURSECS);
+        set_config(usage_aggregator::RETENTION_SETTING, 1, 'aiprovider_router');
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'aiprovider_router');
+        $this->aggregator->run($this->now);
+
+        $this->assertSame(0, $DB->count_records(usage_aggregator::TABLE));
+        $marker = $this->aggregator->get_history_from();
+        $this->assertGreaterThan(0, $marker);
+        $this->assertSame($this->day(2), $marker);
+    }
+
+    public function test_the_mark_of_what_was_discarded_only_moves_forward(): void {
+        set_config(usage_aggregator::HISTORY_SETTING, $this->day(1), 'aiprovider_router');
+        $this->log($this->day(10) + HOURSECS);
+        set_config(usage_aggregator::RETENTION_SETTING, 1, 'aiprovider_router');
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'aiprovider_router');
+
+        $this->aggregator->run($this->now);
+
+        // A later purge under a longer retention must not let the site claim to
+        // remember more than it does.
+        $this->assertSame($this->day(1), $this->aggregator->get_history_from());
+    }
+
     public function test_a_finished_day_is_summarised(): void {
         $yesterday = $this->day(1);
         $this->log($yesterday + HOURSECS);

@@ -438,27 +438,86 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         );
 
         // The second pass rebuilds, which is exact, and is only done for a day whose
-        // detail rows are actually still there. Summarising a day that has no detail
-        // left would replace what is known about it with nothing, and the detail can
-        // be gone for reasons other than the daily purge -- somebody exercising their
-        // right to be forgotten, for one.
+        // detail is all still here. Summarising a day rewrites it from the rows that
+        // remain, so a day with some of its rows gone would come out smaller than the
+        // figure already stored, and a budget that had been refusing would fall open.
+        //
+        // Having some detail for a day does not mean having all of it. The purge
+        // removes everything before a midnight in the timezone in force when it ran,
+        // and after a site changes timezone that midnight falls in the middle of an
+        // older day: the morning goes and the evening stays. The detail can also go
+        // for reasons that are not the purge at all, such as somebody exercising their
+        // right to be forgotten.
+        //
+        // Rather than work out where a purge boundary once fell, the rebuild is asked
+        // to prove itself: the rows that are here must add up to the requests and the
+        // cost already recorded for that day. Both are worked out the same way in
+        // every version, so agreement means nothing is missing, and disagreement means
+        // the day keeps what it has and lives with the arithmetic above.
         $aggregator = new \aiprovider_router\usage_aggregator($DB);
         $days = $DB->get_fieldset_sql(
             'SELECT DISTINCT daystart FROM {aiprovider_router_daily} ORDER BY daystart',
         );
         foreach ($days as $day) {
             $day = (int) $day;
-            $holds = $DB->count_records_select(
-                'aiprovider_router_log',
-                'timecreated >= :from AND timecreated < :to',
+            $stored = $DB->get_record_sql(
+                'SELECT SUM(requests) AS requests, SUM(cost) AS cost
+                   FROM {aiprovider_router_daily} WHERE daystart = :day',
+                ['day' => $day],
+            );
+            $held = $DB->get_record_sql(
+                'SELECT COUNT(1) AS held, SUM(counted) AS requests, SUM(cost) AS cost
+                   FROM {aiprovider_router_log}
+                  WHERE timecreated >= :from AND timecreated < :to',
                 ['from' => $day, 'to' => $aggregator->add_days($day, 1)],
             );
-            if ($holds > 0) {
-                $aggregator->summarise_day($day);
+            if ((int) $held->held === 0 || (int) $held->requests !== (int) $stored->requests) {
+                continue;
             }
+            if (($held->cost === null) !== ($stored->cost === null)) {
+                continue;
+            }
+            if ($held->cost !== null && abs((float) $held->cost - (float) $stored->cost) > 0.0000005) {
+                continue;
+            }
+            $aggregator->summarise_day($day);
         }
 
         upgrade_plugin_savepoint(true, 2026092103, 'aiprovider', 'router');
+    }
+
+    if ($oldversion < 2026092104) {
+        // From here on the purge writes down what it discarded, because an empty pair
+        // of tables is the same shape whether a site has never used its AI or has had
+        // its history taken away, and only one of those is a site whose budgets are
+        // measuring less than was spent.
+        //
+        // Nothing wrote it down before, so a site that has already discarded
+        // something has to be given a starting point rather than be assumed innocent.
+        // Only a site that discards summaries can have lost anything: keeping every
+        // summary is the default, and the detail is only ever removed from days a
+        // summary already covers.
+        $aggregator = new \aiprovider_router\usage_aggregator($DB);
+        if ($aggregator->get_summary_retention_days() > 0 && $aggregator->get_history_from() === 0) {
+            $oldest = $DB->get_field_sql('SELECT MIN(daystart) FROM {aiprovider_router_daily}');
+            if (empty($oldest)) {
+                $oldest = $DB->get_field_sql('SELECT MIN(timecreated) FROM {aiprovider_router_log}');
+            }
+            if (empty($oldest)) {
+                // Nothing left to date it by. The summariser having run at all is
+                // what says there was something here once.
+                $oldest = (int) get_config('aiprovider_router', \aiprovider_router\usage_aggregator::LAST_SETTING);
+            }
+            if (!empty($oldest)) {
+                set_config(
+                    \aiprovider_router\usage_aggregator::HISTORY_SETTING,
+                    (int) $oldest,
+                    'aiprovider_router',
+                );
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026092104, 'aiprovider', 'router');
     }
 
     return true;
