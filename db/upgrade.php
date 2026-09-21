@@ -438,66 +438,11 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         );
 
         // The second pass rebuilds, which is exact, and is only done for a day whose
-        // detail is all still here. Summarising a day rewrites it from the rows that
-        // remain, so a day with some of its rows gone would come out smaller than the
-        // figure already stored, and a budget that had been refusing would fall open.
-        //
-        // Having some detail for a day does not mean having all of it. The purge
-        // removes everything before a midnight in the timezone in force when it ran,
-        // and after a site changes timezone that midnight falls in the middle of an
-        // older day: the morning goes and the evening stays. The detail can also go
-        // for reasons that are not the purge at all, such as somebody exercising their
-        // right to be forgotten.
-        //
-        // Rather than work out where a purge boundary once fell, the rebuild is asked
-        // to prove itself, and the rule it has to satisfy is that it may add to what
-        // is known about a day and may never take anything away. The requests and the
-        // cost have to come out exactly as recorded, because those two are worked out
-        // the same way in every version. The calls and the priced calls have only to
-        // come out no lower, because raising them off the floor the step above set is
-        // the whole reason for rebuilding at all.
-        //
-        // Matching the requests and the cost is not on its own proof that nothing is
-        // missing. An attempt that answered with nothing and had no rate is counted as
-        // no request and carries no cost, so losing one leaves both figures untouched
-        // while the day quietly goes from half priced to fully priced. Refusing to let
-        // any figure fall covers that, and covers whatever else has the same shape.
-        $aggregator = new \aiprovider_router\usage_aggregator($DB);
-        $days = $DB->get_fieldset_sql(
-            'SELECT DISTINCT daystart FROM {aiprovider_router_daily} ORDER BY daystart',
-        );
-        foreach ($days as $day) {
-            $day = (int) $day;
-            $stored = $DB->get_record_sql(
-                'SELECT SUM(requests) AS requests, SUM(calls) AS calls,
-                        SUM(costedcalls) AS costedcalls, SUM(cost) AS cost
-                   FROM {aiprovider_router_daily} WHERE daystart = :day',
-                ['day' => $day],
-            );
-            $held = $DB->get_record_sql(
-                'SELECT COUNT(1) AS calls, SUM(counted) AS requests, SUM(cost) AS cost,
-                        SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedcalls
-                   FROM {aiprovider_router_log}
-                  WHERE timecreated >= :from AND timecreated < :to',
-                ['from' => $day, 'to' => $aggregator->add_days($day, 1)],
-            );
-            if ((int) $held->calls === 0 || (int) $held->requests !== (int) $stored->requests) {
-                continue;
-            }
-            if ((int) $held->calls < (int) $stored->calls) {
-                continue;
-            }
-            if ((int) $held->costedcalls < (int) $stored->costedcalls) {
-                continue;
-            }
-            if (($held->cost === null) !== ($stored->cost === null)) {
-                continue;
-            }
-            if ($held->cost !== null && abs((float) $held->cost - (float) $stored->cost) > 0.0000005) {
-                continue;
-            }
-            $aggregator->summarise_day($day);
-        }
+        // detail can be shown to account for everything already summarised of it. See
+        // usage_aggregator::resummarise_intact_days() for what has to be shown and
+        // why: the short version is that a rebuild may add to what is known about a
+        // day and may never take anything away.
+        (new \aiprovider_router\usage_aggregator($DB))->resummarise_intact_days();
 
         upgrade_plugin_savepoint(true, 2026092103, 'aiprovider', 'router');
     }
@@ -529,6 +474,25 @@ function xmldb_aiprovider_router_upgrade(int $oldversion): bool {
         (new \aiprovider_router\usage_aggregator($DB))->seed_history_from();
 
         upgrade_plugin_savepoint(true, 2026092105, 'aiprovider', 'router');
+    }
+
+    if ($oldversion < 2026092106) {
+        // What the rebuild above had to be shown was not enough. It compared the
+        // requests, the cost and the two counts it exists to raise, and an attempt
+        // that answered with nothing and had no rate moves none of those: it is no
+        // request, it carries no cost, and the count it would raise starts from the
+        // request count anyway. A day that had lost one was rebuilt without it, and
+        // the tokens that attempt had used went with it -- the provider charged for
+        // them, and the site's own record of them was the only place they existed.
+        //
+        // The tokens are in the comparison now, and they close it: an attempt that
+        // answered with nothing is only recorded at all when it used something. Run
+        // again for a site that has already been through the weaker version. It
+        // cannot bring back what that lost, but from here on it rebuilds only what
+        // it can account for.
+        (new \aiprovider_router\usage_aggregator($DB))->resummarise_intact_days();
+
+        upgrade_plugin_savepoint(true, 2026092106, 'aiprovider', 'router');
     }
 
     return true;

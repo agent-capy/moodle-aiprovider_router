@@ -128,7 +128,18 @@ final class upgrade_test extends \advanced_testcase {
         // attempt that answered with nothing and was therefore not a request.
         $this->summary();
         $this->log(['counted' => 0, 'success' => 0]);
-        $this->log(['cost' => null, 'targetprovider' => null, 'model' => null, 'success' => 0]);
+        // The row carrying the request reached no target at all, so it reports no
+        // tokens either. That is what a refusal looks like in the log.
+        $this->log([
+            'cost' => null,
+            'success' => 0,
+            'targetid' => null,
+            'targetname' => null,
+            'targetprovider' => null,
+            'model' => null,
+            'prompttokens' => null,
+            'completiontokens' => null,
+        ]);
 
         $this->upgrade();
 
@@ -241,6 +252,85 @@ final class upgrade_test extends \advanced_testcase {
         $this->assertSame(2, (int) $totals->calls);
         $this->assertSame(1, (int) $totals->costedcalls);
         $this->assertEqualsWithDelta(1.0, (float) $totals->cost, 0.000001);
+    }
+
+    public function test_losing_an_attempt_does_not_lose_the_tokens_it_used(): void {
+        global $DB;
+
+        // The figure that catches this is the tokens. An attempt that answered with
+        // nothing and had no rate is no request and carries no cost, and the count of
+        // calls it would raise starts from the request count, so none of those three
+        // moves when it goes. The provider charged for the tokens it used, and the
+        // summary was the only place the site still had them.
+        $this->summary([
+            'failures' => 0,
+            'requests' => 1,
+            // What the version before last wrote: the calls of a day were taken to be
+            // its requests, which is a floor and not the truth.
+            'calls' => 1,
+            'costedcalls' => 1,
+            'cost' => 1.0,
+            'prompttokens' => 1050,
+            'completiontokens' => 210,
+        ]);
+        $this->log([
+            'cost' => 1.0,
+            'prompttokens' => 50,
+            'completiontokens' => 10,
+        ]);
+
+        $this->upgrade();
+
+        $totals = $DB->get_record_sql(
+            'SELECT SUM(requests) AS requests, SUM(prompttokens) AS prompttokens,
+                    SUM(completiontokens) AS completiontokens, SUM(cost) AS cost
+               FROM {' . usage_aggregator::TABLE . '} WHERE daystart = :day',
+            ['day' => $this->day],
+        );
+        $this->assertSame(1050, (int) $totals->prompttokens);
+        $this->assertSame(210, (int) $totals->completiontokens);
+        $this->assertSame(1, (int) $totals->requests);
+        $this->assertEqualsWithDelta(1.0, (float) $totals->cost, 0.000001);
+    }
+
+    public function test_a_day_whose_detail_accounts_for_all_of_it_is_still_rebuilt(): void {
+        global $DB;
+
+        // The control for the test above. Nothing is missing here, so the rebuild
+        // goes ahead and raises the calls off the floor, which is what it is for.
+        $this->summary([
+            'failures' => 0,
+            'requests' => 1,
+            'calls' => 1,
+            'costedcalls' => 1,
+            'cost' => 1.0,
+            'prompttokens' => 1050,
+            'completiontokens' => 210,
+        ]);
+        $this->log([
+            'counted' => 0,
+            'success' => 0,
+            'cost' => null,
+            'targetprovider' => null,
+            'model' => null,
+            'prompttokens' => 1000,
+            'completiontokens' => 200,
+        ]);
+        $this->log(['cost' => 1.0, 'prompttokens' => 50, 'completiontokens' => 10]);
+
+        $this->upgrade();
+
+        $totals = $DB->get_record_sql(
+            'SELECT SUM(requests) AS requests, SUM(calls) AS calls, SUM(costedcalls) AS costedcalls,
+                    SUM(prompttokens) AS prompttokens, SUM(completiontokens) AS completiontokens
+               FROM {' . usage_aggregator::TABLE . '} WHERE daystart = :day',
+            ['day' => $this->day],
+        );
+        $this->assertSame(1, (int) $totals->requests);
+        $this->assertSame(2, (int) $totals->calls);
+        $this->assertSame(1, (int) $totals->costedcalls);
+        $this->assertSame(1050, (int) $totals->prompttokens);
+        $this->assertSame(210, (int) $totals->completiontokens);
     }
 
     public function test_a_site_that_had_already_discarded_history_is_given_a_starting_point(): void {

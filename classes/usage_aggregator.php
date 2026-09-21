@@ -194,6 +194,101 @@ class usage_aggregator {
     }
 
     /**
+     * Summarise again every finished day whose detail can be shown to be whole.
+     *
+     * Written for the upgrade that had to give the old summaries their new meaning,
+     * and kept here because the rule it follows is about this table rather than about
+     * any one version.
+     *
+     * The rule is that a rebuild may add to what is known about a day and may never
+     * take anything away. Working out where an old purge boundary fell is not
+     * something that can be done after the fact -- the purge removes everything before
+     * a midnight in the timezone in force when it ran, and after a change of timezone
+     * that midnight lands inside an older day -- so the detail is asked to prove
+     * itself instead.
+     *
+     * What has to match exactly is every figure whose formula has never changed:
+     * the requests, the failures, the tokens and the cost. What has only to come out
+     * no lower is the pair this exists to raise, the calls and the priced calls,
+     * because what is stored for those may be a floor rather than the truth.
+     *
+     * Each of those was learnt from a day this got wrong. Matching the requests and
+     * the cost alone missed an attempt that answered with nothing and had no rate,
+     * which is counted as no request and carries no cost. Adding the calls missed it
+     * too, because the floor they start from is the request count. The tokens catch
+     * it: an attempt that answered with nothing is only recorded at all when it used
+     * something, so there is no such row without them.
+     *
+     * @return int How many days were summarised again.
+     */
+    public function resummarise_intact_days(): int {
+        $rebuilt = 0;
+        $days = $this->db->get_fieldset_sql(
+            'SELECT DISTINCT daystart FROM {' . self::TABLE . '} ORDER BY daystart',
+        );
+        foreach ($days as $day) {
+            $day = (int) $day;
+            if (!$this->detail_is_whole($day)) {
+                continue;
+            }
+            $this->summarise_day($day);
+            $rebuilt++;
+        }
+
+        return $rebuilt;
+    }
+
+    /**
+     * Whether the detail still held for a day accounts for everything summarised of it.
+     *
+     * @param int $day Midnight of the day, in the server timezone.
+     * @return bool True when the day can safely be summarised again.
+     */
+    protected function detail_is_whole(int $day): bool {
+        $stored = $this->db->get_record_sql(
+            'SELECT SUM(requests) AS requests, SUM(failures) AS failures, SUM(calls) AS calls,
+                    SUM(prompttokens) AS prompttokens, SUM(completiontokens) AS completiontokens,
+                    SUM(cost) AS cost, SUM(costedcalls) AS costedcalls
+               FROM {' . self::TABLE . '} WHERE daystart = :day',
+            ['day' => $day],
+        );
+        $held = $this->db->get_record_sql(
+            'SELECT COUNT(1) AS calls, SUM(counted) AS requests,
+                    SUM(CASE WHEN counted = 1 AND success = 0 THEN 1 ELSE 0 END) AS failures,
+                    SUM(CASE WHEN prompttokens IS NULL THEN 0 ELSE prompttokens END) AS prompttokens,
+                    SUM(CASE WHEN completiontokens IS NULL THEN 0 ELSE completiontokens END) AS completiontokens,
+                    SUM(cost) AS cost,
+                    SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costedcalls
+               FROM {' . usage_logger::TABLE . '}
+              WHERE timecreated >= :from AND timecreated < :to',
+            ['from' => $day, 'to' => $this->add_days($day, 1)],
+        );
+
+        if ((int) $held->calls === 0) {
+            // Nothing left to rebuild from. Summarising the day would replace what is
+            // known about it with nothing at all, and the detail can be gone for
+            // reasons that are not the purge -- somebody exercising their right to be
+            // forgotten, for one.
+            return false;
+        }
+        foreach (['requests', 'failures', 'prompttokens', 'completiontokens'] as $exact) {
+            if ((int) $held->$exact !== (int) $stored->$exact) {
+                return false;
+            }
+        }
+        foreach (['calls', 'costedcalls'] as $floor) {
+            if ((int) $held->$floor < (int) $stored->$floor) {
+                return false;
+            }
+        }
+        if (($held->cost === null) !== ($stored->cost === null)) {
+            return false;
+        }
+
+        return $held->cost === null || abs((float) $held->cost - (float) $stored->cost) <= 0.0000005;
+    }
+
+    /**
      * Remove detail rows older than the retention period.
      *
      * The cut never runs past the last day summarised, so that turning cron back on

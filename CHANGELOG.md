@@ -240,6 +240,22 @@ Both of these were introduced by the fixes above them.
   afterwards, so the address changes at a moment nothing announces, and the step was
   relying on that happening within the gap between two steps. It usually did.
 
+### Closing the same door properly
+
+- The upgrade now checks every figure a day already holds before rebuilding it, rather
+  than the few that the last problem happened to involve. What has to match exactly is
+  each figure whose formula has never changed -- the requests, the failures, the tokens
+  and the cost. What has only to come out no lower is the pair the rebuild exists to
+  raise. Checking the calls alone was no check at all: what a day held for them was a
+  floor the previous step had put there, equal to the request count, so a rebuild that
+  had lost an attempt still came out no lower. The tokens are what catch it, and they
+  catch it in every case rather than in this one: an attempt that answered with nothing
+  is only recorded at all when it used something, so there is no such row without them.
+  A day that had lost one was being rebuilt without the tokens it used, which the
+  provider had charged for and which the summary was the only remaining record of.
+- The rule lives with the table it is about, as `resummarise_intact_days()`, rather
+  than in the upgrade file, and both upgrade steps that need it call it.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built
