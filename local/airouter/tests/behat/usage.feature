@@ -1,4 +1,4 @@
-@ai @aiprovider @local_airouter
+@ai @local @local_airouter
 Feature: Seeing what the router handled
   In order to know where my site's AI requests went and what they cost
   As an administrator

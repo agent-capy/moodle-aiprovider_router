@@ -105,15 +105,19 @@ jobs:
         if: ${{ always() }}
       - run: ./plugin/.github/run-step.sh "phpcs (connector)" moodle-plugin-ci phpcs --max-warnings 0 ./plugin/ai/provider/router
         if: ${{ always() }}
-      - run: moodle-plugin-ci validate ./plugin/local/airouter
+      - run: ./plugin/.github/run-step.sh validate moodle-plugin-ci validate ./plugin/local/airouter
         if: ${{ always() }}
-      - run: moodle-plugin-ci validate ./plugin/ai/provider/router
+      - run: ./plugin/.github/run-step.sh "validate (connector)" moodle-plugin-ci validate ./plugin/ai/provider/router
         if: ${{ always() }}
       - run: moodle-plugin-ci savepoints ./plugin/local/airouter
         if: ${{ always() }}
       - run: moodle-plugin-ci mustache ./plugin/local/airouter
         if: ${{ always() }}
-      - run: moodle-plugin-ci grunt --max-lint-warnings 0 ./plugin/local/airouter
+      # ⚠ No path here. Grunt runs Moodle's own Gruntfile, which works out which
+      # component it is linting from the directory it is run in, relative to the
+      # Moodle root. Handed the checkout path instead of the installed one it has
+      # nothing to work that out from. The connector has no assets to lint.
+      - run: ./plugin/.github/run-step.sh grunt moodle-plugin-ci grunt --max-lint-warnings 0
         if: ${{ always() }}
       - run: ./plugin/.github/run-step.sh phpunit moodle-plugin-ci phpunit --fail-on-warning ./plugin/local/airouter
         if: ${{ always() }}

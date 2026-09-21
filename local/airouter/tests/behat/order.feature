@@ -1,4 +1,4 @@
-@ai @aiprovider @local_airouter
+@ai @local @local_airouter
 Feature: Keeping the AI Router first in the provider order
   In order for the AI Router to be asked at all
   As an administrator

@@ -1,4 +1,4 @@
-@ai @aiprovider @local_airouter
+@ai @local @local_airouter
 Feature: Registering a key of my own
   In order to have my AI requests charged to me rather than to the site
   As somebody the site allows to bring a key

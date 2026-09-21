@@ -1,4 +1,4 @@
-@ai @aiprovider @local_airouter
+@ai @local @local_airouter
 Feature: Routing requests by rule
   In order to send different requests to different AI providers
   As an administrator
