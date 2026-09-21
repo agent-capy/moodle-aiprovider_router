@@ -96,6 +96,10 @@ class routing_manager extends \core_ai\manager {
         $actionclass = ltrim($actionclass, '\\');
         $instances = $this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]);
 
+        if ($instances === []) {
+            return $this->adapter_for($actionclass);
+        }
+
         foreach ($instances as $instance) {
             if (!$instance->enabled || !$instance->is_provider_configured()) {
                 continue;
@@ -115,5 +119,39 @@ class routing_manager extends \core_ai\manager {
         }
 
         return null;
+    }
+
+    /**
+     * The router built from the site's own settings, when it can answer this action.
+     *
+     * A site with no row in ai_providers is not a site without a router. The policy,
+     * the rules and the budgets live in this plugin's configuration, and the object
+     * core needs while it runs an action can be made from them for the length of the
+     * request. This is the arrangement the plugin is moving to; the stored instance
+     * above is what it is moving from, and while both exist a stored one wins, so
+     * that a site that has configured the router in the old place keeps the settings
+     * it can see.
+     *
+     * @param string $actionclass The action class being requested, already normalised.
+     * @return ai_provider|null The adapter, or null when it cannot answer.
+     */
+    protected function adapter_for(string $actionclass): ?ai_provider {
+        $adapter = adapter_provider::create();
+        if (!$adapter->is_provider_configured()) {
+            return null;
+        }
+
+        $carried = array_map(
+            static fn(string $action): string => ltrim($action, '\\'),
+            $adapter->get_action_list(),
+        );
+        if (!in_array($actionclass, $carried, true)) {
+            return null;
+        }
+
+        // The adapter says it answers exactly what the site has placed under the
+        // router, so this repeats nothing: it reads the same decision back in the
+        // shape core reads it, which is what the stored instance is asked as well.
+        return ($adapter->actionconfig[$actionclass]['enabled'] ?? false) ? $adapter : null;
     }
 }

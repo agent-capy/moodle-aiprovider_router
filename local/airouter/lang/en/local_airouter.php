@@ -24,6 +24,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+$string['adapter:name'] = 'AI Router';
 $string['airouter:managecoursekey'] = 'Register the key a course pays with';
 $string['airouter:viewusage'] = 'View AI Router usage in a course';
 $string['airouter:viewuserusage'] = 'See which people used the AI, and what it cost';

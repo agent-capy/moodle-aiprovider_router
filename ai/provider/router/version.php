@@ -25,9 +25,9 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'aiprovider_router';
-$plugin->version = 2026092200;
+$plugin->version = 2026092201;
 $plugin->requires = 2025041400;
-$plugin->dependencies = ['local_airouter' => 2026092200];
+$plugin->dependencies = ['local_airouter' => 2026092201];
 $plugin->supported = [500, 502];
 $plugin->maturity = MATURITY_BETA;
 $plugin->release = '0.1.0';

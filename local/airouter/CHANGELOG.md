@@ -315,6 +315,20 @@ Both of these were introduced by the fixes above them.
   - Saving the settings form no longer drops such an action. It has no checkbox there,
     and losing it by saving something else would have been the same silent release.
 
+### Routing a site that has no router to configure
+
+- A site with no AI Router provider instance now routes anyway. Routing is a policy,
+  and the row existed only because core wanted a provider object while it ran an
+  action - which it builds from the class name, the action list and the settings, none
+  of which have to come from the database. The policy is read from the plugin's own
+  configuration and handed to core for the length of the request.
+  - Core records the result against `local_airouter`, which is the component that
+    processed it. Where the request was delegated to is a different fact and stays in
+    the router's own records.
+  - A site that already has an instance keeps using it, settings and all. This is a
+    step towards removing the stored instance, not a switch that moves a configured
+    site onto different settings without saying so.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

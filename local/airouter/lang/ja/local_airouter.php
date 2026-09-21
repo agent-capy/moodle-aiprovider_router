@@ -24,6 +24,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+$string['adapter:name'] = 'AIルータ';
 $string['airouter:managecoursekey'] = 'コースが支払う鍵を登録する';
 $string['airouter:viewusage'] = 'コースのAIルータ利用状況を閲覧する';
 $string['airouter:viewuserusage'] = '誰が AI を使い、いくらかかったかを閲覧する';
