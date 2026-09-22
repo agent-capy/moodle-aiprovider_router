@@ -17,6 +17,7 @@
 namespace local_airouter\privacy;
 
 use local_airouter\budget_notifier;
+use local_airouter\record\usage_recorder;
 use local_airouter\key;
 use local_airouter\key_repository;
 use local_airouter\usage_aggregator;
@@ -77,6 +78,37 @@ class provider implements
         );
 
         $collection->add_database_table(
+            usage_recorder::REQUEST_TABLE,
+            [
+                'userid' => 'privacy:metadata:request:userid',
+                'contextid' => 'privacy:metadata:request:contextid',
+                'courseid' => 'privacy:metadata:request:courseid',
+                'actionname' => 'privacy:metadata:request:actionname',
+                'placement' => 'privacy:metadata:request:placement',
+                'state' => 'privacy:metadata:request:state',
+                'timestarted' => 'privacy:metadata:request:timestarted',
+                'timeended' => 'privacy:metadata:request:timeended',
+            ],
+            'privacy:metadata:request',
+        );
+
+        $collection->add_database_table(
+            usage_recorder::ATTEMPT_TABLE,
+            [
+                'requestid' => 'privacy:metadata:attempt:requestid',
+                'targetname' => 'privacy:metadata:attempt:targetname',
+                'model' => 'privacy:metadata:attempt:model',
+                'keyid' => 'privacy:metadata:attempt:keyid',
+                'state' => 'privacy:metadata:attempt:state',
+                'prompttokens' => 'privacy:metadata:attempt:prompttokens',
+                'completiontokens' => 'privacy:metadata:attempt:completiontokens',
+                'cost' => 'privacy:metadata:attempt:cost',
+                'timeended' => 'privacy:metadata:attempt:timeended',
+            ],
+            'privacy:metadata:attempt',
+        );
+
+        $collection->add_database_table(
             usage_aggregator::TABLE,
             [
                 'userid' => 'privacy:metadata:daily:userid',
@@ -129,6 +161,10 @@ class provider implements
         $contextlist = new contextlist();
         $contextlist->add_from_sql(
             'SELECT DISTINCT contextid FROM {' . usage_logger::TABLE . '} WHERE userid = :userid',
+            ['userid' => $userid],
+        );
+        $contextlist->add_from_sql(
+            'SELECT DISTINCT contextid FROM {' . usage_recorder::REQUEST_TABLE . '} WHERE userid = :userid',
             ['userid' => $userid],
         );
 
@@ -189,6 +225,11 @@ class provider implements
             'SELECT userid FROM {' . usage_logger::TABLE . '} WHERE contextid = :contextid',
             ['contextid' => $context->id],
         );
+        $userlist->add_from_sql(
+            'userid',
+            'SELECT userid FROM {' . usage_recorder::REQUEST_TABLE . '} WHERE contextid = :contextid',
+            ['contextid' => $context->id],
+        );
 
         if ($context instanceof \context_user) {
             $userlist->add_from_sql(
@@ -230,6 +271,7 @@ class provider implements
         }
         $userid = $contextlist->get_user()->id;
         self::export_requests($contextlist, $userid);
+        self::export_recorded_requests($contextlist, (int) $userid);
         self::export_summaries($contextlist, (int) $userid);
         self::export_notices($contextlist, (int) $userid);
 
@@ -261,6 +303,7 @@ class provider implements
         global $DB;
 
         $DB->delete_records(usage_logger::TABLE, ['contextid' => $context->id]);
+        self::delete_recorded_requests('contextid = :contextid', ['contextid' => $context->id]);
 
         $repository = new key_repository($DB);
         if ($context instanceof \context_user) {
@@ -284,6 +327,7 @@ class provider implements
         [$insql, $params] = $DB->get_in_or_equal($contextlist->get_contextids(), SQL_PARAMS_NAMED);
         $params['userid'] = $userid;
         $DB->delete_records_select(usage_logger::TABLE, "userid = :userid AND contextid {$insql}", $params);
+        self::delete_recorded_requests("userid = :userid AND contextid {$insql}", $params);
 
         self::delete_summaries($contextlist->get_contexts(), $userid);
         self::forget_keys($contextlist->get_contexts(), $userid);
@@ -300,6 +344,7 @@ class provider implements
         [$insql, $params] = $DB->get_in_or_equal($userlist->get_userids(), SQL_PARAMS_NAMED);
         $params['contextid'] = $context->id;
         $DB->delete_records_select(usage_logger::TABLE, "contextid = :contextid AND userid {$insql}", $params);
+        self::delete_recorded_requests("contextid = :contextid AND userid {$insql}", $params);
 
         foreach ($userlist->get_userids() as $userid) {
             self::delete_summaries([$context], (int) $userid);
@@ -560,6 +605,88 @@ class provider implements
             writer::with_context($context)->export_data(
                 [get_string('privacy:path:log', 'local_airouter')],
                 (object) ['requests' => $requests],
+            );
+        }
+    }
+
+    /**
+     * Remove requests, and the attempts made on their behalf.
+     *
+     * The attempts first, by the requests they belong to, and then the requests. An
+     * attempt names no person of its own; it is personal because of whose request it
+     * served, so it goes when that request goes and not otherwise.
+     *
+     * @param string $where A condition on the request table.
+     * @param array $params Its parameters.
+     */
+    protected static function delete_recorded_requests(string $where, array $params): void {
+        global $DB;
+
+        $DB->delete_records_select(
+            usage_recorder::ATTEMPT_TABLE,
+            'requestid IN (SELECT id FROM {' . usage_recorder::REQUEST_TABLE . "} WHERE {$where})",
+            $params,
+        );
+        $DB->delete_records_select(usage_recorder::REQUEST_TABLE, $where, $params);
+    }
+
+    /**
+     * Export the requests one person made, each with what was tried on its behalf.
+     *
+     * The prompt is not here because it was never stored. Neither is a key: an
+     * attempt made with a brought key says which key by its id and nothing more.
+     *
+     * @param approved_contextlist $contextlist The contexts approved for export.
+     * @param int $userid The user.
+     */
+    protected static function export_recorded_requests(approved_contextlist $contextlist, int $userid): void {
+        global $DB;
+
+        [$insql, $params] = $DB->get_in_or_equal($contextlist->get_contextids(), SQL_PARAMS_NAMED);
+        $params['userid'] = $userid;
+        $requests = $DB->get_records_select(
+            usage_recorder::REQUEST_TABLE,
+            "userid = :userid AND contextid {$insql}",
+            $params,
+            'timestarted ASC, id ASC',
+        );
+        if (!$requests) {
+            return;
+        }
+        [$reqsql, $reqparams] = $DB->get_in_or_equal(array_keys($requests), SQL_PARAMS_NAMED);
+        $attempts = [];
+        foreach ($DB->get_records_select(usage_recorder::ATTEMPT_TABLE, "requestid {$reqsql}", $reqparams, 'seq ASC') as $attempt) {
+            $attempts[(int) $attempt->requestid][] = (object) [
+                'delegatedto' => $attempt->targetname,
+                'model' => $attempt->model,
+                'outcome' => $attempt->state,
+                'prompttokens' => $attempt->prompttokens,
+                'completiontokens' => $attempt->completiontokens,
+                'cost' => $attempt->cost,
+                'currency' => $attempt->currency,
+                'timeended' => $attempt->timeended === null ? null : transform::datetime($attempt->timeended),
+            ];
+        }
+
+        $bycontext = [];
+        foreach ($requests as $request) {
+            $bycontext[(int) $request->contextid][] = (object) [
+                'timestarted' => transform::datetime($request->timestarted),
+                'timeended' => $request->timeended === null ? null : transform::datetime($request->timeended),
+                'action' => $request->actionname,
+                'placement' => $request->placement,
+                'outcome' => $request->state,
+                'attempts' => $attempts[(int) $request->id] ?? [],
+            ];
+        }
+        foreach ($bycontext as $contextid => $rows) {
+            $context = \context::instance_by_id($contextid, IGNORE_MISSING);
+            if (!$context) {
+                continue;
+            }
+            writer::with_context($context)->export_data(
+                [get_string('privacy:path:requests', 'local_airouter')],
+                (object) ['requests' => $rows],
             );
         }
     }

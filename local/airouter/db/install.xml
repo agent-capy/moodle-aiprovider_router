@@ -191,5 +191,71 @@
         <INDEX NAME="kind-subjectid-metric-limitamount-threshold-periodstart-perioddays" UNIQUE="true" FIELDS="kind, subjectid, metric, limitamount, threshold, periodstart, perioddays"/>
       </INDEXES>
     </TABLE>
+    <TABLE NAME="local_airouter_request" COMMENT="One row per AI request the router handled, from the moment it arrived. Says who asked, where, for what, and how it ended; what was tried on its behalf is in local_airouter_attempt. The two are kept apart so that a request is always one row however many providers it took, which is what a budget counted in requests needs, and so that every provider call leaves a row of its own, which is what a bill needs.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="correlation" TYPE="char" LENGTH="36" NOTNULL="true" SEQUENCE="false" COMMENT="An identifier made when the request was opened, so that a row written twice by a retried process is the same row and not a second request."/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="contextid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Resolved the same way the rule engine resolves it. Null when the request came from outside any course, which is not the convention core adopted for its own register in 5.3 (-1 there), and is not translated: the two are compared, not merged."/>
+        <FIELD NAME="actionname" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="The action basename, matching what core records."/>
+        <FIELD NAME="placement" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="ruleid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="The rule that claimed the request, if one did."/>
+        <FIELD NAME="rulename" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Copied because rules get renamed and deleted, and a record nobody can read is not a record."/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Whose key the request was to be paid for with: site, user or course. What each attempt was actually paid for with is on the attempt, and can differ when the chain fell back."/>
+        <FIELD NAME="state" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="open" SEQUENCE="false" COMMENT="open while being worked on; then succeeded, declined (turned down before anything was tried) or failed (tried, and nothing answered)."/>
+        <FIELD NAME="reason" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false" COMMENT="Why it did not succeed, in terms an administrator can act on."/>
+        <FIELD NAME="errorcode" TYPE="int" LENGTH="4" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="answeredby" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="The target whose answer was used. Null unless the request succeeded."/>
+        <FIELD NAME="attempts" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="How many targets were tried. A convenience: the attempt rows are the record."/>
+        <FIELD NAME="timestarted" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timeended" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="When the outcome was written. Null while open. This, not timestarted, is the day a request is counted in."/>
+        <FIELD NAME="applied" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether the summary has counted this row yet. Kept on the row rather than as a watermark in the settings, so that nothing about what has been counted depends on how a setting is read."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="userid" TYPE="foreign" FIELDS="userid" REFTABLE="user" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="correlation" UNIQUE="true" FIELDS="correlation"/>
+        <INDEX NAME="applied-timeended" UNIQUE="false" FIELDS="applied, timeended"/>
+        <INDEX NAME="contextid" UNIQUE="false" FIELDS="contextid"/>
+        <INDEX NAME="courseid-timeended" UNIQUE="false" FIELDS="courseid, timeended"/>
+        <INDEX NAME="timestarted" UNIQUE="false" FIELDS="timestarted"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_attempt" COMMENT="One row per provider the router asked on behalf of a request, whether or not it answered. What a provider charged for is charged whether it answered or not, and to whoever's key it was asked with, so each attempt carries its own target, payer, usage and cost.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="requestid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="seq" TYPE="int" LENGTH="4" NOTNULL="true" SEQUENCE="false" COMMENT="Which attempt of the request this is, from one. Unique with the request, so that a retried write cannot make a second attempt out of the same call."/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="targetname" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Copied, for the same reason the rule name is copied on the request."/>
+        <FIELD NAME="targetprovider" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="The component of the instance, which is what prices are looked up by."/>
+        <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Whose key this attempt was made with."/>
+        <FIELD NAME="keyid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Which brought key, when one was used. Never the key itself."/>
+        <FIELD NAME="state" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="started" SEQUENCE="false" COMMENT="started until the target comes back; then succeeded, empty, failed, threw, or lost when nothing ever came back."/>
+        <FIELD NAME="errorcode" TYPE="int" LENGTH="4" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="prompttokens" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Null when the target did not say, which is not the same as none."/>
+        <FIELD NAME="completiontokens" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="images" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="usageknown" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="One when the token counts can be believed as counts. A report adds up the attempts where this is one and says how many it left out."/>
+        <FIELD NAME="cost" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Worked out when the attempt ended, never recalculated. Null when no rate was known, which is not free."/>
+        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="timestarted" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timeended" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="When the outcome was written. Null while started. The day an attempt is counted in."/>
+        <FIELD NAME="applied" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether the summary has counted this row yet."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="requestid" TYPE="foreign" FIELDS="requestid" REFTABLE="local_airouter_request" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="requestid-seq" UNIQUE="true" FIELDS="requestid, seq"/>
+        <INDEX NAME="applied-timeended" UNIQUE="false" FIELDS="applied, timeended"/>
+        <INDEX NAME="targetid-timeended" UNIQUE="false" FIELDS="targetid, timeended"/>
+      </INDEXES>
+    </TABLE>
   </TABLES>
 </XMLDB>

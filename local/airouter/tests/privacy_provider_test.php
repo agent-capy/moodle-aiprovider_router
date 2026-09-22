@@ -17,6 +17,7 @@
 namespace local_airouter;
 
 use local_airouter\privacy\provider;
+use local_airouter\record\usage_recorder;
 use core_privacy\local\request\approved_contextlist;
 use core_privacy\local\request\approved_userlist;
 use core_privacy\local\request\userlist;
@@ -258,6 +259,108 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
             'threshold' => 100,
             'timenotified' => time(),
         ]);
+    }
+
+    /**
+     * A recorded request with one attempt, made by somebody somewhere.
+     *
+     * @param int $userid Who asked.
+     * @param int $contextid Where.
+     * @return \stdClass The request row.
+     */
+    protected function record(int $userid, int $contextid): \stdClass {
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $request = $generator->create_request(['userid' => $userid, 'contextid' => $contextid]);
+        $generator->create_attempt([
+            'requestid' => $request->id,
+            'targetname' => 'Named target',
+            'cost' => 0.25,
+            'currency' => 'USD',
+        ]);
+
+        return $request;
+    }
+
+    public function test_a_recorded_request_is_found_where_it_was_made(): void {
+        $user = $this->getDataGenerator()->create_user();
+        $course = $this->getDataGenerator()->create_course();
+        $coursecontext = \context_course::instance($course->id);
+        $this->record((int) $user->id, (int) $coursecontext->id);
+
+        $contexts = provider::get_contexts_for_userid((int) $user->id)->get_contextids();
+        $this->assertContains((int) $coursecontext->id, array_map('intval', $contexts));
+
+        $userlist = new userlist($coursecontext, 'local_airouter');
+        provider::get_users_in_context($userlist);
+        $this->assertSame([(int) $user->id], $userlist->get_userids());
+    }
+
+    public function test_a_recorded_request_is_exported_with_what_was_tried_and_no_key(): void {
+        $user = $this->getDataGenerator()->create_user();
+        $context = \context_user::instance((int) $user->id);
+        $this->record((int) $user->id, (int) $context->id);
+
+        provider::export_user_data(new approved_contextlist($user, 'local_airouter', [$context->id]));
+
+        $exported = writer::with_context($context)->get_data([get_string('privacy:path:requests', 'local_airouter')]);
+        $this->assertCount(1, $exported->requests);
+        $request = $exported->requests[0];
+        $this->assertSame('generate_text', $request->action);
+        $this->assertSame('succeeded', $request->outcome);
+        $this->assertCount(1, $request->attempts);
+        $this->assertSame('Named target', $request->attempts[0]->delegatedto);
+        $this->assertSame('0.250000', (string) $request->attempts[0]->cost);
+        $this->assertObjectNotHasProperty('keyid', $request->attempts[0]);
+        $this->assertObjectNotHasProperty('correlation', $request);
+    }
+
+    public function test_a_deletion_request_removes_recorded_requests_and_their_attempts(): void {
+        global $DB;
+        $user = $this->getDataGenerator()->create_user();
+        $other = $this->getDataGenerator()->create_user();
+        $context = \context_user::instance((int) $user->id);
+        $this->record((int) $user->id, (int) $context->id);
+        $kept = $this->record((int) $other->id, (int) \context_user::instance((int) $other->id)->id);
+
+        provider::delete_data_for_user(new approved_contextlist($user, 'local_airouter', [$context->id]));
+
+        $this->assertSame(0, $DB->count_records(usage_recorder::REQUEST_TABLE, ['userid' => $user->id]));
+        $this->assertSame(1, $DB->count_records(usage_recorder::REQUEST_TABLE, ['userid' => $other->id]));
+        // The attempts went with the request, and nobody else's did.
+        $this->assertSame(1, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+        $this->assertSame(1, $DB->count_records(usage_recorder::ATTEMPT_TABLE, ['requestid' => $kept->id]));
+    }
+
+    public function test_emptying_a_context_removes_every_recorded_request_in_it(): void {
+        global $DB;
+        $course = $this->getDataGenerator()->create_course();
+        $context = \context_course::instance($course->id);
+        $this->record(3, (int) $context->id);
+        $this->record(4, (int) $context->id);
+        $this->record(4, (int) \context_system::instance()->id);
+
+        provider::delete_data_for_all_users_in_context($context);
+
+        $this->assertSame(1, $DB->count_records(usage_recorder::REQUEST_TABLE));
+        $this->assertSame(1, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+    }
+
+    public function test_removing_several_users_from_a_context_leaves_the_rest(): void {
+        global $DB;
+        $course = $this->getDataGenerator()->create_course();
+        $context = \context_course::instance($course->id);
+        $a = $this->getDataGenerator()->create_user();
+        $b = $this->getDataGenerator()->create_user();
+        $c = $this->getDataGenerator()->create_user();
+        foreach ([$a, $b, $c] as $user) {
+            $this->record((int) $user->id, (int) $context->id);
+        }
+
+        provider::delete_data_for_users(new approved_userlist($context, 'local_airouter', [$a->id, $b->id]));
+
+        $remaining = array_column($DB->get_records(usage_recorder::REQUEST_TABLE), 'userid');
+        $this->assertSame([(int) $c->id], array_map('intval', $remaining));
+        $this->assertSame(1, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
     }
 
     public function test_a_request_made_in_somebodys_own_context_still_names_them(): void {

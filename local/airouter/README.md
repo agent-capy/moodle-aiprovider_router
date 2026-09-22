@@ -459,6 +459,41 @@ means something quite different.
 Failing to write this history never fails the request. A monitor is a tool for running a
 site, not an obstacle on the path of every AI request.
 
+### Requests and attempts
+
+Underneath, the router writes two records as it goes: one row for the request, and
+one row for every provider it asked on the request's behalf. The request row is
+opened the moment the request arrives, before the rate limit and before the rules,
+and closed when the outcome is known. Each attempt row is written before the provider
+is called and finished when it comes back -- or does not.
+
+That last part is the point. A provider that takes the tokens and then answers a
+failure has still charged for them, and a bill is made of calls, not of answers. So
+every call leaves a row: the ones that answered, the ones that answered with nothing,
+the ones that failed, the ones that threw. Each row says which provider, which model,
+whose key it was made with, what it reported using and what that cost at the rates in
+force at the time.
+
+Three things a row can say are kept apart, because adding them together is wrong
+whichever way it is done:
+
+| | |
+| --- | --- |
+| Used nothing | Token counts of zero, marked as counts that can be believed |
+| Did not say | No token counts, marked as counts nobody gave. Not zero |
+| Nothing to price it by | A cost of nothing, which is not a cost of zero. A provider with a rate of zero is free, and free is a cost of zero |
+
+An attempt that never comes back -- the process did not survive the call -- stays on
+record as started, and is later closed as lost with its usage unknown. What the site
+cannot know, the record does not pretend to know.
+
+A write that fails is counted, so that a site can be told its history has holes rather
+than find them by comparing a bill with a report.
+
+The screens and the budget conditions on this page still read the older, one row per
+request record while they are moved across to these tables; until then the two are
+written side by side. The older record and its table go when the last reader has moved.
+
 **Requests and provider calls are counted separately.** A request that fell through to a
 second provider is one request and two calls, and both were recorded: the call that
 answered with nothing has a row of its own so that what it spent lands against the

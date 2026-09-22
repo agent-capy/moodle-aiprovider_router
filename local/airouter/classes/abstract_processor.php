@@ -17,6 +17,10 @@
 namespace local_airouter;
 
 use local_airouter\exception\declined_request;
+use local_airouter\record\attempt_state;
+use local_airouter\record\request_state;
+use local_airouter\record\usage;
+use local_airouter\record\usage_recorder;
 use core_ai\aiactions\responses\response_base;
 
 /**
@@ -129,6 +133,15 @@ abstract class abstract_processor extends \core_ai\process_base {
     /** @var bool Whether the router was ever reached, or core turned the request away first. */
     protected bool $routed = false;
 
+    /** @var int|null The request row being written, until it is closed. */
+    protected ?int $requestid = null;
+
+    /** @var target_resolver|null The resolver that chose for this request, once one has. */
+    protected ?target_resolver $resolver = null;
+
+    /** @var int How many targets have been asked for this request so far. */
+    protected int $attemptcount = 0;
+
 
     /**
      * The response field carrying the generated content, if the action has one.
@@ -172,6 +185,13 @@ abstract class abstract_processor extends \core_ai\process_base {
     #[\Override]
     public function process(): response_base {
         $this->routed = false;
+        $this->attemptcount = 0;
+        // Opened before anything is decided, including core's rate limit: a request
+        // that was turned away at the door is still a request somebody made.
+        $this->resolver = $this->get_resolver();
+        $this->requestid = $this->get_recorder()->begin_request(
+            $this->resolver->get_evaluated_context($this->action),
+        );
         $response = parent::process();
         if ($this->routed || $response->get_success()) {
             return $response;
@@ -180,7 +200,8 @@ abstract class abstract_processor extends \core_ai\process_base {
         // Recorded before it is raised, as every other refusal here is, so that what a
         // site refused is in the reports whether or not the refusal was made final.
         $this->fail((int) ($response->get_errorcode() ?: 429), 'ratelimited', self::REASON_RATE_LIMITED);
-        $this->record_usage($this->get_resolver(), null, null, 0);
+        $this->record_usage($this->resolver, null, null, 0);
+        $this->end_request(request_state::DECLINED);
         $this->finalise([]);
 
         // Not made final, so core's own answer is returned exactly as before.
@@ -191,10 +212,13 @@ abstract class abstract_processor extends \core_ai\process_base {
     protected function query_ai_api(): array {
         $this->routed = true;
         if (!delegator::is_available()) {
-            return $this->fail(503, 'delegationunavailable', self::REASON_UNAVAILABLE);
+            $outcome = $this->fail(503, 'delegationunavailable', self::REASON_UNAVAILABLE);
+            $this->end_request(request_state::DECLINED);
+
+            return $outcome;
         }
 
-        $resolver = $this->get_resolver();
+        $resolver = $this->resolver ??= $this->get_resolver();
         $candidates = $resolver->get_candidates($this->action);
         $this->keysource = $resolver->get_keysource();
         if (!$candidates) {
@@ -218,6 +242,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                 $outcome = $this->fail(503, 'nodefaulttarget', self::REASON_NO_TARGET);
             }
             $this->record_usage($resolver, null, null, 0);
+            $this->end_request(request_state::DECLINED);
 
             return $this->finalise($outcome);
         }
@@ -228,7 +253,18 @@ abstract class abstract_processor extends \core_ai\process_base {
         $attempts = 0;
         foreach ($candidates as $candidate) {
             $attempts++;
+            $this->attemptcount = $attempts;
             $target = $candidate->target;
+            // On record before the call is made, so that a call this process does not
+            // survive is on record as started rather than as never having happened.
+            $attemptid = $this->get_recorder()->begin_attempt(
+                $this->requestid,
+                $attempts,
+                $target,
+                self::component_of($target),
+                $candidate->keysource,
+                $candidate->get_keyid(),
+            );
             try {
                 $response = $delegator->delegate($target, $this->action);
             } catch (\Throwable $e) {
@@ -240,10 +276,21 @@ abstract class abstract_processor extends \core_ai\process_base {
                 // it is what makes the fallback chain mean anything.
                 $threw = true;
                 $this->report_target_failure($target, $e);
+                // What it used, if anything, is unknown: not nothing.
+                $this->get_recorder()->end_attempt($attemptid, attempt_state::THREW, usage::unknown(), null, null);
                 continue;
             }
 
             if (!$response->get_success()) {
+                // A failure can still have been charged for, and some targets say so.
+                $failed = $response->get_response_data();
+                $this->get_recorder()->end_attempt(
+                    $attemptid,
+                    attempt_state::FAILED,
+                    $this->usage_of($failed, false),
+                    self::modelled($failed['model'] ?? null),
+                    (int) $response->get_errorcode() ?: null,
+                );
                 if ($candidate->is_byok() && $this->was_key_refused($response)) {
                     // The key reached the provider and the provider would not have it.
                     // Nobody else's key is going to change that, and the person who
@@ -255,6 +302,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                         self::REASON_KEY_REJECTED,
                     );
                     $this->record_usage($resolver, $candidate, null, $attempts);
+                    $this->end_request(request_state::FAILED);
 
                     return $this->finalise($outcome);
                 }
@@ -267,9 +315,28 @@ abstract class abstract_processor extends \core_ai\process_base {
             $data = $response->get_response_data();
             if ($this->has_content($data)) {
                 $this->record_usage($resolver, $candidate, $data, $attempts, true);
+                $this->get_recorder()->end_attempt(
+                    $attemptid,
+                    attempt_state::SUCCEEDED,
+                    $this->usage_of($data, true),
+                    self::modelled($data['model'] ?? null),
+                    null,
+                );
+                $this->end_request(request_state::SUCCEEDED, (int) $target->id);
 
                 return ['success' => true] + $data;
             }
+
+            // Nothing to show. Whether the token budget ran out or the model said
+            // nothing, this call was made and charged for, and that is what the attempt
+            // records; which of the two it was is the request's reason.
+            $this->get_recorder()->end_attempt(
+                $attemptid,
+                attempt_state::EMPTY,
+                $this->usage_of($data, false),
+                self::modelled($data['model'] ?? null),
+                null,
+            );
 
             // A success carrying no content must never reach the placement: the user
             // would be shown an empty result as though it had worked.
@@ -292,6 +359,7 @@ abstract class abstract_processor extends \core_ai\process_base {
             // The target still charged for the thinking it did, so the tokens are
             // recorded even though the user got nothing readable.
             $this->record_usage($resolver, $candidate, $data, $attempts);
+            $this->end_request(request_state::FAILED);
 
             return $this->finalise($outcome);
         }
@@ -309,8 +377,49 @@ abstract class abstract_processor extends \core_ai\process_base {
             $outcome = $this->fail($code, 'alltargetsfailed', $reason);
         }
         $this->record_usage($resolver, null, null, $attempts);
+        $this->end_request(request_state::FAILED);
 
         return $this->finalise($outcome);
+    }
+
+    /**
+     * Close the request row, once.
+     *
+     * @param string $state One of request_state::TERMINAL.
+     * @param int|null $answeredby The target whose answer was used, for a success.
+     */
+    protected function end_request(string $state, ?int $answeredby = null): void {
+        if ($this->requestid === null) {
+            return;
+        }
+        $resolver = $this->resolver ??= $this->get_resolver();
+        $succeeded = $state === request_state::SUCCEEDED;
+        $this->get_recorder()->end_request(
+            $this->requestid,
+            $state,
+            $succeeded ? null : $this->reason,
+            $succeeded ? null : $this->failurecode,
+            $answeredby,
+            $resolver->get_matched_rule(),
+            $resolver->get_keysource(),
+            $this->attemptcount,
+        );
+        $this->requestid = null;
+    }
+
+    /**
+     * What a target reported using, as the record keeps it.
+     *
+     * @param array $data The response data.
+     * @param bool $success Whether the response counted as an answer, for image counting.
+     * @return usage The usage.
+     */
+    protected function usage_of(array $data, bool $success): usage {
+        return new usage(
+            self::counted($data['prompttokens'] ?? null),
+            self::counted($data['completiontokens'] ?? null),
+            $this->get_image_count($success),
+        );
     }
 
     /**
@@ -374,6 +483,10 @@ abstract class abstract_processor extends \core_ai\process_base {
 
     /**
      * Hand what happened to the monitor.
+     *
+     * This is the old record, one row per request with the last attempt's figures
+     * on it. It stays until the reports, the budget conditions and the summary read
+     * the request and attempt tables instead, and is then removed with its table.
      *
      * Failures and refusals are recorded as well as successes. How often the router
      * turns requests down is a number a site owner needs, and it has to be countable
@@ -475,12 +588,26 @@ abstract class abstract_processor extends \core_ai\process_base {
     /**
      * The monitor this processor reports to.
      *
+     * The old record, one row per request in local_airouter_log, written alongside
+     * the new one until the reports read the new tables. It goes with the table.
+     *
      * @return usage_logger The logger.
      */
     protected function get_logger(): usage_logger {
         global $DB;
 
         return new usage_logger($DB);
+    }
+
+    /**
+     * The record this processor writes as it goes.
+     *
+     * @return usage_recorder The recorder.
+     */
+    protected function get_recorder(): usage_recorder {
+        global $DB;
+
+        return new usage_recorder($DB);
     }
 
     /**

@@ -82,9 +82,13 @@ abstract class abstract_processor extends \core_ai\process_base {
             'success' => true,
             'model' => (string) $this->provider->get_setting('model', 'mock-1'),
             'finishreason' => $finishreason,
-            'prompttokens' => (int) $this->provider->get_setting('prompttokens', 11),
-            'completiontokens' => (int) $this->provider->get_setting('completiontokens', 22),
         ];
+        // A target that does not say what it used, which some do not. Left out rather
+        // than set to null, because that is what a provider that omits them produces.
+        if ($this->provider->get_setting('reportusage', true)) {
+            $data['prompttokens'] = (int) $this->provider->get_setting('prompttokens', 11);
+            $data['completiontokens'] = (int) $this->provider->get_setting('completiontokens', 22);
+        }
         if ($key = $this->get_content_key()) {
             $data[$key] = $content;
         }
