@@ -55,6 +55,12 @@ class managedboundary extends check {
 
     #[\Override]
     public function get_result(): result {
+        if (!managed_policy::is_switched_on()) {
+            // Nothing is being routed, so nothing can be failing to be routed. The
+            // actions are still on the list, waiting for the switch to go back on.
+            return new result(result::NA, get_string('check:managedboundary:off', 'local_airouter'));
+        }
+
         $managed = managed_policy::managed_actions();
         if ($managed === []) {
             return new result(result::NA, get_string('check:managedboundary:none', 'local_airouter'));

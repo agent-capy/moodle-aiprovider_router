@@ -70,8 +70,12 @@ final class adapter_provider extends provider {
     private static function policy_settings(): array {
         $target = (int) get_config('local_airouter', 'defaulttarget');
 
+        // No operating mode. It offered "alongside other providers", which means
+        // letting core try the next one after a refusal -- and for an action placed
+        // under the router there is no next one. On this path the setting decided
+        // nothing, and two settings saying the same thing in different words is how
+        // a site ends up configured one way and behaving another.
         return [
-            'mode' => (string) (get_config('local_airouter', 'mode') ?: self::MODE_FULL),
             'nomatch' => (string) (get_config('local_airouter', 'nomatch') ?: ''),
             'defaulttarget' => $target > 0 ? $target : 0,
         ];

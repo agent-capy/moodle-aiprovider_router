@@ -67,13 +67,19 @@ The router's screens are at **Site administration > AI > AI Router**.
 
 | Page | What it is for |
 | --- | --- |
-| Routing policy | The operating mode, what happens when no rule matches, and the default delegation target |
+| Routing policy | Whether the router routes at all, what happens when no rule matches, and the default delegation target |
 | Actions the AI Router must answer | Which actions Moodle brings to the router wherever it sits in the provider order |
 | Routing rules | The rules, in the order they are considered |
 | AI provider order | The site order, and the only page that changes it |
 | AI Router rates | What each model costs, which is what budgets are measured against |
 | Keys people bring | Whether a provider may be used with somebody's own key |
 | Usage | What was asked for, by whom, and what it cost |
+
+**Route AI requests through the AI Router** is one switch above everything else. Off,
+the site behaves as it would without the plugin, and nothing is forgotten: the actions
+placed under the router, the rules and the keys are all still there, and switching it
+back on puts them in charge again. It is a way to find out what the plugin is doing
+for a site without uninstalling it.
 
 ⚠ A site that created an AI Router **provider instance** before the settings moved here
 still uses that instance, settings and all, and the Routing policy page says so. Such a

@@ -36,6 +36,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+use local_airouter\managed_policy;
 use local_airouter\provider;
 use local_airouter\target_resolver;
 
@@ -62,15 +63,11 @@ if ($ADMIN->fulltree) {
         ));
     }
 
-    $policy->add(new admin_setting_configselect(
-        'local_airouter/mode',
-        get_string('mode', 'local_airouter'),
-        get_string('mode_help', 'local_airouter'),
-        provider::MODE_FULL,
-        [
-            provider::MODE_FULL => get_string('mode:full', 'local_airouter'),
-            provider::MODE_COEXIST => get_string('mode:coexist', 'local_airouter'),
-        ],
+    $policy->add(new admin_setting_configcheckbox(
+        'local_airouter/' . managed_policy::SWITCH,
+        get_string('routing', 'local_airouter'),
+        get_string('routing_help', 'local_airouter'),
+        1,
     ));
 
     $policy->add(new admin_setting_configselect(

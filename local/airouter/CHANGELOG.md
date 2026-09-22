@@ -385,6 +385,20 @@ Both of these were introduced by the fixes above them.
   - An instance that is switched off still stops there. It was switched off on
     purpose, and there is nothing to ask.
 
+### One switch
+
+- **Route AI requests through the AI Router** turns the whole thing on and off. Off,
+  the site behaves as it would without the plugin: Moodle picks providers in the site
+  order and no rule, budget or brought key is consulted. Nothing is forgotten, so
+  switching it back on puts the same arrangement back in charge, and a site can find
+  out what the plugin is doing for it by turning it off for a minute.
+  - The operating mode is gone from the settings. It chose between stopping at a
+    refusal and letting Moodle try the next provider, and for an action placed under
+    the router there is no next provider, so the two settings were describing the
+    same site in different words.
+  - The status check about the managed boundary is quiet while the switch is off.
+    Nothing is being routed, so nothing can be failing to be routed.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

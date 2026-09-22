@@ -289,6 +289,53 @@ final class adapter_provider_test extends \advanced_testcase {
         ));
     }
 
+    public function test_the_switch_hands_the_site_back_to_moodle(): void {
+        // Off, the plugin has to be as absent as uninstalling it would make it,
+        // because that is what somebody turning it off is checking.
+        $this->add_target('Ahead', 'Answered by the first provider');
+        $target = $this->add_target('Routed', 'Answered through the router');
+        $this->add_rule((int) $target->id);
+        managed_policy::set_managed_actions([generate_text::class]);
+        set_config(managed_policy::SWITCH, 0, 'local_airouter');
+
+        $response = $this->ask();
+
+        $this->assertSame('Answered by the first provider', $response->get_response_data()['generatedcontent']);
+    }
+
+    public function test_the_switch_forgets_nothing(): void {
+        // Turning it off is not the same as taking the actions out, or a site would
+        // have to set the whole arrangement up again to try running without it.
+        $this->add_target('Ahead', 'Answered by the first provider');
+        $target = $this->add_target('Routed', 'Answered through the router');
+        $this->add_rule((int) $target->id);
+        managed_policy::set_managed_actions([generate_text::class]);
+
+        set_config(managed_policy::SWITCH, 0, 'local_airouter');
+        $this->assertSame([generate_text::class], managed_policy::managed_actions());
+
+        set_config(managed_policy::SWITCH, 1, 'local_airouter');
+        $this->assertSame(
+            'Answered through the router',
+            $this->ask()->get_response_data()['generatedcontent'],
+        );
+    }
+
+    public function test_the_boundary_check_is_quiet_while_the_switch_is_off(): void {
+        // With nothing being routed, nothing can be failing to be routed, and an
+        // error about it would be about a state the site has deliberately left.
+        managed_policy::set_managed_actions([generate_text::class]);
+        set_config(managed_policy::SWITCH, 0, 'local_airouter');
+
+        $result = (new check\managedboundary())->get_result();
+
+        $this->assertSame(\core\check\result::NA, $result->get_status());
+        $this->assertSame(
+            get_string('check:managedboundary:off', 'local_airouter'),
+            $result->get_summary(),
+        );
+    }
+
     public function test_the_adapter_is_built_fresh_for_each_request(): void {
         // The manager in the container is shared for the length of the request and
         // may be reused. Nothing about one request may survive into the next.

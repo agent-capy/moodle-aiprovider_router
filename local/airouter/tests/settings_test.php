@@ -108,18 +108,20 @@ final class settings_test extends \advanced_testcase {
         $names = self::setting_names($page);
 
         // Anything offered here and not read would be a setting that does nothing.
-        $this->assertContains('mode', $names);
+        $this->assertContains(managed_policy::SWITCH, $names);
         $this->assertContains('nomatch', $names);
+        // The operating mode is not offered: what it chose between was whether core
+        // tries the next provider after a refusal, and for an action placed under
+        // the router there is no next provider.
+        $this->assertNotContains('mode', $names);
     }
 
     public function test_the_router_reads_what_the_settings_page_writes(): void {
-        set_config('mode', provider::MODE_COEXIST, 'local_airouter');
         set_config('nomatch', provider::NOMATCH_DECLINE, 'local_airouter');
         set_config('defaulttarget', 42, 'local_airouter');
 
         $adapter = adapter_provider::create();
 
-        $this->assertSame(provider::MODE_COEXIST, $adapter->get_mode());
         $this->assertSame(provider::NOMATCH_DECLINE, $adapter->get_nomatch_behaviour());
         $this->assertSame(42, $adapter->get_default_target_id());
     }
@@ -127,9 +129,22 @@ final class settings_test extends \advanced_testcase {
     public function test_an_unconfigured_site_gets_the_same_defaults_as_before(): void {
         $adapter = adapter_provider::create();
 
-        $this->assertSame(provider::MODE_FULL, $adapter->get_mode());
         $this->assertSame(provider::NOMATCH_DELEGATE, $adapter->get_nomatch_behaviour());
         $this->assertNull($adapter->get_default_target_id());
+    }
+
+    public function test_a_site_that_has_never_seen_the_switch_keeps_routing(): void {
+        // The switch was added after the plugin. A site that had been routing must
+        // not stop because a setting it never saw is not there.
+        //
+        // Moodle writes a setting's default when the plugin is upgraded, so this is
+        // not a state an installed site stays in for long. It is the state between
+        // the code arriving and the upgrade running, and a request in that window
+        // has to behave.
+        unset_config(managed_policy::SWITCH, 'local_airouter');
+
+        $this->assertFalse(get_config('local_airouter', managed_policy::SWITCH));
+        $this->assertTrue(managed_policy::is_switched_on());
     }
 
     public function test_a_site_with_a_stored_instance_is_told_it_is_in_charge(): void {

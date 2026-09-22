@@ -38,6 +38,36 @@ class managed_policy {
     /** @var string Plugin level setting holding the managed action classes. */
     public const SETTING = 'managedactions';
 
+    /** @var string Plugin level setting saying whether the router routes at all. */
+    public const SWITCH = 'routing';
+
+    /**
+     * Whether this site routes AI requests through the router at all.
+     *
+     * One switch, above everything else the plugin decides. Turned off, the site
+     * behaves exactly as a site without this plugin: core picks providers in its own
+     * order and nothing here is consulted. The managed actions are left alone, so
+     * turning it back on restores the arrangement rather than asking for it again.
+     *
+     * It is read once per request and not registered into the container, so a request
+     * already being processed finishes under the policy it started with, and the next
+     * one picks up the change.
+     *
+     * Not the same question as is_active(), which asks whether any action has been
+     * placed under the router. A site can have the switch on and nothing managed,
+     * which routes nothing, or actions managed and the switch off, which also routes
+     * nothing but remembers what to do when it goes back on.
+     *
+     * @return bool True when the router decides where requests go.
+     */
+    public static function is_switched_on(): bool {
+        $value = get_config('local_airouter', self::SWITCH);
+
+        // Absent means on: the switch was added after the plugin, and a site that had
+        // been routing must not stop because a setting it never saw is not there.
+        return $value === false || (bool) $value;
+    }
+
     /**
      * The action classes this site has placed under the router.
      *

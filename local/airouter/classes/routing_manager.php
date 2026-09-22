@@ -51,7 +51,9 @@ class routing_manager extends \core_ai\manager {
      */
     #[\Override]
     public function process_action(action_base $action): response_base {
-        if (!managed_policy::is_managed($action)) {
+        // One switch above everything else. Off, this object does what core's own
+        // manager does, which is what a site turning the router off is asking for.
+        if (!managed_policy::is_switched_on() || !managed_policy::is_managed($action)) {
             return parent::process_action($action);
         }
 
