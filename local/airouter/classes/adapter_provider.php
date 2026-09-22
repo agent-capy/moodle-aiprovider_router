@@ -43,14 +43,17 @@ final class adapter_provider extends provider {
     /**
      * The router, built from the site's own settings.
      *
+     * @param string[]|null $managedactions A policy to build it from instead of the
+     *                                      saved one, for asking what a policy the
+     *                                      site is about to save would do.
      * @return self An instance for this request. It is not stored anywhere.
      */
-    public static function create(): self {
+    public static function create(?array $managedactions = null): self {
         return new self(
             enabled: true,
             name: get_string('adapter:name', 'local_airouter'),
             config: json_encode(self::policy_settings(), JSON_THROW_ON_ERROR),
-            actionconfig: json_encode(self::action_settings(), JSON_THROW_ON_ERROR),
+            actionconfig: json_encode(self::action_settings($managedactions), JSON_THROW_ON_ERROR),
             id: null,
         );
     }
@@ -82,10 +85,20 @@ final class adapter_provider extends provider {
      * shape core reads. Holding it twice would let the two disagree, and the one core
      * happened to read would win.
      *
+     * A policy can be passed in instead of the saved one. That is for the management
+     * screen, which has to say what will happen once the administrator's choice is
+     * saved, and would otherwise be told that every action being added for the first
+     * time is one the router cannot answer -- true only until the save it is asking
+     * about. Running requests never pass one: what they may do is what is saved.
+     *
+     * @param string[]|null $managedactions The policy to use, or null for the saved one.
      * @return array Action settings, keyed by action class name.
      */
-    private static function action_settings(): array {
-        $managed = managed_policy::managed_actions();
+    private static function action_settings(?array $managedactions = null): array {
+        $managed = array_map(
+            static fn(string $action): string => ltrim(trim($action), '\\'),
+            $managedactions ?? managed_policy::managed_actions(),
+        );
         $settings = [];
         foreach (self::get_action_list() as $action) {
             $settings[$action] = [

@@ -57,6 +57,15 @@ $answerable = function (string $actionclass) use ($manager): bool {
     return $manager instanceof routing_manager && $manager->find_router($actionclass) !== null;
 };
 
+// Whether it would reach the router once the choice below is saved, which is a
+// different question and the one to ask before saving. Without a stored instance the
+// router answers what the policy says, so an action being added for the first time is
+// not one it answers yet -- and saying so would mean warning about every correct
+// choice until the warning stopped being read.
+$wouldanswer = function (string $actionclass, array $policy) use ($manager): bool {
+    return $manager instanceof routing_manager && $manager->would_answer($actionclass, $policy);
+};
+
 // Taking one action back out, from the warning that says it is stuck. Reached from
 // here and from the status check, which is where an administrator notices.
 if ($unmanage !== '') {
@@ -126,7 +135,10 @@ if ($data = $form->get_data()) {
     // Choosing an action the router cannot answer stops that action working across the
     // site, which is the intended behaviour and an easy thing to do by accident. It is
     // worth one question before it takes effect rather than an error report afterwards.
-    $stuck = array_values(array_filter($chosen, static fn(string $action): bool => !$answerable($action)));
+    $stuck = array_values(array_filter(
+        $chosen,
+        static fn(string $action): bool => !$wouldanswer($action, $chosen),
+    ));
     if ($stuck !== []) {
         $names = implode(', ', array_map(static fn(string $action): string => $action::get_name(), $stuck));
         $classes = implode(',', $chosen);

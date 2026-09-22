@@ -345,6 +345,18 @@ Both of these were introduced by the fixes above them.
   next AI provider without saying when. For an action placed under the router there is
   no next provider, and the help said otherwise.
 
+### Asking the right question before saving
+
+- Placing an action under the router for the first time is no longer reported as
+  something that will stop the action working. The screen warns before an action goes
+  to a router that cannot answer it, and it asked whether the router answers it now -
+  which, on a site with no provider instance, is exactly what saving the choice
+  changes. Every correct choice produced the warning, which is how a warning stops
+  being read and becomes indistinguishable from the one that matters.
+  - The screen now asks what would happen once the choice is saved. Nothing is written
+    to decide it, and requests still go by what is saved, so a policy somebody is
+    still considering cannot let one through.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

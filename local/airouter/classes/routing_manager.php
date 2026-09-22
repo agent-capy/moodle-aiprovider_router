@@ -133,10 +133,11 @@ class routing_manager extends \core_ai\manager {
      * it can see.
      *
      * @param string $actionclass The action class being requested, already normalised.
+     * @param string[]|null $managedactions A policy to judge by instead of the saved one.
      * @return ai_provider|null The adapter, or null when it cannot answer.
      */
-    protected function adapter_for(string $actionclass): ?ai_provider {
-        $adapter = adapter_provider::create();
+    protected function adapter_for(string $actionclass, ?array $managedactions = null): ?ai_provider {
+        $adapter = adapter_provider::create($managedactions);
         if (!$adapter->is_provider_configured()) {
             return null;
         }
@@ -149,9 +150,37 @@ class routing_manager extends \core_ai\manager {
             return null;
         }
 
-        // The adapter says it answers exactly what the site has placed under the
-        // router, so this repeats nothing: it reads the same decision back in the
-        // shape core reads it, which is what the stored instance is asked as well.
         return ($adapter->actionconfig[$actionclass]['enabled'] ?? false) ? $adapter : null;
+    }
+
+    /**
+     * Whether the router would answer this action if the site saved this policy.
+     *
+     * The management screen warns before an action is placed under a router that
+     * cannot answer it, because that stops the action working everywhere. Asking
+     * find_router() gives the wrong answer there: without a stored instance, what the
+     * router answers is the saved policy, so an action being added for the first time
+     * is always one it does not answer yet -- which is precisely what the save being
+     * asked about would change. Every first choice looked like a mistake, and a
+     * warning shown for correct settings is one that stops being read.
+     *
+     * Nothing is written to decide this. Requests keep asking find_router(), which
+     * judges by what is saved, so the policy an administrator is still considering
+     * cannot let a request through.
+     *
+     * @param string $actionclass The action class the site is considering.
+     * @param string[] $managedactions The policy as it would be saved.
+     * @return bool True when a request for it would reach the router.
+     */
+    public function would_answer(string $actionclass, array $managedactions): bool {
+        $actionclass = ltrim($actionclass, '\\');
+
+        // A stored instance carries its own action settings, which this policy does
+        // not change, so the honest answer is the one a request would get today.
+        if ($this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]) !== []) {
+            return $this->find_router($actionclass) !== null;
+        }
+
+        return $this->adapter_for($actionclass, $managedactions) !== null;
     }
 }

@@ -207,6 +207,58 @@ final class adapter_provider_test extends \advanced_testcase {
         $this->assertNotNull($found?->id);
     }
 
+    public function test_choosing_an_action_for_the_first_time_is_not_called_stuck(): void {
+        // The management screen warns before placing an action under a router that
+        // cannot answer it, because that stops the action working across the site.
+        // Asking whether the router answers it *now* makes every first choice look
+        // like that, since it is the saving that puts it under the router.
+        $target = $this->add_target('Routed', 'Answered through the router');
+        $this->add_rule((int) $target->id);
+
+        /** @var routing_manager $manager */
+        $manager = $this->manager;
+
+        $this->assertTrue($manager->would_answer(generate_text::class, [generate_text::class]));
+
+        // And the answer has to be true, not merely reassuring.
+        managed_policy::set_managed_actions([generate_text::class]);
+        $this->assertTrue($this->ask()->get_success());
+    }
+
+    public function test_an_action_with_nowhere_to_go_is_still_called_stuck(): void {
+        // The warning has to keep working, or it becomes something to click through.
+        $this->add_target('Ahead', 'Answered by the first provider');
+
+        /** @var routing_manager $manager */
+        $manager = $this->manager;
+
+        $this->assertFalse($manager->would_answer(generate_text::class, [generate_text::class]));
+    }
+
+    public function test_a_stored_instance_answers_the_question_itself(): void {
+        // With an instance, what it carries is its own setting, not the policy being
+        // saved, and the screen must report what will actually happen.
+        $target = $this->add_target('Routed', 'Answered through the router');
+        $this->add_rule((int) $target->id);
+        $this->manager->create_provider_instance(
+            classname: provider::INSTANCE_CLASS,
+            name: 'Router',
+            enabled: true,
+            config: [],
+            actionconfig: [generate_text::class => ['enabled' => true]],
+        );
+        provider::get_instance_ids(true);
+
+        /** @var routing_manager $manager */
+        $manager = $this->manager;
+
+        $this->assertTrue($manager->would_answer(generate_text::class, [generate_text::class]));
+        $this->assertFalse($manager->would_answer(
+            \core_ai\aiactions\summarise_text::class,
+            [\core_ai\aiactions\summarise_text::class],
+        ));
+    }
+
     public function test_the_adapter_is_built_fresh_for_each_request(): void {
         // The manager in the container is shared for the length of the request and
         // may be reused. Nothing about one request may survive into the next.
