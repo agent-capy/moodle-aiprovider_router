@@ -100,14 +100,16 @@ class routing_manager extends \core_ai\manager {
      * actually happens cannot drift apart.
      *
      * @param string $actionclass The action class being requested.
+     * @param request_policy|null $policy The settings this request began with, when
+     *                                    the answer is going to carry it out.
      * @return ai_provider|null The instance, or null if none can answer.
      */
-    public function find_router(string $actionclass): ?ai_provider {
+    public function find_router(string $actionclass, ?request_policy $policy = null): ?ai_provider {
         $actionclass = ltrim($actionclass, '\\');
         $instances = $this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]);
 
         if ($instances === []) {
-            return $this->adapter_for($actionclass);
+            return $this->adapter_for($actionclass, null, $policy);
         }
 
         foreach ($instances as $instance) {
@@ -148,7 +150,10 @@ class routing_manager extends \core_ai\manager {
      */
     protected function router_for_dispatch(string $actionclass, ?request_policy $policy = null): ?ai_provider {
         $actionclass = ltrim($actionclass, '\\');
-        $found = $this->find_router($actionclass);
+        // The settings go with the request all the way to the object that carries it
+        // out. Finding the router one way and building it another is how a request
+        // came to be judged by this morning's settings and this minute's switch.
+        $found = $this->find_router($actionclass, $policy);
         if ($found !== null) {
             return $found;
         }
@@ -181,10 +186,15 @@ class routing_manager extends \core_ai\manager {
      *
      * @param string $actionclass The action class being requested, already normalised.
      * @param string[]|null $managedactions A policy to judge by instead of the saved one.
+     * @param request_policy|null $policy The settings this request began with.
      * @return ai_provider|null The adapter, or null when it cannot answer.
      */
-    protected function adapter_for(string $actionclass, ?array $managedactions = null): ?ai_provider {
-        $adapter = adapter_provider::create($managedactions);
+    protected function adapter_for(
+        string $actionclass,
+        ?array $managedactions = null,
+        ?request_policy $policy = null,
+    ): ?ai_provider {
+        $adapter = adapter_provider::create($managedactions, $policy);
         if (!$adapter->is_provider_configured()) {
             return null;
         }

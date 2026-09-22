@@ -410,6 +410,19 @@ Both of these were introduced by the fixes above them.
   - The same read fixes the settings for that request, so a change saved while one is
     being processed applies to the next request rather than to half of this one.
 
+### Settings that reach the request
+
+- A change to the default delegation target, or to what happens when no rule matches,
+  takes effect on the next request. The settings were being read when a request began
+  and then not used: the object that carried the request out was built from the cached
+  copy instead, so an administrator could change where requests go, be told it was
+  saved, and watch them keep going to the old place. A request that was already under
+  way could also be caught by a change made while it ran.
+- A setting fixed in `config.php` is obeyed. Moodle lets a site put a setting beyond
+  the reach of the settings screen, and the router was reading only the database, so
+  such a site was shown one policy and routed by another - including being told the
+  router was on while requests went to AI providers in the site order.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

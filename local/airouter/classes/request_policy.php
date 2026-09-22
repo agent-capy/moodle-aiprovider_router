@@ -58,12 +58,30 @@ final class request_policy {
      * @return self The settings, fixed for this request.
      */
     public static function start(\moodle_database $db): self {
-        return new self($db->get_records_menu(
+        global $CFG;
+
+        $values = $db->get_records_menu(
             'config_plugins',
             ['plugin' => 'local_airouter'],
             '',
             'name, value',
-        ));
+        );
+
+        // A site can put a setting beyond the reach of the settings screen by fixing
+        // it in config.php, and then that is what the site means. Reading only the
+        // table would leave the screen agreeing with the administrator while requests
+        // went on being routed by something else. The rule is core's own, from
+        // get_config(): a value that is null, an array or an object counts as the
+        // setting not being there at all, and anything else replaces it as a string.
+        foreach ($CFG->forced_plugin_settings['local_airouter'] ?? [] as $name => $value) {
+            if ($value === null || is_array($value) || is_object($value)) {
+                unset($values[$name]);
+                continue;
+            }
+            $values[$name] = (string) $value;
+        }
+
+        return new self($values);
     }
 
     /**
