@@ -446,10 +446,24 @@ class summariser {
      * @return int Midnight of that day.
      */
     public static function days_before(int $time, int $days): int {
-        $timezone = new \DateTimeZone(\core_date::get_server_timezone());
-        $day = (new \DateTimeImmutable('@' . $time))->setTimezone($timezone)->setTime(0, 0);
+        return self::add_days(self::day_of($time), -$days);
+    }
 
-        return $day->modify('-' . $days . ' days')->getTimestamp();
+    /**
+     * A time moved by so many calendar days, in the server timezone.
+     *
+     * Midnight stays midnight across a change of the clocks, which a multiple of
+     * 86400 seconds does not manage.
+     *
+     * @param int $time The time.
+     * @param int $days How many days, negative for earlier.
+     * @return int The moved time.
+     */
+    public static function add_days(int $time, int $days): int {
+        $timezone = new \DateTimeZone(\core_date::get_server_timezone());
+        $moved = (new \DateTimeImmutable('@' . $time))->setTimezone($timezone);
+
+        return $moved->modify(($days < 0 ? '-' : '+') . abs($days) . ' days')->getTimestamp();
     }
 
     /**

@@ -37,7 +37,8 @@ use local_airouter\price_book;
 use local_airouter\rule;
 use local_airouter\usage_aggregator;
 use local_airouter\usage_formatter;
-use local_airouter\usage_report;
+use local_airouter\record\reader;
+use local_airouter\record\summariser;
 
 $days = optional_param('days', 30, PARAM_INT);
 $keysource = optional_param('keysource', rule::KEYSOURCE_SITE, PARAM_ALPHA);
@@ -57,7 +58,7 @@ if (!in_array($days, $periods, true)) {
 // What the site spent is the question this screen exists to answer, so it is the one
 // asked first. Money somebody paid out of their own pocket is real and is recorded, but
 // adding it in would produce a figure that is nobody's expenditure.
-$keysources = array_merge(rule::get_keysources(), [usage_report::KEYSOURCE_ALL]);
+$keysources = array_merge(rule::get_keysources(), [reader::KEYSOURCE_ALL]);
 if (!in_array($keysource, $keysources, true)) {
     $keysource = rule::KEYSOURCE_SITE;
 }
@@ -92,22 +93,25 @@ $form->set_data([
     'budgetnotifyshare' => budget_notifier::get_share(),
 ]);
 
-$report = new usage_report($DB, $aggregator);
+// Read from the request and attempt records: the summary for what has been counted,
+// the detail for what has not, each fact once. The budget bars on the course page
+// still read the older record until the ledger is moved across too.
+$report = new reader($DB);
 $now = time();
-$from = $aggregator->add_days($aggregator->day_of($now), -($days - 1));
+$from = summariser::add_days(summariser::day_of($now), -($days - 1));
 // One answer for the whole screen: the headline, the tables, the chart and the
 // exported file must not disagree about what the money is counted in.
 $currency = $report->currency_for($from, $now, null, $keysource);
 
 $series = $report->get_series($from, $now, null, $keysource);
-$totals = usage_report::total($series);
-$bytarget = $report->get_breakdown(usage_report::BY_TARGET, $from, $now, null, $keysource);
-$byaction = $report->get_breakdown(usage_report::BY_ACTION, $from, $now, null, $keysource);
-$bymodel = $report->get_breakdown(usage_report::BY_MODEL, $from, $now, null, $keysource);
+$totals = reader::total($series);
+$bytarget = $report->get_breakdown(reader::BY_TARGET, $from, $now, null, $keysource);
+$byaction = $report->get_breakdown(reader::BY_ACTION, $from, $now, null, $keysource);
+$bymodel = $report->get_breakdown(reader::BY_MODEL, $from, $now, null, $keysource);
 $reasons = $report->get_failure_reasons($from, $now, null, $keysource);
 // What the chosen payer leaves out, so that a filtered screen is never mistaken for the
 // whole of what the site did.
-$bykeysource = $report->get_breakdown(usage_report::BY_KEYSOURCE, $from, $now);
+$bykeysource = $report->get_breakdown(reader::BY_KEYSOURCE, $from, $now);
 
 echo $OUTPUT->header();
 echo admin_page::back_button($url);

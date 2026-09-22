@@ -518,9 +518,15 @@ The **Record gaps** status check says when the record has holes: writes that fai
 attempts given up as lost, and requests or attempts open for longer than any call
 takes. A site comparing a provider's bill with these reports should read it first.
 
-The screens and the budget conditions on this page still read the older, one row per
-request record while they are moved across to these tables; until then the two are
-written side by side. The older record and its table go when the last reader has moved.
+The site's usage dashboard reads these tables: the summary for what has been counted
+and the detail for what has not, so that every finished request and call is counted
+once, whichever day it ended on and whether or not the nightly task has reached it. A
+request or call still in flight is not counted until it ends.
+
+The course page's budget bars, the report by person and the budget conditions still
+read the older, one row per request record while they are moved across; until then
+the two records are written side by side. The older record and its table go when the
+last reader has moved.
 
 **Requests and provider calls are counted separately.** A request that fell through to a
 second provider is one request and two calls, and both were recorded: the call that
