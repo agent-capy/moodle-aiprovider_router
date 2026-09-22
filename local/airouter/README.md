@@ -227,6 +227,12 @@ skipped, which conditions were not satisfied, or not reached because something a
 matched first. Nothing is sent to any provider and nothing is recorded; the rules are
 evaluated by exactly the code a real request uses.
 
+The placement is the one thing the form has to supply rather than observe. A real
+request is identified by what called it, and nothing calls this page except you, so a
+rule limited to a placement would never match here unless the choice on the form were
+carried all the way through to deciding where the request goes. It is: what the screen
+says a rule did and what it says the request would do are the same judgement, made once.
+
 It reports the prompt's length in characters, which is what prompt length conditions
 compare against, and an estimated token count beneath it. Tokens are the unit cost and
 context windows are thought about in, so the estimate is there to help you settle on a

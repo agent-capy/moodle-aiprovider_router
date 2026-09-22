@@ -118,6 +118,33 @@ Feature: Routing requests by rule
     And I should see "21 characters. This is what prompt length conditions compare against."
     And I should see "An estimate, shown as a guide when choosing a threshold"
 
+  @javascript
+  Scenario: The rule tester judges the placement chosen on the form
+    Given I visit "/local/airouter/rule.php"
+    And I set the following fields to these values:
+      | Rule name   | Editor only |
+      | Delegate to | Test OpenAI |
+    And I set the field "Placement" to "Text editor placement"
+    And I click on "Save changes" "button"
+    When I visit "/local/airouter/ruletest.php"
+    And I set the field "Prompt" to "Please summarise this"
+    And I set the field "Placement" to "Text editor placement"
+    And I click on "Test" "button"
+    Then I should see "The rule \"Editor only\" would claim this request, and it would go to Test OpenAI."
+
+  @javascript
+  Scenario: The rule tester leaves a placement rule unmatched when no placement is chosen
+    Given I visit "/local/airouter/rule.php"
+    And I set the following fields to these values:
+      | Rule name   | Editor only |
+      | Delegate to | Test OpenAI |
+    And I set the field "Placement" to "Text editor placement"
+    And I click on "Save changes" "button"
+    When I visit "/local/airouter/ruletest.php"
+    And I set the field "Prompt" to "Please summarise this"
+    And I click on "Test" "button"
+    Then I should see "No rule would claim this request."
+
   Scenario: The rule tester says when nothing would claim a request
     Given I visit "/local/airouter/ruletest.php"
     When I set the field "Prompt" to "Please summarise this"

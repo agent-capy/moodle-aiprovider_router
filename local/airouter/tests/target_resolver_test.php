@@ -627,4 +627,31 @@ final class target_resolver_test extends \advanced_testcase {
 
         $this->assertFalse($router->is_provider_configured());
     }
+
+    public function test_a_caller_that_knows_the_placement_is_believed(): void {
+        $resolver = $this->resolver([$this->instance(3), $this->instance(7)]);
+        $this->add('Editor only', 3, ['placement' => ['placements' => ['aiplacement_editor']]]);
+        $action = $this->action();
+
+        // Nothing in a test's call stack is a placement, which is the same position the
+        // rule tester is in: it is a page, not an editor. The rule cannot match.
+        $this->assertSame([7], $this->candidates($resolver, $action));
+
+        // A caller that already knows which placement is being asked about says so, and
+        // the rule that is limited to it claims the request. Working the placement out
+        // here as well would answer about this call stack instead, and a screen built on
+        // it would report the rule as matched while naming the default target.
+        $candidates = $resolver->get_candidates(
+            $action,
+            new evaluation_context($action, placement: 'aiplacement_editor'),
+        );
+
+        // The rule's target first, with the default still behind it the way it is for
+        // any matched rule. What the rule tester reports is the first of these.
+        $this->assertSame(
+            [3, 7],
+            array_map(static fn(candidate $candidate): int => (int) $candidate->target->id, $candidates),
+        );
+        $this->assertSame('Editor only', $resolver->get_matched_rule()?->get('name'));
+    }
 }

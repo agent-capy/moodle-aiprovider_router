@@ -111,10 +111,18 @@ class target_resolver {
     /**
      * Candidate targets for an action, in the order they should be tried.
      *
+     * A caller that already knows what the rules should be told hands that in. The rule
+     * tester is the case: the placement it tries out is chosen on a form, and there is
+     * nothing in its call stack to find it in. Working one out here as well would
+     * answer a different question from the one the screen asked, and the screen would
+     * report a rule as matched and then send the request somewhere else.
+     *
      * @param action_base $action The action to be delegated.
+     * @param evaluation_context|null $context What the rules should be told about this
+     *                                         request, when the caller already knows.
      * @return candidate[] Usable targets. Empty when nothing can handle the action.
      */
-    public function get_candidates(action_base $action): array {
+    public function get_candidates(action_base $action, ?evaluation_context $context = null): array {
         $this->matchedrule = null;
         $this->declined = false;
         $this->keysource = rule::KEYSOURCE_SITE;
@@ -124,7 +132,7 @@ class target_resolver {
         $this->byokdisallowed = null;
         $instances = $this->get_instances_by_id();
 
-        $this->evaluated = $this->get_evaluation_context($action);
+        $this->evaluated = $context ?? $this->get_evaluation_context($action);
         foreach ($this->get_evaluator()->matches($this->evaluated) as $rule) {
             $target = $instances[(int) $rule->get('targetid')] ?? null;
             if ($target === null || !$this->is_usable($target, $action, $rule->is_byok())) {

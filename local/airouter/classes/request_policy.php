@@ -85,6 +85,32 @@ final class request_policy {
     }
 
     /**
+     * Read the settings the way a screen or a report should.
+     *
+     * The same settings, seen through core's own cache rather than the table. A screen
+     * is drawn by a process that started moments ago, so the cache holds what was saved
+     * and the reason start() goes to the table does not apply. What does apply is the
+     * rest of this object: a setting fixed in config.php has to mean the same thing to
+     * the administrator reading a status check as it does to the request being routed.
+     *
+     * Asking get_config() for the whole plugin rather than for one setting is what
+     * makes that true. Core applies the config.php overlay differently in the two
+     * cases: given a name it hands back the forced value cast to a string, so a null
+     * arrives as an empty string and reads as a setting that has been turned off; given
+     * only the plugin it drops null the way this class does, and the setting counts as
+     * never having been made. The difference is invisible until a site forces a setting
+     * whose absence means something, and then the screen and the request disagree.
+     *
+     * @return self The settings as they stand.
+     */
+    public static function current(): self {
+        return new self(array_map(
+            static fn($value): string => (string) $value,
+            (array) get_config('local_airouter'),
+        ));
+    }
+
+    /**
      * One setting.
      *
      * @param string $name The setting name.

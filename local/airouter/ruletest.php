@@ -125,7 +125,14 @@ if ($data) {
     // and this screen is about which rule would claim it.
     $resolver = target_resolver::for_site();
     $router = $resolver->get_router();
-    $candidates = $resolver->get_candidates($action);
+
+    // Judged on the same evaluation context the trace above was built from. Asking the
+    // resolver to work one out instead would look for the placement in this page's call
+    // stack, find nothing, and decide the rules as though the placement were unknown: a
+    // rule limited to the editor would be listed as matched and then passed over, and
+    // the screen would name the default target while saying the rule had claimed the
+    // request. What is tried out on this form has to be what is judged.
+    $candidates = $resolver->get_candidates($action, $evaluationcontext);
     $chosentarget = $candidates[0]->target ?? null;
     // A rule can be matched and still carry the request nowhere. The clearest case is
     // a key that is registered and cannot be decrypted: the resolver remembers the

@@ -239,4 +239,82 @@ final class effective_policy_test extends \advanced_testcase {
             unset($CFG->forced_plugin_settings['local_airouter']);
         }
     }
+
+    /**
+     * Values a site might fix the switch to, and what each one means.
+     *
+     * @return array<string, array{0: mixed, 1: bool}> The forced value and the answer.
+     */
+    public static function forced_switches(): array {
+        return [
+            // Core drops these when it is asked for a whole plugin, so the setting
+            // counts as never having been made, and an absent switch means on.
+            'null' => [null, true],
+            'an array' => [[], true],
+            // Everything else is a value, and reads as what it says.
+            'zero' => [0, false],
+            'false' => [false, false],
+            'one' => [1, true],
+            'the string one' => ['1', true],
+        ];
+    }
+
+    /**
+     * The screen and the request must read a fixed switch the same way.
+     *
+     * Core applies config.php differently depending on how it is asked. Given a setting
+     * name it returns the forced value cast to a string, so a null arrives as an empty
+     * string and reads as off; given only the plugin it drops the null, and the setting
+     * counts as absent, which this plugin reads as on. One of those was on each side of
+     * the same question, so a site could be told routing was off while every request
+     * went on being routed.
+     *
+     * @param mixed $forced What config.php fixes the switch to.
+     * @param bool $expected Whether the site routes.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('forced_switches')]
+    public function test_a_fixed_switch_means_the_same_to_the_screen_and_the_request(
+        mixed $forced,
+        bool $expected,
+    ): void {
+        global $CFG, $DB;
+
+        set_config(managed_policy::SWITCH, 1, 'local_airouter');
+        $CFG->forced_plugin_settings['local_airouter'][managed_policy::SWITCH] = $forced;
+
+        try {
+            $this->assertSame($expected, managed_policy::is_switched_on());
+            $this->assertSame(
+                managed_policy::is_switched_on(),
+                request_policy::start($DB)->is_switched_on(),
+                'The switch a status check reports must be the switch a request is routed by.',
+            );
+        } finally {
+            unset($CFG->forced_plugin_settings['local_airouter']);
+        }
+    }
+
+    /**
+     * The same, for the list of actions the router answers.
+     *
+     * Nothing forced makes these two disagree today, because an empty list and no list
+     * both mean nothing is managed. It is here because the setting is read on both
+     * sides, and that is the whole of what went wrong with the switch.
+     */
+    public function test_a_fixed_managed_list_means_the_same_to_the_screen_and_the_request(): void {
+        global $CFG, $DB;
+
+        managed_policy::set_managed_actions([generate_text::class]);
+        $CFG->forced_plugin_settings['local_airouter'][managed_policy::SETTING] = null;
+
+        try {
+            $this->assertSame(
+                managed_policy::managed_actions(),
+                request_policy::start($DB)->managed_actions(),
+                'The actions a screen lists as managed must be the actions a request is held to.',
+            );
+        } finally {
+            unset($CFG->forced_plugin_settings['local_airouter']);
+        }
+    }
 }

@@ -61,11 +61,13 @@ class managed_policy {
      * @return bool True when the router decides where requests go.
      */
     public static function is_switched_on(): bool {
-        $value = get_config('local_airouter', self::SWITCH);
-
-        // Absent means on: the switch was added after the plugin, and a site that had
-        // been routing must not stop because a setting it never saw is not there.
-        return $value === false || (bool) $value;
+        // Read through the same object the dispatch path reads, rather than through
+        // get_config() with a name. Absent means on here, so the two ways core applies
+        // a setting fixed in config.php do not agree: asked for one setting it returns
+        // a forced null as an empty string, which reads as off, and asked for the whole
+        // plugin it drops it, which reads as absent and therefore on. This screen and
+        // that request must not be able to say opposite things about one site.
+        return request_policy::current()->is_switched_on();
     }
 
     /**
@@ -86,19 +88,19 @@ class managed_policy {
      * @return string[] Fully qualified action class names, without a leading separator.
      */
     public static function managed_actions(): array {
-        $stored = get_config('local_airouter', self::SETTING);
-        if ($stored === false || trim((string) $stored) === '') {
-            return [];
-        }
-
-        return self::parse((string) $stored);
+        // Through the same reader as the switch, for the same reason. Nothing forced
+        // makes these two disagree today, because an empty list and no list mean the
+        // same thing here, but the setting is read in both places and only one of them
+        // deciding what config.php means is how the switch came to differ.
+        return request_policy::current()->managed_actions();
     }
 
     /**
      * Turn a stored policy into action class names.
      *
-     * Shared with request_policy, which reads the same setting a different way, so
-     * that the two cannot come to different conclusions about the same text.
+     * Kept here, next to what the setting means, while request_policy owns reading it.
+     * Both sides go through this, so they cannot come to different conclusions about
+     * the same text.
      *
      * @param string $stored The setting value.
      * @return string[] Fully qualified action class names, without a leading separator.
