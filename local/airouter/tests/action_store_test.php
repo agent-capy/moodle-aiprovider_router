@@ -30,6 +30,8 @@ require_once(__DIR__ . '/fixtures/mock/process_generate_text.php');
 require_once(__DIR__ . '/fixtures/mock/process_summarise_text.php');
 require_once(__DIR__ . '/fixtures/mock/process_explain_text.php');
 require_once(__DIR__ . '/fixtures/mock/process_generate_image.php');
+require_once(__DIR__ . '/fixtures/mock/process_describe_image.php');
+require_once(__DIR__ . '/fixtures/mock/process_transcript_audio.php');
 
 /**
  * Every action, through the router, all the way into the database.
@@ -59,6 +61,9 @@ final class action_store_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
+        // The actions that work on a file need somewhere to put one, and a draft
+        // area belongs to whoever is asking.
+        $this->setAdminUser();
         provider::get_instance_ids(true);
         $this->manager = \core\di::get(manager::class);
     }
@@ -75,6 +80,35 @@ final class action_store_test extends \advanced_testcase {
             'explain text' => [explain_text::class, 'ai_action_explain_text'],
             'generate image' => [generate_image::class, 'ai_action_generate_image'],
         ];
+    }
+
+    /**
+     * The actions another plugin defines, where that plugin is installed.
+     *
+     * @return array<string, array{class-string, string}> Class and its table, by name.
+     */
+    public static function extra_actions(): array {
+        return [
+            'describe image' => ['local_aimedia\\aiactions\\describe_image', 'local_aimedia_describe'],
+            'transcribe audio' => ['local_aimedia\\aiactions\\transcript_audio', 'local_aimedia_transcript'],
+        ];
+    }
+
+    /**
+     * A file for an action that works on one.
+     *
+     * @param string $filename What it is called.
+     * @return \stored_file The file.
+     */
+    protected function file(string $filename): \stored_file {
+        return get_file_storage()->create_file_from_string([
+            'contextid' => \context_user::instance((int) get_admin()->id)->id,
+            'component' => 'user',
+            'filearea' => 'draft',
+            'itemid' => file_get_unused_draft_itemid(),
+            'filepath' => '/',
+            'filename' => $filename,
+        ], 'some bytes');
     }
 
     /**
@@ -96,6 +130,21 @@ final class action_store_test extends \advanced_testcase {
                 aspectratio: 'square',
                 numimages: 1,
                 style: 'natural',
+            );
+        }
+        if (str_ends_with($classname, 'describe_image')) {
+            return new $classname(
+                contextid: $common['contextid'],
+                userid: $common['userid'],
+                file: $this->file('picture.png'),
+                prompttext: 'What is this?',
+            );
+        }
+        if (str_ends_with($classname, 'transcript_audio')) {
+            return new $classname(
+                contextid: $common['contextid'],
+                userid: $common['userid'],
+                file: $this->file('recording.ogg'),
             );
         }
 
@@ -143,6 +192,46 @@ final class action_store_test extends \advanced_testcase {
         $register = $DB->get_records('ai_action_register');
         $this->assertCount(1, $register);
         $this->assertSame('local_airouter', reset($register)->provider);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('extra_actions')]
+    public function test_an_action_from_another_plugin_is_stored(string $classname, string $table): void {
+        global $DB;
+
+        // The release that broke these broke them here: the response could not even
+        // be built, so nothing reached the table. Running this wherever the suite
+        // runs is what puts that question in front of every supported release.
+        if (!class_exists($classname)) {
+            $this->markTestSkipped('local_aimedia is not installed');
+        }
+
+        $this->routing_site($classname, \aiprovider_mock\provider::SUCCESS);
+
+        $response = $this->manager->process_action($this->build($classname));
+
+        $this->assertTrue($response->get_success(), $classname);
+        $this->assertSame(1, $DB->count_records($table), $table);
+
+        $register = $DB->get_records('ai_action_register');
+        $this->assertCount(1, $register);
+        $this->assertSame('local_airouter', reset($register)->provider);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('extra_actions')]
+    public function test_an_action_from_another_plugin_stores_its_failures(string $classname, string $table): void {
+        global $DB;
+
+        if (!class_exists($classname)) {
+            $this->markTestSkipped('local_aimedia is not installed');
+        }
+
+        $this->routing_site($classname, \aiprovider_mock\provider::FAILURE);
+
+        $response = $this->manager->process_action($this->build($classname));
+
+        $this->assertFalse($response->get_success(), $classname);
+        $this->assertSame(1, $DB->count_records($table), $table);
+        $this->assertSame(1, $DB->count_records('ai_action_register'));
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('core_actions')]

@@ -83,6 +83,17 @@ jobs:
           mkdir -p extra
           cp -r plugin/ai/provider/router extra/router
 
+      # The router has to answer actions it did not define, and the only way to find
+      # out whether it can store their results on a given release is to have one
+      # installed. local_aimedia defines two, and a release once changed what a failed
+      # response must carry without anything here noticing, because these tests ran
+      # against one Moodle and that plugin was not in this matrix at all.
+      - name: Stage the plugin that defines the extra actions
+        run: |
+          git clone --depth 1 https://github.com/agent-capy/moodle-aimedia.git aimedia
+          cp -r aimedia/local/aimedia extra/aimedia
+          cp -r aimedia/lib/editor/tiny/plugins/aimedia extra/tinyaimedia
+
       - name: Install Moodle
         run: |
           moodle-plugin-ci install \

@@ -57,7 +57,7 @@ class provider extends \core_ai\provider {
 
     #[\Override]
     public static function get_action_list(): array {
-        return [
+        $actions = [
             \core_ai\aiactions\generate_text::class,
             \core_ai\aiactions\generate_image::class,
             \core_ai\aiactions\summarise_text::class,
@@ -66,6 +66,18 @@ class provider extends \core_ai\provider {
             // managed boundary has somewhere to escape to.
             \local_airouter\fixture_dropped_action::class,
         ];
+
+        // The actions another plugin defines, where it is installed. The router has
+        // to be able to answer and store these, and only a site that has them can
+        // show whether it can.
+        foreach (['describe_image', 'transcript_audio'] as $extra) {
+            $class = 'local_aimedia\\aiactions\\' . $extra;
+            if (class_exists($class)) {
+                $actions[] = $class;
+            }
+        }
+
+        return $actions;
     }
 
     #[\Override]
