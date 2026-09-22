@@ -95,6 +95,20 @@ final class action_store_test extends \advanced_testcase {
     }
 
     /**
+     * Whether this run is one that was set up to include the extra actions.
+     *
+     * A skipped test and a passing one look the same in a summary, so a continuous
+     * integration run whose extra plugin failed to install would go green while
+     * testing nothing of what it was added for. The workflow says it installed them;
+     * this turns that into something the suite can insist on.
+     *
+     * @return bool True when the actions must be present.
+     */
+    protected function extras_are_expected(): bool {
+        return (bool) getenv('MOODLE_AIROUTER_EXTRA_ACTIONS');
+    }
+
+    /**
      * A file for an action that works on one.
      *
      * @param string $filename What it is called.
@@ -202,6 +216,10 @@ final class action_store_test extends \advanced_testcase {
         // be built, so nothing reached the table. Running this wherever the suite
         // runs is what puts that question in front of every supported release.
         if (!class_exists($classname)) {
+            $this->assertFalse(
+                $this->extras_are_expected(),
+                'This run was set up with local_aimedia and it is not there.',
+            );
             $this->markTestSkipped('local_aimedia is not installed');
         }
 
@@ -222,6 +240,10 @@ final class action_store_test extends \advanced_testcase {
         global $DB;
 
         if (!class_exists($classname)) {
+            $this->assertFalse(
+                $this->extras_are_expected(),
+                'This run was set up with local_aimedia and it is not there.',
+            );
             $this->markTestSkipped('local_aimedia is not installed');
         }
 

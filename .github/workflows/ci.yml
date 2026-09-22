@@ -130,7 +130,12 @@ jobs:
       # nothing to work that out from. The connector has no assets to lint.
       - run: ./plugin/.github/run-step.sh grunt moodle-plugin-ci grunt --max-lint-warnings 0
         if: ${{ always() }}
+      # Saying so here is what lets the tests refuse to skip quietly: a run whose
+      # extra plugin failed to install would otherwise go green having tested none
+      # of what it was added for.
       - run: ./plugin/.github/run-step.sh phpunit moodle-plugin-ci phpunit --fail-on-warning ./plugin/local/airouter
+        env:
+          MOODLE_AIROUTER_EXTRA_ACTIONS: 1
         if: ${{ always() }}
       - run: ./plugin/.github/run-step.sh behat moodle-plugin-ci behat --profile chrome ./plugin/local/airouter
         if: ${{ always() }}
