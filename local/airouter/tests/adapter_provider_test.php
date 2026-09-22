@@ -24,6 +24,7 @@ defined('MOODLE_INTERNAL') || die();
 require_once(__DIR__ . '/fixtures/mock/provider.php');
 require_once(__DIR__ . '/fixtures/mock/abstract_processor.php');
 require_once(__DIR__ . '/fixtures/mock/process_generate_text.php');
+require_once(__DIR__ . '/fixtures/fixture_text_provider.php');
 
 /**
  * Routing a site that has no row in ai_providers for the router.
@@ -387,6 +388,126 @@ final class adapter_provider_test extends \advanced_testcase {
         $this->assertSame(
             'Answered by the first provider',
             $this->ask()->get_response_data()['generatedcontent'],
+        );
+    }
+
+    public function test_the_rules_apply_to_an_action_not_placed_under_the_router(): void {
+        // What the rule tester has to answer. The screen asked for a stored instance,
+        // found none on a site that routes without one, and reported every matched
+        // rule as unable to carry the request. Asking find_router() instead was no
+        // better: that also wants the action to be one the site has placed under the
+        // router, and the rules apply to a request whether or not it is.
+        $target = $this->add_target('Routed', 'Answered through the router');
+        $this->add_rule((int) $target->id);
+        managed_policy::set_managed_actions([]);
+
+        $this->assertNull((new order_inspector())->get_primary_router());
+
+        $candidates = target_resolver::for_site()->get_candidates(
+            new generate_text(
+                contextid: \context_system::instance()->id,
+                userid: get_admin()->id,
+                prompttext: 'Hello',
+            ),
+        );
+
+        $this->assertNotSame([], $candidates);
+        $this->assertSame((int) $target->id, (int) $candidates[0]->target->id);
+    }
+
+    public function test_the_screens_reach_whichever_router_the_site_has(): void {
+        // A page cannot be unit tested, so the decision the pages were getting wrong
+        // lives where it can be.
+        $this->add_rule((int) $this->add_target('Routed', 'Answered')->id);
+
+        $this->assertInstanceOf(adapter_provider::class, target_resolver::for_site()->get_router());
+
+        $this->manager->create_provider_instance(
+            classname: provider::INSTANCE_CLASS,
+            name: 'Router',
+            enabled: true,
+            config: [],
+            actionconfig: [generate_text::class => ['enabled' => true]],
+        );
+        provider::get_instance_ids(true);
+
+        $this->assertNotInstanceOf(adapter_provider::class, target_resolver::for_site()->get_router());
+    }
+
+    public function test_an_unusable_target_says_which_one_and_why(): void {
+        // An instance id on its own sends an administrator to the database to find
+        // out what they just configured.
+        $target = $this->add_target('Routed', 'Answered through the router');
+        $this->add_rule((int) $target->id);
+        managed_policy::set_managed_actions([generate_text::class]);
+        $resolver = new target_resolver(adapter_provider::create());
+
+        $usable = $resolver->describe_unusable((int) $target->id, new generate_text(
+            contextid: \context_system::instance()->id,
+            userid: get_admin()->id,
+            prompttext: 'Hello',
+        ));
+        $gone = $resolver->describe_unusable(99999, new generate_text(
+            contextid: \context_system::instance()->id,
+            userid: get_admin()->id,
+            prompttext: 'Hello',
+        ));
+
+        $this->assertNull($usable);
+        $this->assertSame(get_string('ruletest:reason:missing', 'local_airouter'), $gone);
+    }
+
+    public function test_an_action_the_target_offers_but_has_switched_off(): void {
+        // Two different reasons an administrator has to tell apart: the provider
+        // offers this action and the site turned it off here, or the provider does
+        // not do it at all. The second is the case a site meets when a rule with no
+        // conditions names a provider that does text and not pictures.
+        $target = $this->add_target('Routed', 'Answered through the router');
+        $this->add_rule((int) $target->id);
+        $resolver = new target_resolver(adapter_provider::create());
+
+        $reason = $resolver->describe_unusable((int) $target->id, $this->an_image());
+
+        $this->assertSame(get_string('ruletest:reason:actionoff', 'local_airouter'), $reason);
+    }
+
+    public function test_a_target_that_does_not_offer_the_action_says_so(): void {
+        $target = $this->manager->create_provider_instance(
+            classname: fixture_text_provider::class,
+            name: 'Text only',
+            enabled: true,
+            config: [],
+            actionconfig: [generate_text::class => ['enabled' => true]],
+        );
+        $this->add_rule((int) $target->id);
+        $resolver = new target_resolver(adapter_provider::create());
+
+        $reason = $resolver->describe_unusable((int) $target->id, $this->an_image());
+
+        $this->assertSame(
+            get_string(
+                'ruletest:reason:noaction',
+                'local_airouter',
+                \core_ai\aiactions\generate_image::get_name(),
+            ),
+            $reason,
+        );
+    }
+
+    /**
+     * An image request, which not every provider can carry.
+     *
+     * @return \core_ai\aiactions\generate_image The action.
+     */
+    protected function an_image(): \core_ai\aiactions\generate_image {
+        return new \core_ai\aiactions\generate_image(
+            contextid: \context_system::instance()->id,
+            userid: get_admin()->id,
+            prompttext: 'A cat',
+            quality: 'hd',
+            aspectratio: 'square',
+            numimages: 1,
+            style: 'natural',
         );
     }
 

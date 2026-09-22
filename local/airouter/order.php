@@ -69,7 +69,10 @@ if ($action !== '' && $confirm) {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         throw new moodle_exception('order:cannotapply', 'local_airouter');
     }
-    if (!isset($targets[$action]) || $router === null) {
+    // Cleaning the order is about providers that no longer exist and is worth doing
+    // whatever else is true. Promoting is about putting the router first, which only
+    // means anything where the router is one of the entries.
+    if (!isset($targets[$action]) || ($action === 'promote' && $router === null)) {
         throw new moodle_exception('order:cannotapply', 'local_airouter');
     }
 
@@ -89,14 +92,11 @@ if ($action !== '' && $confirm) {
 echo $OUTPUT->header();
 
 if ($router === null) {
-    echo $OUTPUT->notification(get_string('check:norouter', 'local_airouter'), 'info');
-    echo $OUTPUT->single_button(
-        new moodle_url('/admin/settings.php', ['section' => 'aiprovider']),
-        get_string('check:singleinstance:manage', 'local_airouter'),
-        'get',
-    );
-    echo $OUTPUT->footer();
-    die;
+    // Not an error, and not a reason to stop: this is what a site looks like once the
+    // router is not one of the providers. The order still decides which provider
+    // answers anything the router has not been given, and it can still hold entries
+    // for providers that have been deleted, which is what this page clears.
+    echo $OUTPUT->notification(get_string('order:notaprovider', 'local_airouter'), 'info');
 }
 
 // Confirmation screen. A site wide setting is never one click away, and the value before
@@ -151,7 +151,7 @@ echo order_formatter::render($inspector->get_entries(), $instances, $routerid);
 echo $OUTPUT->heading(get_string('order:actions', 'local_airouter'), 3);
 
 $offered = false;
-if (!$inspector->is_router_first()) {
+if ($router !== null && !$inspector->is_router_first()) {
     echo $OUTPUT->box(get_string('order:promote_help', 'local_airouter'));
     echo $OUTPUT->single_button(
         new moodle_url($url, ['action' => 'promote']),

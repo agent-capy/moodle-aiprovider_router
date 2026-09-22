@@ -117,24 +117,30 @@ if ($data) {
     // or the person may hold no key for it. The list above is the one the rule form
     // offers and deliberately includes targets in all of those states, so deciding from
     // it produced a screen that named one provider while requests went to another.
-    $router = (new order_inspector())->get_primary_router();
-    $resolver = $router === null ? null : new target_resolver($router);
-    $candidates = $resolver?->get_candidates($action) ?? [];
+    // On a site with no provider instance the router is this plugin itself, and
+    // looking only for an instance answered "there is no router" while requests were
+    // being routed perfectly well. It is asked for here rather than through
+    // find_router(), which additionally wants the action to be one the site has
+    // placed under the router: the rules apply to a request whether or not it is,
+    // and this screen is about which rule would claim it.
+    $resolver = target_resolver::for_site();
+    $router = $resolver->get_router();
+    $candidates = $resolver->get_candidates($action);
     $chosentarget = $candidates[0]->target ?? null;
     // A rule can be matched and still carry the request nowhere. The clearest case is
     // a key that is registered and cannot be decrypted: the resolver remembers the
     // rule, empties the candidates and stops the request. Reading the rule alone
     // produced a screen that said the request would be sent, to a provider it could
     // not name.
-    $chosenrule = $chosentarget === null ? null : $resolver?->get_matched_rule();
+    $chosenrule = $chosentarget === null ? null : $resolver->get_matched_rule();
     $chosenid = $chosenrule === null ? null : (int) $chosenrule->get('id');
-    $unreadablekey = $resolver?->get_unreadable_key();
+    $unreadablekey = $resolver->get_unreadable_key();
 
     echo $OUTPUT->heading(get_string('ruletest:result', 'local_airouter'), 3);
 
-    if ($router === null) {
-        // Nothing to ask. The conditions below are still worth showing, but which
-        // target would carry the request is not a question this site can answer yet.
+    if (!$router->is_provider_configured()) {
+        // The conditions below are still worth showing, but with nothing to delegate
+        // to, which target would carry the request is not a question yet.
         echo $OUTPUT->notification(get_string('ruletest:norouter', 'local_airouter'), 'warning');
     }
 
@@ -173,8 +179,23 @@ if ($data) {
             $outcome = get_string('ruletest:outcome:notreached', 'local_airouter');
         } else {
             // Matched, and the router passed over it anyway: whatever it names cannot
-            // carry this request, so the search went on to the rule below.
-            $outcome = get_string('ruletest:outcome:unusable', 'local_airouter', $targetid);
+            // carry this request, so the search went on to the rule below. Naming the
+            // target and the reason is the point of the screen; an id on its own sends
+            // the administrator to the database to find out what they just configured.
+            // The target itself may be perfectly able to carry this, and the request
+            // still be stopped: a budget that has run out and a key that cannot be
+            // read are decisions about the request, not about the provider.
+            $reason = $resolver->describe_unusable($targetid, $action);
+            if ($reason === null && $unreadablekey !== null) {
+                $reason = get_string('ruletest:reason:unreadablekey', 'local_airouter');
+            }
+            if ($reason === null && $resolver->was_budget_spent()) {
+                $reason = get_string('ruletest:reason:budgetspent', 'local_airouter');
+            }
+            $outcome = get_string('ruletest:outcome:unusable', 'local_airouter', (object) [
+                'target' => s($targets[$targetid] ?? get_string('ruletest:target:gone', 'local_airouter')),
+                'reason' => s($reason ?? get_string('ruletest:reason:unknown', 'local_airouter')),
+            ]);
         }
 
         $table->data[] = [(string) (++$position), s($rule->get('name')), $outcome];

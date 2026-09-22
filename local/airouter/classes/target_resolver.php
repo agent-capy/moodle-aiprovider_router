@@ -84,6 +84,31 @@ class target_resolver {
     }
 
     /**
+     * The router this resolver delegates on behalf of.
+     *
+     * @return provider The router.
+     */
+    public function get_router(): provider {
+        return $this->router;
+    }
+
+    /**
+     * A resolver for this site, however its router is configured.
+     *
+     * The screens that answer "where would this request go" have to reach the router
+     * the same way a request does. Asking only for a stored instance said there was
+     * no router on a site that routes without one; asking the manager for the router
+     * of a given action additionally wants that action to be one the site has placed
+     * under the router, which the rules do not care about. Both were tried and both
+     * were wrong, which is why the answer lives here rather than in each page.
+     *
+     * @return self A resolver over whichever router this site has.
+     */
+    public static function for_site(): self {
+        return new self((new order_inspector())->get_primary_router() ?? adapter_provider::create());
+    }
+
+    /**
      * Candidate targets for an action, in the order they should be tried.
      *
      * @param action_base $action The action to be delegated.
@@ -458,6 +483,44 @@ class target_resolver {
         }
 
         return $options;
+    }
+
+    /**
+     * Why a target a rule names cannot carry this request.
+     *
+     * The rule tester needs this in words. Working it out there would mean a second
+     * copy of the conditions below, and a screen that explains one thing while the
+     * router does another is worse than a screen that explains nothing.
+     *
+     * @param int $targetid The provider instance the rule names.
+     * @param action_base $action The action being tested.
+     * @return string|null The reason, or null when the target can be used.
+     */
+    public function describe_unusable(int $targetid, action_base $action): ?string {
+        $instance = $this->get_instances_by_id()[$targetid] ?? null;
+        if ($instance === null) {
+            return get_string('ruletest:reason:missing', 'local_airouter');
+        }
+        if ($instance instanceof provider) {
+            return get_string('ruletest:reason:router', 'local_airouter');
+        }
+        if (!$instance->enabled) {
+            return get_string('ruletest:reason:disabled', 'local_airouter');
+        }
+        if (!$instance->is_provider_configured()) {
+            return get_string('ruletest:reason:unconfigured', 'local_airouter');
+        }
+        if (!in_array($action::class, $instance::get_action_list(), true)) {
+            return get_string('ruletest:reason:noaction', 'local_airouter', $action::get_name());
+        }
+        if (empty(($instance->actionconfig[$action::class] ?? [])['enabled'])) {
+            return get_string('ruletest:reason:actionoff', 'local_airouter', $action::get_name());
+        }
+        if (in_array($targetid, $this->get_byok_only(), true)) {
+            return get_string('ruletest:reason:byokonly', 'local_airouter');
+        }
+
+        return null;
     }
 
     /**
