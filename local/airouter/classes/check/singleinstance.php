@@ -39,6 +39,11 @@ class singleinstance extends base {
     }
 
     #[\Override]
+    protected function requires_instance(): bool {
+        return true;
+    }
+
+    #[\Override]
     protected function check_router(): result {
         $routers = $this->inspector->get_routers();
         if (count($routers) < 2) {

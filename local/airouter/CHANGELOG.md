@@ -357,6 +357,20 @@ Both of these were introduced by the fixes above them.
     to decide it, and requests still go by what is saved, so a policy somebody is
     still considering cannot let one through.
 
+### Watching a site that routes without a provider instance
+
+- The status checks work on a site that has no AI Router provider instance. They asked
+  whether one existed, and reported that there was nothing to check when it did not -
+  on a site whose rules, budgets and brought keys were in use and being watched by
+  nothing at all.
+  - Whether the router is set up is now asked separately from whether it is registered
+    as a provider. A check about the provider order, about having two instances, or
+    about an instance's stored action settings stands down where there is no provider,
+    and says why. A check about the site's own rules, rates, budgets or keys runs.
+  - *There is nothing to check* no longer says an instance has not been created. It
+    says the router has no rules and no default delegation target, which is what it
+    means.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

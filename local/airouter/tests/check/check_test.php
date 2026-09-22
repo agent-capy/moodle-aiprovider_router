@@ -131,6 +131,63 @@ final class check_test extends \advanced_testcase {
         }
     }
 
+    /**
+     * The checks that are about a stored provider rather than about the site.
+     *
+     * @return string[] The check class names.
+     */
+    protected static function provider_checks(): array {
+        return [
+            routerlisted::class,
+            routerfirst::class,
+            actionconflict::class,
+            declinereach::class,
+            singleinstance::class,
+            staleactions::class,
+        ];
+    }
+
+    public function test_a_site_routing_without_an_instance_is_still_watched(): void {
+        // Asking for a provider instance turned every check off on a site that has no
+        // instance and does route: the rules, the budgets and the keys were being used
+        // and nothing was watching any of them.
+        set_config('defaulttarget', 9, 'local_airouter');
+        $inspector = $this->inspector([9 => $this->other(9)], ',9');
+
+        $result = (new staleentries($inspector))->get_result();
+
+        $this->assertNotSame(result::NA, $result->get_status());
+    }
+
+    public function test_the_checks_about_a_provider_stand_down_without_one(): void {
+        // These ask where the router sits in the site order, whether two of it exist,
+        // and what its stored settings say. None of that is about a site that routes
+        // without registering a provider at all.
+        set_config('defaulttarget', 9, 'local_airouter');
+        $inspector = $this->inspector([9 => $this->other(9)], ',9');
+
+        foreach (self::provider_checks() as $class) {
+            $result = (new $class($inspector))->get_result();
+            $this->assertSame(result::NA, $result->get_status(), $class);
+            $this->assertSame(
+                get_string('check:notaprovider', 'local_airouter'),
+                $result->get_summary(),
+                $class,
+            );
+        }
+    }
+
+    public function test_a_site_that_has_set_nothing_up_is_left_alone(): void {
+        // No instance, no rules, no default target. Nothing has been asked for yet,
+        // and a site that has not started is not a site with a problem.
+        $inspector = $this->inspector([9 => $this->other(9)], ',9');
+
+        $result = (new staleentries($inspector))->get_result();
+
+        $this->assertSame(result::NA, $result->get_status());
+        $this->assertSame(get_string('check:norouter', 'local_airouter'), $result->get_summary());
+    }
+
     public function test_a_router_at_the_front_passes_every_check(): void {
         $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',5,9');
 

@@ -49,6 +49,11 @@ class staleactions extends base {
     }
 
     #[\Override]
+    protected function requires_instance(): bool {
+        return true;
+    }
+
+    #[\Override]
     protected function check_router(): result {
         $router = $this->inspector->get_primary_router();
         $missing = [];

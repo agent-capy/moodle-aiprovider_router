@@ -16,6 +16,7 @@
 
 namespace local_airouter\check;
 
+use local_airouter\adapter_provider;
 use local_airouter\managed_policy;
 use local_airouter\order_inspector;
 use local_airouter\provider;
@@ -26,9 +27,15 @@ use core\check\result;
  * Shared behaviour for the router's status checks.
  *
  * The checks all describe the same thing from different angles, so they share one
- * order_inspector and cannot end up contradicting each other. A site with no router
- * instance is not misconfigured, it has simply not been set up yet, so every check
- * reports NA rather than a problem.
+ * order_inspector and cannot end up contradicting each other. A site that has not set
+ * the router up is not misconfigured, so every check reports NA rather than a problem.
+ *
+ * Whether the router is set up is not the same question as whether a provider instance
+ * exists. A site can route with no instance at all, and asking for the instance turned
+ * every check off on exactly such a site: the rules, the budgets and the keys were
+ * being used and nothing was watching any of them. What each check needs is asked for
+ * separately, so a check about the provider order stands down where there is no
+ * provider to order, and a check about the site's own rules keeps working.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -62,8 +69,15 @@ abstract class base extends check {
 
     #[\Override]
     public function get_result(): result {
-        if ($this->inspector->get_primary_router() === null) {
+        if (!$this->router_is_set_up()) {
             return new result(result::NA, get_string('check:norouter', 'local_airouter'));
+        }
+
+        // Some of these are questions about a provider: where it sits in the site
+        // order, whether two of it exist, what its stored action settings say. On a
+        // site that routes without one there is nothing for them to be about.
+        if ($this->requires_instance() && $this->inspector->get_primary_router() === null) {
+            return new result(result::NA, get_string('check:notaprovider', 'local_airouter'));
         }
 
         if (!$this->depends_on_provider_order()) {
@@ -98,10 +112,33 @@ abstract class base extends check {
     }
 
     /**
+     * Whether the router is set up on this site at all.
+     *
+     * Either way of configuring it counts: a provider instance, or the rules and
+     * default target this plugin holds itself. A site with neither has not started.
+     *
+     * @return bool True when there is something to check.
+     */
+    protected function router_is_set_up(): bool {
+        return $this->inspector->get_primary_router() !== null
+            || adapter_provider::create()->is_provider_configured();
+    }
+
+    /**
+     * Whether this check is about a stored provider instance rather than the site.
+     *
+     * @return bool True when the finding needs an instance to be about.
+     */
+    protected function requires_instance(): bool {
+        return false;
+    }
+
+    /**
      * Whether this check is asking a question about the provider order.
      *
      * Those checks stop applying to an action the site has placed under the router,
-     * because such a request never reaches the order.
+     * because such a request never reaches the order. They are also about a provider,
+     * so they need one to exist.
      *
      * @return bool True when the finding depends on where the router sits.
      */

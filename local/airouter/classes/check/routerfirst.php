@@ -37,6 +37,11 @@ class routerfirst extends base {
     }
 
     #[\Override]
+    protected function requires_instance(): bool {
+        return true;
+    }
+
+    #[\Override]
     protected function check_router(): result {
         if ($this->inspector->is_router_first()) {
             return new result(result::OK, get_string('check:routerfirst:ok', 'local_airouter'));

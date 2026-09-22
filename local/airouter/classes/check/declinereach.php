@@ -41,6 +41,11 @@ class declinereach extends base {
     }
 
     #[\Override]
+    protected function requires_instance(): bool {
+        return true;
+    }
+
+    #[\Override]
     protected function check_router(): result {
         $following = $this->inspector->get_following_instances();
         if (!$following) {
