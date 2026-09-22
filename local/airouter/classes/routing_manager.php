@@ -55,7 +55,7 @@ class routing_manager extends \core_ai\manager {
             return parent::process_action($action);
         }
 
-        $router = $this->find_router($action::class);
+        $router = $this->router_for_dispatch($action::class);
         if ($router === null) {
             // The site says this action goes through the router and the router cannot
             // take it. Answering it with another provider would be the one thing the
@@ -63,7 +63,10 @@ class routing_manager extends \core_ai\manager {
             //
             // Core's record is not written for this: writing it needs a provider that
             // really exists to attribute it to, and inventing one to make the row
-            // appear would be a lie in the site's own audit trail.
+            // appear would be a lie in the site's own audit trail. What is left here
+            // is the case where nothing can run at all -- a stored instance that is
+            // switched off, or an action this release of the router has no processor
+            // for. There is no code that could be asked to explain itself.
             return response_factory::failure(
                 $action,
                 503,
@@ -119,6 +122,42 @@ class routing_manager extends \core_ai\manager {
         }
 
         return null;
+    }
+
+    /**
+     * The router to hand this request to, which may be one that will refuse it.
+     *
+     * Being unable to answer and being unconfigured are different, and only the first
+     * is a reason to stop here. A site with no stored instance has this plugin as its
+     * router whether or not the rules are finished, and the router knows why it cannot
+     * carry the request: no target, no rule matched, a budget spent, a key it could
+     * not read. Letting it say so puts the refusal through core's own processing, so
+     * the request is recorded and the person is shown a reason, where stopping short
+     * of it left the site with neither.
+     *
+     * @param string $actionclass The action class being requested.
+     * @return ai_provider|null The router, or null when nothing could even explain itself.
+     */
+    protected function router_for_dispatch(string $actionclass): ?ai_provider {
+        $actionclass = ltrim($actionclass, '\\');
+        $found = $this->find_router($actionclass);
+        if ($found !== null) {
+            return $found;
+        }
+
+        // A stored instance is the site's router and its own state is the answer:
+        // one that is switched off has been switched off on purpose.
+        if ($this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]) !== []) {
+            return null;
+        }
+
+        $adapter = adapter_provider::create();
+        $carried = array_map(
+            static fn(string $action): string => ltrim($action, '\\'),
+            $adapter->get_action_list(),
+        );
+
+        return in_array($actionclass, $carried, true) ? $adapter : null;
     }
 
     /**

@@ -155,8 +155,6 @@ final class adapter_provider_test extends \advanced_testcase {
     }
 
     public function test_a_router_with_nowhere_to_send_anything_refuses(): void {
-        global $DB;
-
         // P-3. No rule and no default target. The request is not handed back to the
         // provider order, which is the whole point of having placed it here.
         $this->add_target('Ahead', 'Answered by the first provider');
@@ -167,7 +165,39 @@ final class adapter_provider_test extends \advanced_testcase {
         $this->assertFalse($response->get_success());
         $this->assertSame(503, $response->get_errorcode());
         $this->assertNull($response->get_response_data()['generatedcontent']);
-        $this->assertSame(0, $DB->count_records('ai_action_register'));
+    }
+
+    public function test_the_refusal_is_recorded_rather_than_disappearing(): void {
+        global $DB;
+
+        // A refused request is one the site made. Stopping before anything ran left
+        // it out of core's record altogether, so a site that refused everything and
+        // a site nobody used looked the same afterwards.
+        $this->add_target('Ahead', 'Answered by the first provider');
+        managed_policy::set_managed_actions([generate_text::class]);
+
+        $this->ask();
+
+        $records = $DB->get_records('ai_action_register');
+        $this->assertCount(1, $records);
+        $record = reset($records);
+        $this->assertEquals(0, $record->success);
+        $this->assertSame('local_airouter', $record->provider);
+    }
+
+    public function test_the_refusal_says_which_reason_it_was(): void {
+        // A refusal could only say that the router was unavailable, because the code
+        // that knows the difference had not been reached. There are several reasons
+        // and they need different things done about them.
+        $this->add_target('Ahead', 'Answered by the first provider');
+        managed_policy::set_managed_actions([generate_text::class]);
+
+        $response = $this->ask();
+
+        $this->assertSame(
+            get_string('error:nodefaulttarget', 'local_airouter'),
+            $response->get_errormessage(),
+        );
     }
 
     public function test_only_the_managed_actions_are_answered(): void {

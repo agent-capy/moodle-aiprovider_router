@@ -371,6 +371,20 @@ Both of these were introduced by the fixes above them.
     says the router has no rules and no default delegation target, which is what it
     means.
 
+### Saying why, and writing it down
+
+- A refused request is recorded and gives its reason. Where the router had nothing to
+  send a request to, the request was turned down before the router's own code ran, so
+  Moodle's AI action log had no row for it and the person was told only that the
+  router was unavailable. A site that refused everything and a site nobody used looked
+  the same afterwards.
+  - Being unable to answer and not being finished being set up are different things,
+    and only the first is a reason to stop. A site with no provider instance now hands
+    the request to the router either way, and the router says which it is: no target,
+    no rule matched, a budget spent, a key it could not read.
+  - An instance that is switched off still stops there. It was switched off on
+    purpose, and there is nothing to ask.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built
