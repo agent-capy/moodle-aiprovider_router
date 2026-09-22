@@ -33,8 +33,8 @@ require_once(__DIR__ . '/lib.php');
 use local_airouter\key;
 use local_airouter\price_book;
 use local_airouter\target_resolver;
-use local_airouter\usage_aggregator;
-use local_airouter\user_report;
+use local_airouter\record\person_reader;
+use local_airouter\record\summariser;
 use local_airouter\user_report_formatter;
 
 $days = optional_param('days', 30, PARAM_INT);
@@ -59,15 +59,15 @@ if (!in_array($days, $periods, true)) {
     $days = 30;
 }
 
-$aggregator = new usage_aggregator($DB);
-$report = new user_report($DB, $aggregator);
+// Read from the request and attempt records, each finished fact once.
+$report = new person_reader($DB);
 $now = time();
-$from = $aggregator->add_days($aggregator->day_of($now), -($days - 1));
+$from = summariser::add_days(summariser::day_of($now), -($days - 1));
 // One answer for the whole screen, including the exported file.
 $currency = $report->currency_for($from, $now);
 
 $people = $report->get_people($from, $now);
-$names = user_report::get_names(array_column($people, 'userid'));
+$names = person_reader::get_names(array_column($people, 'userid'));
 
 if ($download !== '') {
     require_sesskey();
@@ -136,9 +136,9 @@ if ($userid > 0) {
     if (!$requests) {
         echo $OUTPUT->notification(get_string('report:norequests', 'local_airouter'), 'info');
     } else {
-        if (count($requests) >= user_report::MAX_REQUESTS) {
+        if (count($requests) >= person_reader::MAX_REQUESTS) {
             echo $OUTPUT->notification(
-                get_string('report:truncated', 'local_airouter', user_report::MAX_REQUESTS),
+                get_string('report:truncated', 'local_airouter', person_reader::MAX_REQUESTS),
                 'warning',
             );
         }
@@ -187,7 +187,7 @@ if (!$holders) {
     echo html_writer::table(user_report_formatter::holders(
         $holders,
         $report->get_key_usage($from, $now),
-        user_report::get_names($holderids),
+        person_reader::get_names($holderids),
         $courses,
         target_resolver::get_delegation_targets(),
         $currency,

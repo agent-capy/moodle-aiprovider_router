@@ -523,9 +523,13 @@ and the detail for what has not, so that every finished request and call is coun
 once, whichever day it ended on and whether or not the nightly task has reached it. A
 request or call still in flight is not counted until it ends.
 
-The course page's budget bars, the report by person and the budget conditions still
-read the older, one row per request record while they are moved across; until then
-the two records are written side by side. The older record and its table go when the
+The report by person and the course page read them too. A person's individual
+requests are listed with what every call made for them used, the failed calls
+included, because that is what the person's request cost.
+
+The budget bars on the course page and the budget conditions themselves still read
+the older, one row per request record while they are moved across; until then the
+two records are written side by side. The older record and its table go when the
 last reader has moved.
 
 **Requests and provider calls are counted separately.** A request that fell through to a

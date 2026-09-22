@@ -324,9 +324,17 @@ class reader {
      * @param int $to The end of the period.
      * @param int|null $courseid Limit to one course, or null for the whole site.
      * @param string|null $keysource Limit to one payer, or null for all.
+     * @param int|null $userid Limit to one person, or null for everybody.
      * @return \stdClass[] Normalised rows carrying the group fields and the metrics.
      */
-    protected function summarised(array $fields, int $from, int $to, ?int $courseid, ?string $keysource): array {
+    protected function summarised(
+        array $fields,
+        int $from,
+        int $to,
+        ?int $courseid,
+        ?string $keysource,
+        ?int $userid = null,
+    ): array {
         $where = 'daystart >= :from AND daystart < :to';
         $params = ['from' => $from, 'to' => $to];
         if ($courseid !== null) {
@@ -337,13 +345,18 @@ class reader {
             $where .= ' AND keysource = :keysource';
             $params['keysource'] = $keysource;
         }
+        if ($userid !== null) {
+            $where .= ' AND userid = :userid';
+            $params['userid'] = $userid;
+        }
         // The currency has to be part of every grouping: money in two currencies is
         // never one figure, and a row that mixed them could not be read.
         $groups = array_values(array_unique(array_merge($fields, ['currency'])));
         $select = implode(', ', $groups);
-        // The name a target carries is the same on every row of a target, so any of
-        // them will do; grouping on it as well would only split rows on a rename.
-        if (in_array('targetname', $groups, true)) {
+        // When rows are grouped by target id, the name a target carries is the same on
+        // every one of its rows, so any will do; grouping on the name as well would
+        // only split a target on a rename. Asked for by name alone, the name is the group.
+        if (in_array('targetname', $groups, true) && in_array('targetid', $groups, true)) {
             $groups = array_values(array_diff($groups, ['targetname']));
             $select = implode(', ', $groups) . ', MIN(targetname) AS targetname';
         }
@@ -376,14 +389,22 @@ class reader {
      * or so of traffic plus whatever ended late, and the day a fact belongs to is a
      * timezone calculation the database is not asked to make.
      *
-     * @param string[] $fields Fields to group on; day for the day the fact ended.
+     * @param string[] $fields Fields to group on; day or daystart for the day the fact ended.
      * @param int $from The start of the period.
      * @param int $to The end of the period.
      * @param int|null $courseid Limit to one course, or null for the whole site.
      * @param string|null $keysource Limit to one payer, or null for all.
+     * @param int|null $userid Limit to one person, or null for everybody.
      * @return \stdClass[] Normalised rows carrying the group fields and the metrics.
      */
-    protected function detailed(array $fields, int $from, int $to, ?int $courseid, ?string $keysource): array {
+    protected function detailed(
+        array $fields,
+        int $from,
+        int $to,
+        ?int $courseid,
+        ?string $keysource,
+        ?int $userid = null,
+    ): array {
         $params = ['from' => $from, 'to' => $to];
         $rwhere = 'r.applied = 0 AND r.state <> :open AND r.timeended >= :from AND r.timeended < :to';
         $awhere = 'a.applied = 0 AND a.state <> :started AND a.timeended >= :from AND a.timeended < :to';
@@ -397,6 +418,11 @@ class reader {
             $awhere .= ' AND a.keysource = :keysource';
             $params['keysource'] = $keysource;
         }
+        if ($userid !== null) {
+            $rwhere .= ' AND r.userid = :userid';
+            $awhere .= ' AND r.userid = :userid';
+            $params['userid'] = $userid;
+        }
 
         $facts = [];
         // A request sits with the target and model that answered it, as in the summary.
@@ -409,8 +435,10 @@ class reader {
             $params + ['open' => request_state::OPEN, 'succeeded' => attempt_state::SUCCEEDED],
         );
         foreach ($requests as $request) {
+            $day = summariser::day_of((int) $request->timeended);
             $facts[] = (object) [
-                'day' => summariser::day_of((int) $request->timeended),
+                'day' => $day,
+                'daystart' => $day,
                 'userid' => (int) $request->userid,
                 'courseid' => (int) ($request->courseid ?? 0),
                 'actionname' => $request->actionname,
@@ -435,8 +463,10 @@ class reader {
         );
         foreach ($attempts as $attempt) {
             $known = (int) $attempt->usageknown === 1;
+            $day = summariser::day_of((int) $attempt->timeended);
             $facts[] = (object) [
-                'day' => summariser::day_of((int) $attempt->timeended),
+                'day' => $day,
+                'daystart' => $day,
                 'userid' => (int) $attempt->userid,
                 'courseid' => (int) ($attempt->courseid ?? 0),
                 'actionname' => $attempt->actionname,

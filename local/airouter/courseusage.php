@@ -34,7 +34,8 @@ use local_airouter\rule_repository;
 use local_airouter\spend_ledger;
 use local_airouter\usage_aggregator;
 use local_airouter\usage_formatter;
-use local_airouter\usage_report;
+use local_airouter\record\reader;
+use local_airouter\record\summariser;
 
 $courseid = required_param('id', PARAM_INT);
 $days = optional_param('days', 30, PARAM_INT);
@@ -56,14 +57,16 @@ if (!in_array($days, $periods, true)) {
     $days = 30;
 }
 
+// The figures come from the request and attempt records, each finished fact once.
+// The budget bars below still read the older record until the ledger has moved.
 $aggregator = new usage_aggregator($DB);
-$report = new usage_report($DB, $aggregator);
+$report = new reader($DB);
 $now = time();
-$from = $aggregator->add_days($aggregator->day_of($now), -($days - 1));
+$from = summariser::add_days(summariser::day_of($now), -($days - 1));
 
 $series = $report->get_series($from, $now, $course->id);
-$totals = usage_report::total($series);
-$bytarget = $report->get_breakdown(usage_report::BY_TARGET, $from, $now, $course->id);
+$totals = reader::total($series);
+$bytarget = $report->get_breakdown(reader::BY_TARGET, $from, $now, $course->id);
 
 echo $OUTPUT->header();
 echo $OUTPUT->heading(get_string('courseusage:heading', 'local_airouter'));
