@@ -399,6 +399,17 @@ Both of these were introduced by the fixes above them.
   - The status check about the managed boundary is quiet while the switch is off.
     Nothing is being routed, so nothing can be failing to be routed.
 
+### Settings that take effect
+
+- A change to the router's settings takes effect on the next AI request, including in
+  a process that has been running for hours. Settings read through `get_config()` are
+  kept inside each process, and saving a change in another one deletes the shared copy
+  without reaching them, so a task runner started in the morning went on routing by
+  the morning's settings. The router now reads what it needs from the database when a
+  request begins.
+  - The same read fixes the settings for that request, so a change saved while one is
+    being processed applies to the next request rather than to half of this one.
+
 ## 0.1.0 — 2026-09-20
 
 The first release. Everything below is implemented, covered by tests, and built

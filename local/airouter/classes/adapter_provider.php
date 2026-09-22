@@ -40,6 +40,9 @@ namespace local_airouter;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 final class adapter_provider extends provider {
+    /** @var request_policy|null The settings this request began with. */
+    private ?request_policy $policy = null;
+
     /**
      * The router, built from the site's own settings.
      *
@@ -48,14 +51,20 @@ final class adapter_provider extends provider {
      *                                      site is about to save would do.
      * @return self An instance for this request. It is not stored anywhere.
      */
-    public static function create(?array $managedactions = null): self {
-        return new self(
+    public static function create(?array $managedactions = null, ?request_policy $policy = null): self {
+        $adapter = new self(
             enabled: true,
             name: get_string('adapter:name', 'local_airouter'),
-            config: json_encode(self::policy_settings(), JSON_THROW_ON_ERROR),
-            actionconfig: json_encode(self::action_settings($managedactions), JSON_THROW_ON_ERROR),
+            config: json_encode(self::policy_settings($policy), JSON_THROW_ON_ERROR),
+            actionconfig: json_encode(
+                self::action_settings($managedactions ?? $policy?->managed_actions()),
+                JSON_THROW_ON_ERROR,
+            ),
             id: null,
         );
+        $adapter->policy = $policy;
+
+        return $adapter;
     }
 
     /**
@@ -67,8 +76,12 @@ final class adapter_provider extends provider {
      *
      * @return array The settings, in the shape the provider expects.
      */
-    private static function policy_settings(): array {
-        $target = (int) get_config('local_airouter', 'defaulttarget');
+    private static function policy_settings(?request_policy $policy): array {
+        $read = static fn(string $name): ?string => $policy !== null
+            ? $policy->get($name)
+            : (get_config('local_airouter', $name) ?: null);
+
+        $target = (int) $read('defaulttarget');
 
         // No operating mode. It offered "alongside other providers", which means
         // letting core try the next one after a refusal -- and for an action placed
@@ -76,7 +89,7 @@ final class adapter_provider extends provider {
         // nothing, and two settings saying the same thing in different words is how
         // a site ends up configured one way and behaving another.
         return [
-            'nomatch' => (string) (get_config('local_airouter', 'nomatch') ?: ''),
+            'nomatch' => (string) ($read('nomatch') ?? ''),
             'defaulttarget' => $target > 0 ? $target : 0,
         ];
     }
@@ -126,6 +139,14 @@ final class adapter_provider extends provider {
      */
     #[\Override]
     public function is_provider_configured(): bool {
-        return $this->get_default_target_id() !== null || self::has_rules();
+        if ($this->get_default_target_id() !== null) {
+            return true;
+        }
+
+        // The rule count is a setting like the others, so a request that fixed its
+        // settings at the start must read this one from there too.
+        return $this->policy !== null
+            ? (int) $this->policy->get('rulecount') > 0
+            : self::has_rules();
     }
 }

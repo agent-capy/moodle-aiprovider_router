@@ -91,9 +91,26 @@ class managed_policy {
             return [];
         }
 
+        return self::parse((string) $stored);
+    }
+
+    /**
+     * Turn a stored policy into action class names.
+     *
+     * Shared with request_policy, which reads the same setting a different way, so
+     * that the two cannot come to different conclusions about the same text.
+     *
+     * @param string $stored The setting value.
+     * @return string[] Fully qualified action class names, without a leading separator.
+     */
+    public static function parse(string $stored): array {
+        if (trim($stored) === '') {
+            return [];
+        }
+
         $wanted = array_filter(array_map(
             static fn(string $action): string => ltrim(trim($action), '\\'),
-            explode(',', (string) $stored),
+            explode(',', $stored),
         ));
 
         return array_values(array_unique($wanted));

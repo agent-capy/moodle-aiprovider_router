@@ -336,6 +336,42 @@ final class adapter_provider_test extends \advanced_testcase {
         );
     }
 
+    public function test_a_change_made_elsewhere_takes_effect_on_the_next_request(): void {
+        global $DB;
+
+        // P-4. A task runner can be processing a queue for hours. Settings read
+        // through get_config() are kept inside the process, and another process
+        // saving a change deletes the shared copy without reaching this one, so the
+        // runner would go on routing by the settings it read when it started.
+        $this->add_target('Ahead', 'Answered by the first provider');
+        $target = $this->add_target('Routed', 'Answered through the router');
+        $this->add_rule((int) $target->id);
+        managed_policy::set_managed_actions([generate_text::class]);
+        set_config(managed_policy::SWITCH, 1, 'local_airouter');
+
+        $this->assertSame(
+            'Answered through the router',
+            $this->ask()->get_response_data()['generatedcontent'],
+        );
+
+        // An administrator switching the router off in another process, which leaves
+        // the table changed and this process's caches untouched.
+        $DB->set_field(
+            'config_plugins',
+            'value',
+            0,
+            ['plugin' => 'local_airouter', 'name' => managed_policy::SWITCH],
+        );
+
+        // The cache still says the old thing, which is the whole difficulty.
+        $this->assertEquals(1, get_config('local_airouter', managed_policy::SWITCH));
+
+        $this->assertSame(
+            'Answered by the first provider',
+            $this->ask()->get_response_data()['generatedcontent'],
+        );
+    }
+
     public function test_the_adapter_is_built_fresh_for_each_request(): void {
         // The manager in the container is shared for the length of the request and
         // may be reused. Nothing about one request may survive into the next.

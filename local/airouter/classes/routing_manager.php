@@ -51,13 +51,18 @@ class routing_manager extends \core_ai\manager {
      */
     #[\Override]
     public function process_action(action_base $action): response_base {
+        // Everything this request is decided by is read once, here. A change saved
+        // while it is being processed applies to the next one, not to half of this
+        // one, and a process that has been running for hours still sees the change.
+        $policy = request_policy::start($this->db);
+
         // One switch above everything else. Off, this object does what core's own
         // manager does, which is what a site turning the router off is asking for.
-        if (!managed_policy::is_switched_on() || !managed_policy::is_managed($action)) {
+        if (!$policy->is_switched_on() || !$policy->is_managed($action)) {
             return parent::process_action($action);
         }
 
-        $router = $this->router_for_dispatch($action::class);
+        $router = $this->router_for_dispatch($action::class, $policy);
         if ($router === null) {
             // The site says this action goes through the router and the router cannot
             // take it. Answering it with another provider would be the one thing the
@@ -138,9 +143,10 @@ class routing_manager extends \core_ai\manager {
      * of it left the site with neither.
      *
      * @param string $actionclass The action class being requested.
+     * @param request_policy|null $policy The settings this request began with.
      * @return ai_provider|null The router, or null when nothing could even explain itself.
      */
-    protected function router_for_dispatch(string $actionclass): ?ai_provider {
+    protected function router_for_dispatch(string $actionclass, ?request_policy $policy = null): ?ai_provider {
         $actionclass = ltrim($actionclass, '\\');
         $found = $this->find_router($actionclass);
         if ($found !== null) {
@@ -153,7 +159,7 @@ class routing_manager extends \core_ai\manager {
             return null;
         }
 
-        $adapter = adapter_provider::create();
+        $adapter = adapter_provider::create(policy: $policy);
         $carried = array_map(
             static fn(string $action): string => ltrim($action, '\\'),
             $adapter->get_action_list(),
