@@ -103,5 +103,41 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092205, 'local', 'airouter');
     }
 
+    if ($oldversion < 2026092301) {
+        // A day of the new records added up, built by applying each fact once.
+        $table = new xmldb_table('local_airouter_summary');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('daystart', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('courseid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('actionname', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('targetid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('targetname', XMLDB_TYPE_CHAR, '255', null, null, null, null);
+        $table->add_field('model', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, '-');
+        $table->add_field('keysource', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'site');
+        $table->add_field('currency', XMLDB_TYPE_CHAR, '10', null, XMLDB_NOTNULL, null, '-');
+        $table->add_field('requests', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('failures', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('calls', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('knowncalls', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('prompttokens', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('completiontokens', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('cost', XMLDB_TYPE_NUMBER, '16, 6', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('costedcalls', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index(
+            'key',
+            XMLDB_INDEX_UNIQUE,
+            ['daystart', 'userid', 'courseid', 'actionname', 'targetid', 'model', 'keysource', 'currency']
+        );
+        $table->add_index('userid-daystart', XMLDB_INDEX_NOTUNIQUE, ['userid', 'daystart']);
+        $table->add_index('courseid-daystart', XMLDB_INDEX_NOTUNIQUE, ['courseid', 'daystart']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026092301, 'local', 'airouter');
+    }
+
     return true;
 }

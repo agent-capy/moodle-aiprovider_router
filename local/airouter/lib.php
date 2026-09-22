@@ -48,6 +48,7 @@ function local_airouter_status_checks(): array {
         new \local_airouter\check\byokeligibility($inspector),
         new \local_airouter\check\budgetrates($inspector),
         new \local_airouter\check\budgethistory($inspector),
+        new \local_airouter\check\recordgaps($inspector),
     ];
 }
 

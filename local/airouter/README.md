@@ -500,6 +500,24 @@ the request and the attempts made so far go, and the attempts still to come are 
 recorded, because a record nothing can trace back to a person is a record nobody can
 delete for them.
 
+Once a day, a task adds every request and attempt that has ended into a summary of
+its day -- the day it ended, in the server's timezone -- and marks it as counted. What
+has been counted is a fact on the row, not a watermark kept in the settings, so an
+ending that arrives late is counted when it arrives, a run that is interrupted counts
+nothing twice and nothing by half, and nothing is ever purged that has not been
+counted, however old it is. The same task gives up on attempts that have been open for
+six hours as lost, with their usage unknown, and closes their requests as failed.
+
+The summary keeps requests and calls apart, keeps each payer's money apart, keeps each
+currency apart, and says how many of the calls it added up had known token counts and
+how many had a cost, so that a total can be read for what it covers. Detail rows are
+kept for the number of days set on the usage page and then removed; summary rows are
+kept for as long as the summary retention says, or for good.
+
+The **Record gaps** status check says when the record has holes: writes that failed,
+attempts given up as lost, and requests or attempts open for longer than any call
+takes. A site comparing a provider's bill with these reports should read it first.
+
 The screens and the budget conditions on this page still read the older, one row per
 request record while they are moved across to these tables; until then the two are
 written side by side. The older record and its table go when the last reader has moved.

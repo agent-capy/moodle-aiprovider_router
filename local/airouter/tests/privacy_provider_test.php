@@ -17,6 +17,7 @@
 namespace local_airouter;
 
 use local_airouter\privacy\provider;
+use local_airouter\record\summariser;
 use local_airouter\record\usage_recorder;
 use core_privacy\local\request\approved_contextlist;
 use core_privacy\local\request\approved_userlist;
@@ -361,6 +362,61 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
         $remaining = array_column($DB->get_records(usage_recorder::REQUEST_TABLE), 'userid');
         $this->assertSame([(int) $c->id], array_map('intval', $remaining));
         $this->assertSame(1, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+    }
+
+    /**
+     * A summarised day of somebody's requests, in the newer summary.
+     *
+     * @param int $userid Whose day it is.
+     * @return int The row id.
+     */
+    protected function summarise_records(int $userid): int {
+        global $DB;
+
+        return $DB->insert_record(summariser::TABLE, (object) [
+            'daystart' => make_timestamp(2026, 9, 1, 0, 0, 0),
+            'userid' => $userid,
+            'courseid' => 0,
+            'actionname' => 'generate_text',
+            'targetid' => 1,
+            'targetname' => 'Target one',
+            'model' => 'gpt-4o',
+            'keysource' => 'site',
+            'currency' => 'USD',
+            'requests' => 2,
+            'failures' => 0,
+            'calls' => 3,
+            'knowncalls' => 3,
+            'prompttokens' => 30,
+            'completiontokens' => 10,
+            'cost' => 0.5,
+            'costedcalls' => 3,
+        ]);
+    }
+
+    public function test_a_summarised_day_of_records_is_found_exported_and_removed_through_the_persons_context(): void {
+        global $DB;
+        $user = $this->getDataGenerator()->create_user();
+        $other = $this->getDataGenerator()->create_user();
+        $context = \context_user::instance((int) $user->id);
+        $this->summarise_records((int) $user->id);
+        $this->summarise_records((int) $other->id);
+
+        $contexts = provider::get_contexts_for_userid((int) $user->id)->get_contextids();
+        $this->assertContains((int) $context->id, array_map('intval', $contexts));
+        $userlist = new userlist($context, 'local_airouter');
+        provider::get_users_in_context($userlist);
+        $this->assertSame([(int) $user->id], $userlist->get_userids());
+
+        provider::export_user_data(new approved_contextlist($user, 'local_airouter', [$context->id]));
+        $exported = writer::with_context($context)->get_data([get_string('privacy:path:recordsummaries', 'local_airouter')]);
+        $this->assertCount(1, $exported->days);
+        $this->assertSame('Target one', $exported->days[0]->delegatedto);
+        $this->assertSame(3, (int) $exported->days[0]->calls);
+
+        provider::delete_data_for_user(new approved_contextlist($user, 'local_airouter', [$context->id]));
+        $this->assertSame(0, $DB->count_records(summariser::TABLE, ['userid' => $user->id]));
+        $this->assertSame(1, $DB->count_records(summariser::TABLE, ['userid' => $other->id]));
     }
 
     public function test_a_request_made_in_somebodys_own_context_still_names_them(): void {

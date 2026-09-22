@@ -37,6 +37,18 @@ $tasks = [
         'month' => '*',
     ],
     [
+        // The same hour as the older summariser, for the newer record. Adds each
+        // finished request and attempt into its day once, closes what was left open,
+        // and purges what has been counted and is past keeping.
+        'classname' => 'local_airouter\task\summarise_records',
+        'blocking' => 0,
+        'minute' => 'R',
+        'hour' => '3',
+        'day' => '*',
+        'dayofweek' => '*',
+        'month' => '*',
+    ],
+    [
         // Runs after the summariser, so that a notice is weighed against figures the
         // day's summarising has already settled. Never from the path of a request:
         // a slow mail server would become a slow AI.

@@ -257,5 +257,35 @@
         <INDEX NAME="targetid-timeended" UNIQUE="false" FIELDS="targetid, timeended"/>
       </INDEXES>
     </TABLE>
+    <TABLE NAME="local_airouter_summary" COMMENT="A day of the request and attempt records, added up, so that reports outlive the detail the purge removes. Built by adding each finished request and attempt into its day once and marking it applied, so that what has been counted is a fact on the row and not a watermark in the settings. Names the user for the same reason the older summary does: a site asked to account for its AI spending has to be able to say who spent it.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="daystart" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Midnight of the day summarised, in the server timezone. The day a fact belongs to is the day it ended."/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Zero for requests made outside any course. Not null, because a unique index over a nullable column is not unique."/>
+        <FIELD NAME="actionname" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="For an attempt, the target asked. For a request, the target that answered, or zero when none did, which is how refusals and total failures are counted."/>
+        <FIELD NAME="targetname" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Carried over from the attempt, because once the detail is purged this is the only readable name left."/>
+        <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="The model that answered, or a dash where none did or none was named."/>
+        <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Who paid. Part of the key, so that what people spent out of their own pocket is never added into what the site spent."/>
+        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="Part of the key, so that changing the site currency splits the summary instead of adding unlike figures. A dash for rows carrying no money."/>
+        <FIELD NAME="requests" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Requests that ended that day, whatever the outcome."/>
+        <FIELD NAME="failures" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Of those, the ones that did not succeed: declined or failed."/>
+        <FIELD NAME="calls" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Attempts that ended that day, whatever the outcome. A request that fell through to a second provider is one request and two calls."/>
+        <FIELD NAME="knowncalls" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Of the calls, the ones whose token counts were reported. The token totals are totals of these alone."/>
+        <FIELD NAME="prompttokens" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="completiontokens" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="cost" TYPE="number" LENGTH="16" NOTNULL="true" DEFAULT="0" SEQUENCE="false" DECIMALS="6" COMMENT="The costs recorded on the attempts added up, never recalculated. Only as complete as costedcalls says."/>
+        <FIELD NAME="costedcalls" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Of the calls, the ones that had a cost. Without it a total cannot be told apart from a total of the few calls a rate happened to cover."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="key" UNIQUE="true" FIELDS="daystart, userid, courseid, actionname, targetid, model, keysource, currency"/>
+        <INDEX NAME="userid-daystart" UNIQUE="false" FIELDS="userid, daystart"/>
+        <INDEX NAME="courseid-daystart" UNIQUE="false" FIELDS="courseid, daystart"/>
+      </INDEXES>
+    </TABLE>
   </TABLES>
 </XMLDB>

@@ -17,6 +17,7 @@
 namespace local_airouter\privacy;
 
 use local_airouter\budget_notifier;
+use local_airouter\record\summariser;
 use local_airouter\record\usage_recorder;
 use local_airouter\key;
 use local_airouter\key_repository;
@@ -109,6 +110,24 @@ class provider implements
         );
 
         $collection->add_database_table(
+            summariser::TABLE,
+            [
+                'userid' => 'privacy:metadata:summary:userid',
+                'daystart' => 'privacy:metadata:summary:daystart',
+                'courseid' => 'privacy:metadata:summary:courseid',
+                'actionname' => 'privacy:metadata:summary:actionname',
+                'targetname' => 'privacy:metadata:summary:targetname',
+                'model' => 'privacy:metadata:summary:model',
+                'requests' => 'privacy:metadata:summary:requests',
+                'calls' => 'privacy:metadata:summary:calls',
+                'prompttokens' => 'privacy:metadata:summary:prompttokens',
+                'completiontokens' => 'privacy:metadata:summary:completiontokens',
+                'cost' => 'privacy:metadata:summary:cost',
+            ],
+            'privacy:metadata:summary',
+        );
+
+        $collection->add_database_table(
             usage_aggregator::TABLE,
             [
                 'userid' => 'privacy:metadata:daily:userid',
@@ -178,6 +197,13 @@ class provider implements
                 AND EXISTS (SELECT 1 FROM {' . usage_aggregator::TABLE . '} d WHERE d.userid = :duserid)',
             ['level' => CONTEXT_USER, 'userid' => $userid, 'duserid' => $userid],
         );
+        $contextlist->add_from_sql(
+            'SELECT ctx.id
+               FROM {context} ctx
+              WHERE ctx.contextlevel = :level AND ctx.instanceid = :userid
+                AND EXISTS (SELECT 1 FROM {' . summariser::TABLE . '} s WHERE s.userid = :suserid)',
+            ['level' => CONTEXT_USER, 'userid' => $userid, 'suserid' => $userid],
+        );
 
         // Being told that a limit on one's own spending has been reached is a fact
         // about that person, kept until the limit eases off. Like the summaries it has
@@ -243,6 +269,11 @@ class provider implements
                 ['userid' => $context->instanceid],
             );
             $userlist->add_from_sql(
+                'userid',
+                'SELECT DISTINCT userid FROM {' . summariser::TABLE . '} WHERE userid = :userid',
+                ['userid' => $context->instanceid],
+            );
+            $userlist->add_from_sql(
                 'subjectid',
                 'SELECT subjectid FROM {' . budget_notifier::TABLE . '}
                   WHERE kind = :kind AND subjectid = :userid',
@@ -272,6 +303,7 @@ class provider implements
         $userid = $contextlist->get_user()->id;
         self::export_requests($contextlist, $userid);
         self::export_recorded_requests($contextlist, (int) $userid);
+        self::export_record_summaries($contextlist, (int) $userid);
         self::export_summaries($contextlist, (int) $userid);
         self::export_notices($contextlist, (int) $userid);
 
@@ -308,6 +340,7 @@ class provider implements
         $repository = new key_repository($DB);
         if ($context instanceof \context_user) {
             $DB->delete_records(usage_aggregator::TABLE, ['userid' => (int) $context->instanceid]);
+            $DB->delete_records(summariser::TABLE, ['userid' => (int) $context->instanceid]);
             self::forget_notices((int) $context->instanceid, self::key_ids_of((int) $context->instanceid));
             $repository->delete_for_user((int) $context->instanceid);
         } else if ($context instanceof \context_course) {
@@ -369,6 +402,7 @@ class provider implements
         foreach ($contexts as $context) {
             if ($context instanceof \context_user && (int) $context->instanceid === $userid) {
                 $DB->delete_records(usage_aggregator::TABLE, ['userid' => $userid]);
+                $DB->delete_records(summariser::TABLE, ['userid' => $userid]);
 
                 return;
             }
@@ -706,5 +740,51 @@ class provider implements
                 (object) ['requests' => $rows],
             );
         }
+    }
+
+    /**
+     * Export the summarised days of one person's requests and attempts.
+     *
+     * Into their own user context, like the older summaries: a day of somebody's usage
+     * is a fact about them, not an event in a course.
+     *
+     * @param approved_contextlist $contextlist The contexts approved for export.
+     * @param int $userid The user.
+     */
+    protected static function export_record_summaries(approved_contextlist $contextlist, int $userid): void {
+        global $DB;
+
+        $usercontext = null;
+        foreach ($contextlist->get_contexts() as $context) {
+            if ($context instanceof \context_user && (int) $context->instanceid === $userid) {
+                $usercontext = $context;
+            }
+        }
+        if ($usercontext === null) {
+            return;
+        }
+        $rows = [];
+        foreach ($DB->get_records(summariser::TABLE, ['userid' => $userid], 'daystart ASC, id ASC') as $row) {
+            $rows[] = (object) [
+                'day' => transform::date($row->daystart),
+                'action' => $row->actionname,
+                'delegatedto' => $row->targetname,
+                'model' => $row->model === '-' ? null : $row->model,
+                'requests' => $row->requests,
+                'failures' => $row->failures,
+                'calls' => $row->calls,
+                'prompttokens' => $row->prompttokens,
+                'completiontokens' => $row->completiontokens,
+                'cost' => $row->cost,
+                'currency' => $row->currency === '-' ? null : $row->currency,
+            ];
+        }
+        if (!$rows) {
+            return;
+        }
+        writer::with_context($usercontext)->export_data(
+            [get_string('privacy:path:recordsummaries', 'local_airouter')],
+            (object) ['days' => $rows],
+        );
     }
 }
