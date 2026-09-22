@@ -114,6 +114,24 @@ final class adapter_provider_test extends \advanced_testcase {
         $this->assertSame(0, $DB->count_records('ai_providers', ['provider' => provider::INSTANCE_CLASS]));
     }
 
+    public function test_the_router_is_not_something_a_site_creates(): void {
+        // The other half of P-1. The AI provider screen offers exactly the installed
+        // aiprovider plugins, so what this plugin can contribute to that list is the
+        // connector and nothing else: no arrangement of settings, and nothing about
+        // the adapter, can put the router there. Removing the connector is therefore
+        // the whole of the work, with nothing left to check here afterwards.
+        $creatable = \core_plugin_manager::instance()->get_plugins_of_type('aiprovider');
+
+        foreach (array_keys($creatable) as $name) {
+            $this->assertStringStartsNotWith('airouter', $name);
+        }
+        $this->assertArrayNotHasKey('local_airouter', $creatable);
+
+        // Named, so that this test fails rather than quietly passing if the connector
+        // is removed without the claim above being revisited.
+        $this->assertArrayHasKey('router', $creatable);
+    }
+
     public function test_the_managed_request_does_not_reach_the_provider_ahead(): void {
         // P-2. The provider created first is the one core reaches first, and it
         // answers this action perfectly well. The site said the router answers it.
