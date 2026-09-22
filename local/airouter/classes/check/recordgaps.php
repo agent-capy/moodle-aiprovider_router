@@ -69,6 +69,13 @@ class recordgaps extends base {
             'state = :lost AND timeended >= :since',
             ['lost' => attempt_state::LOST, 'since' => $now - self::LOOKBACK],
         );
+        // A request given up on is a gap of its own, whether or not it got as far as
+        // asking anybody: what it would have recorded is not there either way.
+        $lostrequests = $DB->count_records_select(
+            usage_recorder::REQUEST_TABLE,
+            'reason = :lost AND timeended >= :since',
+            ['lost' => summariser::REASON_LOST, 'since' => $now - self::LOOKBACK],
+        );
         $stale = $DB->count_records_select(
             usage_recorder::ATTEMPT_TABLE,
             'state = :started AND timestarted < :cutoff',
@@ -79,7 +86,7 @@ class recordgaps extends base {
             ['open' => request_state::OPEN, 'cutoff' => $now - summariser::STALE_AFTER],
         );
 
-        if ($failed === 0 && $lost === 0 && $stale === 0) {
+        if ($failed === 0 && $lost === 0 && $lostrequests === 0 && $stale === 0) {
             return new result(result::OK, get_string('check:recordgaps:ok', 'local_airouter'));
         }
 
@@ -89,6 +96,7 @@ class recordgaps extends base {
             get_string('check:recordgaps:gaps_details', 'local_airouter', (object) [
                 'failed' => $failed,
                 'lost' => $lost,
+                'lostrequests' => $lostrequests,
                 'stale' => $stale,
             ]),
         );

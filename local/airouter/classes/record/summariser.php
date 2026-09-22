@@ -51,6 +51,9 @@ class summariser {
      */
     public const STALE_AFTER = 6 * HOURSECS;
 
+    /** @var string The reason written on a request given up on. */
+    public const REASON_LOST = 'lost';
+
     /** @var int How many ids one marking statement carries. */
     protected const CHUNK = 500;
 
@@ -97,7 +100,14 @@ class summariser {
         }
         try {
             $lost = $this->sweep($now);
-            $applied = $this->summarise($now);
+            try {
+                $applied = $this->summarise($now);
+            } catch (facts_changed_underneath $e) {
+                // Somebody was forgotten while the facts were being added up, and what
+                // was added up would have put them back. Nothing was written; the facts
+                // that remain are read again, once. A second change is left to the next run.
+                $applied = $this->summarise($now);
+            }
             $purged = $this->purge($now);
             $purgedsummaries = $this->purge_summaries($now);
         } finally {
@@ -145,7 +155,7 @@ class summariser {
                     attempts = (SELECT COUNT(1) FROM {' . usage_recorder::ATTEMPT_TABLE . '} a
                                  WHERE a.requestid = {' . usage_recorder::REQUEST_TABLE . '}.id)
               WHERE state = :open AND timestarted < :cutoff',
-            ['failed' => request_state::FAILED, 'reason' => 'lost', 'now' => $now,
+            ['failed' => request_state::FAILED, 'reason' => self::REASON_LOST, 'now' => $now,
                 'open' => request_state::OPEN, 'cutoff' => $cutoff],
         );
 
@@ -222,7 +232,7 @@ class summariser {
         if ($days <= 0) {
             return 0;
         }
-        $cutoff = self::day_of($now) - $days * DAYSECS;
+        $cutoff = self::days_before($now, $days);
         $params = ['cutoff' => $cutoff];
 
         $attempts = $this->db->count_records_select(
@@ -259,7 +269,7 @@ class summariser {
         if ($days <= 0) {
             return 0;
         }
-        $params = ['cutoff' => self::day_of($now) - $days * DAYSECS];
+        $params = ['cutoff' => self::days_before($now, $days)];
         $count = $this->db->count_records_select(self::TABLE, 'daystart < :cutoff', $params);
         if ($count > 0) {
             $this->db->delete_records_select(self::TABLE, 'daystart < :cutoff', $params);
@@ -400,16 +410,46 @@ class summariser {
     }
 
     /**
-     * Mark rows as applied, a chunk at a time.
+     * Mark rows as applied, a chunk at a time, and make sure every one of them was there.
+     *
+     * The facts were read at the start of the transaction, and a privacy deletion can
+     * have removed some of them, and committed, since. The summary rows already added
+     * up from them would put a forgotten person back. So after marking, the marked
+     * rows are counted: an update reaches only rows that exist now, so a row that has
+     * gone is not counted, whichever database this is and whatever it lets a
+     * transaction see. A shortfall means the run is thrown away and taken again.
      *
      * @param string $table The table.
      * @param int[] $ids The rows.
+     * @throws facts_changed_underneath When a row read earlier is no longer there.
      */
     protected function mark(string $table, array $ids): void {
         foreach (array_chunk($ids, self::CHUNK) as $chunk) {
             [$insql, $params] = $this->db->get_in_or_equal($chunk, SQL_PARAMS_NAMED);
             $this->db->set_field_select($table, 'applied', 1, "id $insql", $params);
+            $marked = $this->db->count_records_select($table, "applied = 1 AND id $insql", $params);
+            if ($marked !== count($chunk)) {
+                throw new facts_changed_underneath($table, count($chunk) - $marked);
+            }
         }
+    }
+
+    /**
+     * Midnight, in the server timezone, of the day so many days before a time.
+     *
+     * Counted in calendar days and not in multiples of 86400 seconds, because a day
+     * on which the clocks change is not 86400 seconds long, and a retention counted
+     * in seconds would then cut into the day it was meant to keep.
+     *
+     * @param int $time The time.
+     * @param int $days How many days back.
+     * @return int Midnight of that day.
+     */
+    public static function days_before(int $time, int $days): int {
+        $timezone = new \DateTimeZone(\core_date::get_server_timezone());
+        $day = (new \DateTimeImmutable('@' . $time))->setTimezone($timezone)->setTime(0, 0);
+
+        return $day->modify('-' . $days . ' days')->getTimestamp();
     }
 
     /**

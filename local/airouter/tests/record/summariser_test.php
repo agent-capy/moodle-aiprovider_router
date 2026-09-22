@@ -50,11 +50,13 @@ final class summariser_test extends \advanced_testcase {
      *
      * @param int $ended When it ended.
      * @param int $userid Who asked.
+     * @param int|null $contextid Where, or null for the system context.
      * @return \stdClass The request.
      */
-    private function request(int $ended, int $userid = 5): \stdClass {
+    private function request(int $ended, int $userid = 5, ?int $contextid = null): \stdClass {
         $request = $this->generator->create_request([
             'userid' => $userid, 'courseid' => 7, 'answeredby' => 2,
+            'contextid' => $contextid ?? \context_system::instance()->id,
             'timestarted' => $ended - 10, 'timeended' => $ended,
         ]);
         $this->generator->create_attempt([
@@ -136,6 +138,11 @@ final class summariser_test extends \advanced_testcase {
 
     public function test_an_interrupted_run_rerun_equals_a_clean_run(): void {
         global $DB;
+        // On PostgreSQL the test framework wraps each test in a transaction of its own,
+        // and a rollback inside it marks the whole thing for rollback, so that the next
+        // commit in the same test fails. This test is about a rollback, so it asks to
+        // be reset by truncation instead.
+        $this->preventResetByRollback();
         $this->request($this->now, 5);
         $this->request($this->now + 60, 6);
         (new summariser($DB))->run($this->now + DAYSECS);
@@ -290,6 +297,121 @@ final class summariser_test extends \advanced_testcase {
         $this->assertSame(request_state::OPEN, $DB->get_field(usage_recorder::REQUEST_TABLE, 'state', ['id' => $recent->id]));
     }
 
+    /**
+     * Run a privacy deletion for somebody on a connection of its own, and commit it.
+     *
+     * The summariser reads on the test's connection. A deletion on the same connection
+     * would be inside the summariser's transaction and would prove nothing; it has to
+     * commit underneath, as another process would.
+     *
+     * @param \stdClass $user Who is to be forgotten.
+     */
+    private function forget_on_another_connection(\stdClass $user): void {
+        global $CFG, $DB;
+        $reader = $DB;
+        $writer = \moodle_database::get_driver_instance($CFG->dbtype, $CFG->dblibrary);
+        $writer->connect($CFG->dbhost, $CFG->dbuser, $CFG->dbpass, $CFG->dbname, $CFG->prefix, $CFG->dboptions);
+        try {
+            $DB = $writer;
+            \local_airouter\privacy\provider::delete_data_for_user(new \core_privacy\local\request\approved_contextlist(
+                $user,
+                'local_airouter',
+                [\context_user::instance((int) $user->id)->id],
+            ));
+        } finally {
+            $DB = $reader;
+            $writer->dispose();
+        }
+    }
+
+    public function test_somebody_forgotten_while_the_run_is_on_is_not_put_back(): void {
+        global $DB;
+        // Two connections commit for real, so the test cannot be reset by rollback.
+        $this->preventResetByRollback();
+        $user = $this->getDataGenerator()->create_user();
+        $other = $this->getDataGenerator()->create_user();
+        // Made in their own user contexts, which is what a deletion request names.
+        $this->request($this->now, (int) $user->id, (int) \context_user::instance((int) $user->id)->id);
+        $this->request($this->now + 60, (int) $other->id, (int) \context_user::instance((int) $other->id)->id);
+
+        $fired = false;
+        $summariser = new summariser($DB, function (string $at) use (&$fired, $user): void {
+            // The facts have been read and added up in memory; nothing is written yet.
+            if ($at === 'attempt_added' && !$fired) {
+                $fired = true;
+                $this->forget_on_another_connection($user);
+            }
+        });
+        $result = $summariser->run($this->now + DAYSECS);
+
+        $this->assertTrue($fired);
+        // The run noticed, threw its figures away, and took the remaining facts again.
+        $this->assertSame(3, $result['applied'], 'Only the other person\'s facts were applied.');
+        $this->assertSame(
+            0,
+            $DB->count_records(summariser::TABLE, ['userid' => $user->id]),
+            'A deletion that committed during the run must not be undone by the run.'
+        );
+        $this->assertSame(0, $DB->count_records(usage_recorder::REQUEST_TABLE, ['userid' => $user->id]));
+        $this->assertSame(1, (int) $DB->get_field_sql(
+            'SELECT SUM(requests) FROM {' . summariser::TABLE . '} WHERE userid = :u',
+            ['u' => $other->id],
+        ));
+        // Nothing left half done for the next run to pick up.
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE, ['applied' => 0]));
+    }
+
+    public function test_a_request_given_up_on_without_any_attempt_is_still_a_gap(): void {
+        global $DB;
+        set_config('defaulttarget', 1, 'local_airouter');
+        $request = $this->generator->create_request([
+            'state' => request_state::OPEN, 'timestarted' => time() - 7 * HOURSECS, 'timeended' => null,
+        ]);
+        $this->assertSame(result::WARNING, (new recordgaps())->get_result()->get_status(), 'Open too long.');
+
+        (new summariser($DB))->run(time());
+
+        $this->assertSame(summariser::REASON_LOST, $DB->get_field(usage_recorder::REQUEST_TABLE, 'reason', ['id' => $request->id]));
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+        $result = (new recordgaps())->get_result();
+        $this->assertSame(result::WARNING, $result->get_status(), 'Giving up on it does not make it recorded.');
+        $this->assertStringContainsString('1 request(s) in the last 30 days', $result->get_details());
+    }
+
+    /**
+     * Days on which retention arithmetic in seconds goes wrong, and one on which it does not.
+     *
+     * @return array<string, array{0: string, 1: string}> Timezone and the day after the boundary.
+     */
+    public static function clock_changes(): array {
+        return [
+            'autumn, a 25 hour day' => ['America/New_York', '2026-11-02'],
+            'spring, a 23 hour day' => ['America/New_York', '2026-03-09'],
+            'no change' => ['UTC', '2026-11-02'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('clock_changes')]
+    public function test_retention_is_counted_in_calendar_days_not_in_seconds(string $timezone, string $date): void {
+        global $DB;
+        set_config('timezone', $timezone);
+        set_config(usage_aggregator::RETENTION_SETTING, 1, 'local_airouter');
+        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 1, 'local_airouter');
+        $today = new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone($timezone));
+        $yesterday = $today->modify('-1 day');
+        $before = $today->modify('-2 days');
+        // Half an hour into each day: inside the day whichever length it has.
+        $kept = $this->request($yesterday->getTimestamp() + 1800, 5);
+        $gone = $this->request($before->getTimestamp() + 1800, 5);
+
+        (new summariser($DB))->run($today->getTimestamp() + 10 * HOURSECS);
+
+        $days = array_map('intval', $DB->get_fieldset_sql('SELECT DISTINCT daystart FROM {' . summariser::TABLE . '}'));
+        $this->assertSame([$yesterday->getTimestamp()], $days, 'The whole of yesterday is kept, 23, 24 or 25 hours long.');
+        $this->assertSame(1, $DB->count_records(usage_recorder::REQUEST_TABLE, ['id' => $kept->id]));
+        $this->assertSame(0, $DB->count_records(usage_recorder::REQUEST_TABLE, ['id' => $gone->id]));
+    }
+
     public function test_the_check_is_quiet_when_nothing_is_missing_and_says_what_is_when_it_is(): void {
         global $DB;
         // A site that routes: a default target makes the router configured.
@@ -311,7 +433,7 @@ final class summariser_test extends \advanced_testcase {
         $result = (new recordgaps())->get_result();
         $this->assertSame(result::WARNING, $result->get_status());
         $this->assertStringContainsString('2 write(s) failed', $result->get_details());
-        $this->assertStringContainsString('1 attempt(s) in the last 30 days', $result->get_details());
+        $this->assertStringContainsString('1 attempt(s) and 0 request(s) in the last 30 days', $result->get_details());
         $this->assertStringContainsString('1 request(s) or attempt(s) have been open', $result->get_details());
     }
 
