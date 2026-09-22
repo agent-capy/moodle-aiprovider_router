@@ -57,6 +57,18 @@ class usage_recorder {
     public const FAILURES_SETTING = 'recordfailures';
 
     /**
+     * @var string The lock under which an attempt is attached to its request.
+     *
+     * Held for an existence check and an insert, and by a privacy deletion for its
+     * deletes, so that the two cannot interleave: a request that has been forgotten
+     * while in flight does not get a child a moment later that nothing can find.
+     */
+    public const LOCK = 'record';
+
+    /** @var int How long to wait for that lock before giving the attempt up as unrecorded. */
+    public const LOCK_TIMEOUT = 5;
+
+    /**
      * Constructor.
      *
      * @param \moodle_database $db The database to write to.
@@ -129,17 +141,34 @@ class usage_recorder {
             return null;
         }
         try {
-            return $this->db->insert_record(self::ATTEMPT_TABLE, (object) [
-                'requestid' => $requestid,
-                'seq' => $seq,
-                'targetid' => (int) $target->id,
-                'targetname' => $target->name,
-                'targetprovider' => $component,
-                'keysource' => $keysource,
-                'keyid' => $keyid,
-                'state' => attempt_state::STARTED,
-                'timestarted' => $this->now(),
-            ]);
+            $lock = self::lock_factory()->get_lock(self::LOCK, self::LOCK_TIMEOUT);
+            if (!$lock) {
+                throw new \RuntimeException('the record lock was not obtained in ' . self::LOCK_TIMEOUT . ' seconds');
+            }
+            try {
+                // The request may have been forgotten since it was opened: a deletion
+                // request reaches a request in flight like any other. An attempt is
+                // personal only through its request, so one made after the request has
+                // gone would be personal data nothing could find again. It is not
+                // recorded, and that is not a failure.
+                if (!$this->db->record_exists(self::REQUEST_TABLE, ['id' => $requestid])) {
+                    return null;
+                }
+
+                return $this->db->insert_record(self::ATTEMPT_TABLE, (object) [
+                    'requestid' => $requestid,
+                    'seq' => $seq,
+                    'targetid' => (int) $target->id,
+                    'targetname' => $target->name,
+                    'targetprovider' => $component,
+                    'keysource' => $keysource,
+                    'keyid' => $keyid,
+                    'state' => attempt_state::STARTED,
+                    'timestarted' => $this->now(),
+                ]);
+            } finally {
+                $lock->release();
+            }
         } catch (\Throwable $e) {
             $this->note_failure('record an attempt', $e);
 
@@ -154,13 +183,27 @@ class usage_recorder {
      * said it used is kept as it said it, including when it said nothing: a null count
      * is a count nobody gave, and is not turned into zero.
      *
+     * An attempt ends once. The update applies only to a row still started, in one
+     * statement, so that the same ending sent twice -- by a retried process, say --
+     * leaves the first ending's cost, currency, usage and time exactly as they were,
+     * whatever the rates or the date have become since. A row that has gone is left
+     * gone: an update recreates nothing.
+     *
      * @param int|null $attemptid The attempt, or null when it could not be recorded.
      * @param string $state One of attempt_state::TERMINAL.
      * @param usage $usage What the target reported using.
      * @param string|null $model The model the target said answered, already checked.
      * @param int|null $errorcode The error code, for a failure.
+     * @param string $component The target's component, which is what it is priced by.
      */
-    public function end_attempt(?int $attemptid, string $state, usage $usage, ?string $model, ?int $errorcode): void {
+    public function end_attempt(
+        ?int $attemptid,
+        string $state,
+        usage $usage,
+        ?string $model,
+        ?int $errorcode,
+        string $component,
+    ): void {
         if ($attemptid === null) {
             return;
         }
@@ -168,22 +211,30 @@ class usage_recorder {
             throw new \coding_exception('Not a state an attempt can end in: ' . $state);
         }
         try {
-            $attempt = $this->db->get_record(self::ATTEMPT_TABLE, ['id' => $attemptid], '*', MUST_EXIST);
             $now = $this->now();
-            $price = $this->prices->find($attempt->targetprovider, $model, $now);
-            $this->db->update_record(self::ATTEMPT_TABLE, (object) [
-                'id' => $attemptid,
-                'state' => $state,
-                'errorcode' => $errorcode,
-                'model' => $model,
-                'prompttokens' => $usage->prompttokens,
-                'completiontokens' => $usage->completiontokens,
-                'images' => $usage->images,
-                'usageknown' => (int) $usage->is_known(),
-                'cost' => $price?->cost($usage->prompttokens, $usage->completiontokens, $usage->images),
-                'currency' => $price === null ? null : price_book::get_currency(),
-                'timeended' => $now,
-            ]);
+            $price = $this->prices->find($component, $model, $now);
+            $this->db->execute(
+                'UPDATE {' . self::ATTEMPT_TABLE . '}
+                    SET state = :state, errorcode = :errorcode, model = :model,
+                        prompttokens = :prompttokens, completiontokens = :completiontokens,
+                        images = :images, usageknown = :usageknown,
+                        cost = :cost, currency = :currency, timeended = :timeended
+                  WHERE id = :id AND state = :started',
+                [
+                    'state' => $state,
+                    'errorcode' => $errorcode,
+                    'model' => $model,
+                    'prompttokens' => $usage->prompttokens,
+                    'completiontokens' => $usage->completiontokens,
+                    'images' => $usage->images,
+                    'usageknown' => (int) $usage->is_known(),
+                    'cost' => $price?->cost($usage->prompttokens, $usage->completiontokens, $usage->images),
+                    'currency' => $price === null ? null : price_book::get_currency(),
+                    'timeended' => $now,
+                    'id' => $attemptid,
+                    'started' => attempt_state::STARTED,
+                ],
+            );
         } catch (\Throwable $e) {
             $this->note_failure('close an attempt', $e);
         }
@@ -221,21 +272,41 @@ class usage_recorder {
             throw new \coding_exception('Not a state a request can end in: ' . $state);
         }
         try {
-            $this->db->update_record(self::REQUEST_TABLE, (object) [
-                'id' => $requestid,
-                'state' => $state,
-                'reason' => $reason,
-                'errorcode' => $errorcode,
-                'answeredby' => $answeredby,
-                'ruleid' => $rule === null ? null : (int) $rule->get('id'),
-                'rulename' => $rule === null ? null : $rule->get('name'),
-                'keysource' => $keysource,
-                'attempts' => $attempts,
-                'timeended' => $this->now(),
-            ]);
+            // Closed once, for the same reason an attempt ends once: the day a request
+            // is counted in is the day it was closed, and a retried closing must not
+            // move it to another.
+            $this->db->execute(
+                'UPDATE {' . self::REQUEST_TABLE . '}
+                    SET state = :state, reason = :reason, errorcode = :errorcode,
+                        answeredby = :answeredby, ruleid = :ruleid, rulename = :rulename,
+                        keysource = :keysource, attempts = :attempts, timeended = :timeended
+                  WHERE id = :id AND state = :open',
+                [
+                    'state' => $state,
+                    'reason' => $reason,
+                    'errorcode' => $errorcode,
+                    'answeredby' => $answeredby,
+                    'ruleid' => $rule === null ? null : (int) $rule->get('id'),
+                    'rulename' => $rule === null ? null : $rule->get('name'),
+                    'keysource' => $keysource,
+                    'attempts' => $attempts,
+                    'timeended' => $this->now(),
+                    'id' => $requestid,
+                    'open' => request_state::OPEN,
+                ],
+            );
         } catch (\Throwable $e) {
             $this->note_failure('close a request', $e);
         }
+    }
+
+    /**
+     * The lock factory the recorder and the privacy deletion share.
+     *
+     * @return \core\lock\lock_factory The factory.
+     */
+    public static function lock_factory(): \core\lock\lock_factory {
+        return \core\lock\lock_config::get_lock_factory('local_airouter');
     }
 
     /**

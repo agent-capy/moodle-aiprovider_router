@@ -117,9 +117,15 @@ trait routing_harness {
      * @param ai_provider[] $instances The provider instances the site has.
      * @param array $config The router instance configuration.
      * @param \context|null $context Where the request is raised.
+     * @param delegator|null $delegator The delegator to use, or null for the real one.
      * @return object The response the router produced.
      */
-    protected function route(array $instances, array $config = ['defaulttarget' => 7], ?\context $context = null): object {
+    protected function route(
+        array $instances,
+        array $config = ['defaulttarget' => 7],
+        ?\context $context = null,
+        ?delegator $delegator = null,
+    ): object {
         global $DB;
 
         $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: json_encode($config), id: 1);
@@ -150,7 +156,7 @@ trait routing_harness {
             }
         };
 
-        $processor = new class ($router, $action, $resolver, new delegator($DB)) extends process_generate_text {
+        $processor = new class ($router, $action, $resolver, $delegator ?? new delegator($DB)) extends process_generate_text {
             /**
              * Constructor.
              *

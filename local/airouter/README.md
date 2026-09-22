@@ -490,6 +490,16 @@ cannot know, the record does not pretend to know.
 A write that fails is counted, so that a site can be told its history has holes rather
 than find them by comparing a bill with a report.
 
+An ending is written once. A retried process that sends the same ending again changes
+nothing: the cost stays what it was at the rate of the day, and the day stays the day.
+A request the router turns away at the door, before any provider is chosen, is
+recorded too, as a declined request with no attempt.
+
+Somebody who asks to be forgotten while their request is still in flight is forgotten:
+the request and the attempts made so far go, and the attempts still to come are not
+recorded, because a record nothing can trace back to a person is a record nobody can
+delete for them.
+
 The screens and the budget conditions on this page still read the older, one row per
 request record while they are moved across to these tables; until then the two are
 written side by side. The older record and its table go when the last reader has moved.

@@ -622,12 +622,29 @@ class provider implements
     protected static function delete_recorded_requests(string $where, array $params): void {
         global $DB;
 
-        $DB->delete_records_select(
-            usage_recorder::ATTEMPT_TABLE,
-            'requestid IN (SELECT id FROM {' . usage_recorder::REQUEST_TABLE . "} WHERE {$where})",
-            $params,
-        );
-        $DB->delete_records_select(usage_recorder::REQUEST_TABLE, $where, $params);
+        // Under the lock the recorder takes to attach an attempt, so that a request
+        // deleted here cannot acquire a child in between these two statements, and in
+        // one transaction, so that it cannot lose its children and survive.
+        $lock = usage_recorder::lock_factory()->get_lock(usage_recorder::LOCK, 30);
+        if (!$lock) {
+            debugging('local_airouter: deleting recorded requests without the record lock', DEBUG_DEVELOPER);
+        }
+        $transaction = $DB->start_delegated_transaction();
+        try {
+            $DB->delete_records_select(
+                usage_recorder::ATTEMPT_TABLE,
+                'requestid IN (SELECT id FROM {' . usage_recorder::REQUEST_TABLE . "} WHERE {$where})",
+                $params,
+            );
+            $DB->delete_records_select(usage_recorder::REQUEST_TABLE, $where, $params);
+            $transaction->allow_commit();
+        } catch (\Throwable $e) {
+            $transaction->rollback($e);
+        } finally {
+            if ($lock) {
+                $lock->release();
+            }
+        }
     }
 
     /**

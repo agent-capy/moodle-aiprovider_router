@@ -17,12 +17,16 @@
 namespace local_airouter\record;
 
 use local_airouter\abstract_processor;
+use local_airouter\fixture_dropped_action;
+use local_airouter\managed_policy;
 use local_airouter\rule;
 use local_airouter\routing_harness;
 
 defined('MOODLE_INTERNAL') || die();
 
 require_once(__DIR__ . '/../fixtures/routing_harness.php');
+require_once(__DIR__ . '/../fixtures/fixture_dropped_action.php');
+require_once(__DIR__ . '/../fixtures/mock/process_fixture_dropped_action.php');
 
 /**
  * What a routed request leaves in the request and attempt tables.
@@ -315,6 +319,146 @@ final class recording_test extends \advanced_testcase {
         $this->assertSame((int) $second->get('id'), (int) $attempts[1]->keyid);
         // And nothing here was charged to the site.
         $this->assertNotContains(rule::KEYSOURCE_SITE, array_column($attempts, 'keysource'));
+    }
+
+    // R5-02: a request the manager turns away at the door, before any processor, is
+    // still a request somebody made, and the site kept this action inside the router.
+    public function test_a_request_refused_at_the_managers_door_is_one_declined_request(): void {
+        global $DB;
+        // Managed, and nothing can take it: no instance, and the router does not
+        // declare this action. The refusal happens in the manager, not in a processor.
+        managed_policy::set_managed_actions([fixture_dropped_action::class]);
+        $manager = \core\di::get(\core_ai\manager::class);
+
+        $response = $manager->process_action(new fixture_dropped_action(\context_system::instance()->id));
+
+        $this->assertFalse($response->get_success());
+        $request = $this->request();
+        $this->assertSame(request_state::DECLINED, $request->state);
+        $this->assertSame('router_unavailable', $request->reason);
+        $this->assertSame(503, (int) $request->errorcode);
+        $this->assertSame(0, (int) $request->attempts);
+        $this->assertSame('fixture_dropped_action', $request->actionname);
+        $this->assertSame([], $this->attempts());
+    }
+
+    public function test_a_request_refused_for_a_switched_off_instance_is_one_declined_request(): void {
+        global $DB;
+        managed_policy::set_managed_actions([\core_ai\aiactions\generate_text::class]);
+        $manager = \core\di::get(\core_ai\manager::class);
+        $manager->create_provider_instance(
+            classname: \local_airouter\provider::INSTANCE_CLASS,
+            name: 'Switched off router',
+            enabled: false,
+            config: ['nomatch' => \local_airouter\provider::NOMATCH_DECLINE],
+            actionconfig: [\core_ai\aiactions\generate_text::class => ['enabled' => true]],
+        );
+
+        $response = $manager->process_action(new \core_ai\aiactions\generate_text(
+            contextid: \context_system::instance()->id,
+            userid: 2,
+            prompttext: 'Hello',
+        ));
+
+        $this->assertFalse($response->get_success());
+        $this->assertSame(request_state::DECLINED, $this->request()->state);
+        $this->assertSame('router_unavailable', $this->request()->reason);
+        $this->assertSame([], $this->attempts());
+    }
+
+    /**
+     * A delegator that runs something just before the first target is asked.
+     *
+     * @param \Closure $beforefirst What to run.
+     * @return \local_airouter\delegator The delegator.
+     */
+    private function delegator_that_first(\Closure $beforefirst): \local_airouter\delegator {
+        global $DB;
+
+        return new class ($DB, $beforefirst) extends \local_airouter\delegator {
+            /** @var bool Whether the first call has been made. */
+            private bool $called = false;
+
+            /**
+             * Constructor.
+             *
+             * @param \moodle_database $db The database.
+             * @param \Closure $beforefirst What to run before the first delegation.
+             */
+            public function __construct(
+                \moodle_database $db,
+                /** @var \Closure What to run before the first delegation. */
+                private readonly \Closure $beforefirst,
+            ) {
+                parent::__construct($db);
+            }
+
+            #[\Override]
+            public function delegate(
+                \core_ai\provider $target,
+                \core_ai\aiactions\base $action,
+            ): \core_ai\aiactions\responses\response_base {
+                if (!$this->called) {
+                    $this->called = true;
+                    ($this->beforefirst)();
+                }
+
+                return parent::delegate($target, $action);
+            }
+        };
+    }
+
+    // R5-03: a person forgotten while their request is in flight. The request and the
+    // attempt already made go; the attempts still to come must not appear afterwards
+    // as rows nothing can trace back to anybody.
+    public function test_a_request_forgotten_in_flight_leaves_nothing_behind(): void {
+        global $DB;
+        $this->add('to seven', 7);
+        $context = \context_system::instance();
+        $erase = static function () use ($context): void {
+            \local_airouter\privacy\provider::delete_data_for_user(
+                new \core_privacy\local\request\approved_contextlist(get_admin(), 'local_airouter', [$context->id]),
+            );
+        };
+
+        $response = $this->route(
+            instances: [
+                $this->target(7, \aiprovider_mock\provider::FAILURE, ['errorcode' => 500]),
+                $this->target(8, \aiprovider_mock\provider::SUCCESS),
+            ],
+            config: ['defaulttarget' => 8],
+            delegator: $this->delegator_that_first($erase),
+        );
+
+        // The person still got their answer; forgetting them is not refusing them.
+        $this->assertTrue($response->get_success());
+        $this->assertSame(0, $DB->count_records(usage_recorder::REQUEST_TABLE));
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE), 'The fallback attempt must not appear.');
+        $this->assertDebuggingNotCalled();
+        $this->assertSame(0, usage_recorder::get_failure_count(), 'Being forgotten is not a failure to record.');
+
+        // And forgetting them again finds nothing, because nothing was left.
+        $erase();
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+    }
+
+    public function test_a_request_forgotten_after_completion_goes_with_all_its_attempts(): void {
+        global $DB;
+        $this->add('to seven', 7);
+        $this->route(config: ['defaulttarget' => 8], instances: [
+            $this->target(7, \aiprovider_mock\provider::FAILURE, ['errorcode' => 500]),
+            $this->target(8, \aiprovider_mock\provider::SUCCESS),
+        ]);
+        $this->assertSame(2, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+
+        \local_airouter\privacy\provider::delete_data_for_user(new \core_privacy\local\request\approved_contextlist(
+            get_admin(),
+            'local_airouter',
+            [\context_system::instance()->id],
+        ));
+
+        $this->assertSame(0, $DB->count_records(usage_recorder::REQUEST_TABLE));
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
     }
 
     /**

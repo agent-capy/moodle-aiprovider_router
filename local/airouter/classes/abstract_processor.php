@@ -277,7 +277,14 @@ abstract class abstract_processor extends \core_ai\process_base {
                 $threw = true;
                 $this->report_target_failure($target, $e);
                 // What it used, if anything, is unknown: not nothing.
-                $this->get_recorder()->end_attempt($attemptid, attempt_state::THREW, usage::unknown(), null, null);
+                $this->get_recorder()->end_attempt(
+                    $attemptid,
+                    attempt_state::THREW,
+                    usage::unknown(),
+                    null,
+                    null,
+                    self::component_of($target),
+                );
                 continue;
             }
 
@@ -290,6 +297,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                     $this->usage_of($failed, false),
                     self::modelled($failed['model'] ?? null),
                     (int) $response->get_errorcode() ?: null,
+                    self::component_of($target),
                 );
                 if ($candidate->is_byok() && $this->was_key_refused($response)) {
                     // The key reached the provider and the provider would not have it.
@@ -321,6 +329,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                     $this->usage_of($data, true),
                     self::modelled($data['model'] ?? null),
                     null,
+                    self::component_of($target),
                 );
                 $this->end_request(request_state::SUCCEEDED, (int) $target->id);
 
@@ -336,6 +345,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                 $this->usage_of($data, false),
                 self::modelled($data['model'] ?? null),
                 null,
+                self::component_of($target),
             );
 
             // A success carrying no content must never reach the placement: the user

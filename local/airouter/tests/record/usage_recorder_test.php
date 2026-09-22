@@ -99,7 +99,7 @@ final class usage_recorder_test extends \advanced_testcase {
         $request = $this->recorder->begin_request($this->context());
         $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
         $this->clock += 90;
-        $this->recorder->end_attempt($id, attempt_state::SUCCEEDED, new usage(3, 4), 'gpt', null);
+        $this->recorder->end_attempt($id, attempt_state::SUCCEEDED, new usage(3, 4), 'gpt', null, 'aiprovider_openai');
 
         $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $id], '*', MUST_EXIST);
         $this->assertSame($this->clock - 90, (int) $row->timestarted);
@@ -113,7 +113,7 @@ final class usage_recorder_test extends \advanced_testcase {
         $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
 
         $this->expectException(\coding_exception::class);
-        $this->recorder->end_attempt($id, attempt_state::STARTED, usage::unknown(), null, null);
+        $this->recorder->end_attempt($id, attempt_state::STARTED, usage::unknown(), null, null, 'aiprovider_openai');
     }
 
     public function test_a_request_cannot_end_open(): void {
@@ -126,10 +126,100 @@ final class usage_recorder_test extends \advanced_testcase {
     public function test_a_request_that_could_not_be_opened_is_let_go_of_quietly(): void {
         global $DB;
         // Nothing can be written for a request that has no row, and nothing tries to.
-        $this->recorder->end_attempt(null, attempt_state::LOST, usage::unknown(), null, null);
+        $this->recorder->end_attempt(null, attempt_state::LOST, usage::unknown(), null, null, 'aiprovider_openai');
         $this->recorder->end_request(null, request_state::FAILED, 'x', 500, null, null, rule::KEYSOURCE_SITE, 0);
         $this->assertSame(null, $this->recorder->begin_attempt(null, 1, $this->target(), 'aiprovider_openai', 'site', null));
         $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+        $this->assertDebuggingNotCalled();
+    }
+
+    /**
+     * A rate for the openai provider, any model.
+     *
+     * @param float $promptrate Per million prompt tokens.
+     * @param int $timefrom When the rate takes effect.
+     */
+    private function rate(float $promptrate, int $timefrom = 0): void {
+        $rate = new \local_airouter\price();
+        $rate->set('provider', 'aiprovider_openai');
+        $rate->set('model', '');
+        $rate->set('promptrate', $promptrate);
+        $rate->set('timefrom', $timefrom);
+        $rate->create();
+    }
+
+    public function test_the_same_ending_sent_again_changes_nothing(): void {
+        global $DB;
+        $this->rate(1.0);
+        $request = $this->recorder->begin_request($this->context());
+        $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
+        $this->recorder->end_attempt($id, attempt_state::SUCCEEDED, new usage(1000000, 0), 'm', null, 'aiprovider_openai');
+        $before = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $id], '*', MUST_EXIST);
+        $this->assertEqualsWithDelta(1.0, (float) $before->cost, 0.000001);
+
+        // A day later, at nine times the price, a retried process sends the same ending.
+        $this->rate(9.0, $this->clock + HOURSECS);
+        $this->clock += DAYSECS;
+        $this->recorder->end_attempt($id, attempt_state::SUCCEEDED, new usage(1000000, 0), 'm', null, 'aiprovider_openai');
+
+        $after = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $id], '*', MUST_EXIST);
+        $this->assertEquals($before, $after, 'An ending is written once. Rates and days move on; the record does not.');
+        $this->assertDebuggingNotCalled();
+    }
+
+    public function test_a_different_ending_sent_later_is_not_believed_either(): void {
+        global $DB;
+        $request = $this->recorder->begin_request($this->context());
+        $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
+        $this->recorder->end_attempt($id, attempt_state::SUCCEEDED, new usage(3, 4), 'm', null, 'aiprovider_openai');
+        $this->recorder->end_attempt($id, attempt_state::FAILED, usage::unknown(), null, 500, 'aiprovider_openai');
+
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $id], '*', MUST_EXIST);
+        $this->assertSame(attempt_state::SUCCEEDED, $row->state);
+        $this->assertSame(3, (int) $row->prompttokens);
+        $this->assertNull($row->errorcode);
+    }
+
+    public function test_a_request_closed_again_keeps_the_day_it_was_closed_on(): void {
+        global $DB;
+        $request = $this->recorder->begin_request($this->context());
+        $this->recorder->end_request($request, request_state::DECLINED, 'norulematched', 503, null, null, rule::KEYSOURCE_SITE, 0);
+        $before = $DB->get_record(usage_recorder::REQUEST_TABLE, ['id' => $request], '*', MUST_EXIST);
+
+        $this->clock += DAYSECS;
+        $this->recorder->end_request($request, request_state::DECLINED, 'norulematched', 503, null, null, rule::KEYSOURCE_SITE, 0);
+
+        $after = $DB->get_record(usage_recorder::REQUEST_TABLE, ['id' => $request], '*', MUST_EXIST);
+        $this->assertSame((int) $before->timeended, (int) $after->timeended);
+        $this->assertEquals($before, $after);
+    }
+
+    public function test_an_attempt_is_not_attached_to_a_request_that_has_been_forgotten(): void {
+        global $DB;
+        $request = $this->recorder->begin_request($this->context());
+        $DB->delete_records(usage_recorder::REQUEST_TABLE, ['id' => $request]);
+
+        $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
+
+        $this->assertNull($id);
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+        // Not a failure: the request was forgotten on purpose.
+        $this->assertDebuggingNotCalled();
+        $this->assertSame(0, usage_recorder::get_failure_count());
+    }
+
+    public function test_an_ending_for_a_row_that_has_gone_recreates_nothing(): void {
+        global $DB;
+        $request = $this->recorder->begin_request($this->context());
+        $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
+        $DB->delete_records(usage_recorder::ATTEMPT_TABLE);
+        $DB->delete_records(usage_recorder::REQUEST_TABLE);
+
+        $this->recorder->end_attempt($id, attempt_state::SUCCEEDED, new usage(1, 1), 'm', null, 'aiprovider_openai');
+        $this->recorder->end_request($request, request_state::SUCCEEDED, null, null, 42, null, rule::KEYSOURCE_SITE, 1);
+
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+        $this->assertSame(0, $DB->count_records(usage_recorder::REQUEST_TABLE));
         $this->assertDebuggingNotCalled();
     }
 

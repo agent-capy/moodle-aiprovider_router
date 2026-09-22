@@ -19,6 +19,8 @@ namespace local_airouter;
 use core_ai\aiactions\base as action_base;
 use core_ai\aiactions\responses\response_base;
 use core_ai\provider as ai_provider;
+use local_airouter\record\request_state;
+use local_airouter\record\usage_recorder;
 
 /**
  * The manager Moodle asks, for sites that have placed actions under the router.
@@ -74,6 +76,22 @@ class routing_manager extends \core_ai\manager {
             // is the case where nothing can run at all -- a stored instance that is
             // switched off, or an action this release of the router has no processor
             // for. There is no code that could be asked to explain itself.
+            //
+            // The plugin's own record is written, though: the site kept this action
+            // inside the router, and a request it turned away at the door is still a
+            // request somebody made. One row, declined, with no attempt.
+            $recorder = new usage_recorder($this->db);
+            $recorder->end_request(
+                $recorder->begin_request(new evaluation_context($action)),
+                request_state::DECLINED,
+                'router_unavailable',
+                503,
+                null,
+                null,
+                rule::KEYSOURCE_SITE,
+                0,
+            );
+
             return response_factory::failure(
                 $action,
                 503,
