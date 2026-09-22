@@ -101,8 +101,15 @@ class provider extends \core_ai\provider {
         return $this->config[$name] ?? $default;
     }
 
+    /** @var int[] The instance id each time this provider was asked about rate limits. */
+    public static array $ratechecks = [];
+
     #[\Override]
     public function is_request_allowed(\core_ai\aiactions\base $action): array|bool {
+        // How many times a delegate is asked is how many units of its allowance one
+        // attempt costs, so the asking is what has to be counted.
+        self::$ratechecks[] = (int) $this->id;
+
         // Core's own limiter is not used: it would need the fixture to be an installed
         // component. What matters to the router is how it behaves when a target says no.
         if ($this->get_scenario() !== self::RATELIMIT) {
