@@ -16,8 +16,8 @@
 
 namespace local_airouter\record;
 
+use local_airouter\retention_policy;
 use local_airouter\check\recordgaps;
-use local_airouter\usage_aggregator;
 use core\check\result;
 
 /**
@@ -199,7 +199,7 @@ final class summariser_test extends \advanced_testcase {
 
     public function test_purge_removes_only_what_has_been_counted(): void {
         global $DB;
-        set_config(usage_aggregator::RETENTION_SETTING, 30, 'local_airouter');
+        set_config(retention_policy::DETAIL_SETTING, 30, 'local_airouter');
         $old = $this->now - 40 * DAYSECS;
         $counted = $this->request($old, 5);
         (new summariser($DB))->run($old + DAYSECS);
@@ -223,7 +223,7 @@ final class summariser_test extends \advanced_testcase {
 
     public function test_a_retention_of_zero_keeps_everything(): void {
         global $DB;
-        set_config(usage_aggregator::RETENTION_SETTING, 0, 'local_airouter');
+        set_config(retention_policy::DETAIL_SETTING, 0, 'local_airouter');
         $this->request($this->now - 400 * DAYSECS);
         $result = (new summariser($DB))->run($this->now);
 
@@ -233,7 +233,7 @@ final class summariser_test extends \advanced_testcase {
 
     public function test_a_summary_past_its_own_retention_goes(): void {
         global $DB;
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 10, 'local_airouter');
+        set_config(retention_policy::SUMMARY_SETTING, 10, 'local_airouter');
         $this->request($this->now - 20 * DAYSECS);
         $this->request($this->now - 5 * DAYSECS);
         $result = (new summariser($DB))->run($this->now);
@@ -395,8 +395,8 @@ final class summariser_test extends \advanced_testcase {
     public function test_retention_is_counted_in_calendar_days_not_in_seconds(string $timezone, string $date): void {
         global $DB;
         set_config('timezone', $timezone);
-        set_config(usage_aggregator::RETENTION_SETTING, 1, 'local_airouter');
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 1, 'local_airouter');
+        set_config(retention_policy::DETAIL_SETTING, 1, 'local_airouter');
+        set_config(retention_policy::SUMMARY_SETTING, 1, 'local_airouter');
         $today = new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone($timezone));
         $yesterday = $today->modify('-1 day');
         $before = $today->modify('-2 days');

@@ -471,6 +471,5 @@ final class recording_test extends \advanced_testcase {
         global $DB;
         $DB->delete_records(usage_recorder::ATTEMPT_TABLE);
         $DB->delete_records(usage_recorder::REQUEST_TABLE);
-        $DB->delete_records(\local_airouter\usage_logger::TABLE);
     }
 }

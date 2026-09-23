@@ -16,7 +16,7 @@
 
 namespace local_airouter\record;
 
-use local_airouter\usage_aggregator;
+use local_airouter\retention_policy;
 
 /**
  * Adds each finished request and attempt into its day, once, and marks it done.
@@ -387,23 +387,23 @@ class summariser {
      * @return int Days, or zero to keep everything.
      */
     public static function get_retention_days(): int {
-        $configured = get_config('local_airouter', usage_aggregator::RETENTION_SETTING);
+        $configured = get_config('local_airouter', retention_policy::DETAIL_SETTING);
         if ($configured === false || $configured === '') {
-            return usage_aggregator::DEFAULT_RETENTION;
+            return retention_policy::DEFAULT_DETAIL_DAYS;
         }
 
         return max(0, (int) $configured);
     }
 
     /**
-     * How many days of summary the site keeps. The same setting as the older record.
+     * How many days of summary the site keeps.
      *
      * @return int Days, or zero to keep everything.
      */
     public static function get_summary_retention_days(): int {
-        $configured = get_config('local_airouter', usage_aggregator::SUMMARY_RETENTION_SETTING);
+        $configured = get_config('local_airouter', retention_policy::SUMMARY_SETTING);
         if ($configured === false || $configured === '') {
-            return usage_aggregator::DEFAULT_SUMMARY_RETENTION;
+            return retention_policy::DEFAULT_SUMMARY_DAYS;
         }
 
         return max(0, (int) $configured);

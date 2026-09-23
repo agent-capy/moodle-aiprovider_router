@@ -200,7 +200,6 @@ abstract class abstract_processor extends \core_ai\process_base {
         // Recorded before it is raised, as every other refusal here is, so that what a
         // site refused is in the reports whether or not the refusal was made final.
         $this->fail((int) ($response->get_errorcode() ?: 429), 'ratelimited', self::REASON_RATE_LIMITED);
-        $this->record_usage($this->resolver, null, null, 0);
         $this->end_request(request_state::DECLINED);
         $this->finalise([]);
 
@@ -241,7 +240,6 @@ abstract class abstract_processor extends \core_ai\process_base {
             } else {
                 $outcome = $this->fail(503, 'nodefaulttarget', self::REASON_NO_TARGET);
             }
-            $this->record_usage($resolver, null, null, 0);
             $this->end_request(request_state::DECLINED);
 
             return $this->finalise($outcome);
@@ -310,7 +308,6 @@ abstract class abstract_processor extends \core_ai\process_base {
                         'byokkeyrejected:' . $candidate->keysource,
                         self::REASON_KEY_REJECTED,
                     );
-                    $this->record_usage($resolver, $candidate, null, $attempts);
                     $this->end_request(request_state::FAILED);
 
                     return $this->finalise($outcome);
@@ -323,7 +320,6 @@ abstract class abstract_processor extends \core_ai\process_base {
 
             $data = $response->get_response_data();
             if ($this->has_content($data)) {
-                $this->record_usage($resolver, $candidate, $data, $attempts, true);
                 $this->get_recorder()->end_attempt(
                     $attemptid,
                     attempt_state::SUCCEEDED,
@@ -357,7 +353,6 @@ abstract class abstract_processor extends \core_ai\process_base {
                 // to this target and to whatever key paid for it -- not to whichever
                 // one happens to answer next. So it gets a row of its own, marked as
                 // not being a request: the person asked once.
-                $this->record_usage($resolver, $candidate, $data, 1, false, false);
                 $last = $response;
 
                 continue;
@@ -369,7 +364,6 @@ abstract class abstract_processor extends \core_ai\process_base {
             $outcome = $this->fail(502, 'emptyresponse', self::REASON_EMPTY);
             // The target still charged for the thinking it did, so the tokens are
             // recorded even though the user got nothing readable.
-            $this->record_usage($resolver, $candidate, $data, $attempts);
             $this->end_request(request_state::FAILED);
 
             return $this->finalise($outcome);
@@ -387,7 +381,6 @@ abstract class abstract_processor extends \core_ai\process_base {
             $reason = ($last === null && $threw) ? self::REASON_TARGET_THREW : self::REASON_ALL_FAILED;
             $outcome = $this->fail($code, 'alltargetsfailed', $reason);
         }
-        $this->record_usage($resolver, null, null, $attempts);
         $this->end_request(request_state::FAILED);
 
         return $this->finalise($outcome);
@@ -493,79 +486,6 @@ abstract class abstract_processor extends \core_ai\process_base {
     }
 
     /**
-     * Hand what happened to the monitor.
-     *
-     * This is the old record, one row per request with the last attempt's figures
-     * on it. It stays until the reports, the budget conditions and the summary read
-     * the request and attempt tables instead, and is then removed with its table.
-     *
-     * Failures and refusals are recorded as well as successes. How often the router
-     * turns requests down is a number a site owner needs, and it has to be countable
-     * apart from targets breaking, which means something quite different.
-     *
-     * @param target_resolver $resolver The resolver that chose, holding the matched rule.
-     * @param candidate|null $candidate The candidate that answered, if one did.
-     * @param array|null $data The response data from that target.
-     * @param int $attempts How many targets were tried.
-     * @param bool $success Whether the user got an answer.
-     * @param bool $counted Whether this row is one of the site's requests. False for
-     *                      the record of a delegation attempt that did not answer.
-     */
-    protected function record_usage(
-        target_resolver $resolver,
-        ?candidate $candidate,
-        ?array $data,
-        int $attempts,
-        bool $success = false,
-        bool $counted = true,
-    ): void {
-        $context = $resolver->get_evaluated_context($this->action);
-        $rule = $resolver->get_matched_rule();
-        $target = $candidate?->target;
-        // A request that never reached a target can still have been somebody's to pay
-        // for, and a key that could not be read is exactly the case worth finding again.
-        $keyid = $candidate?->get_keyid() ?? $resolver->get_unreadable_key()?->get('id');
-
-        $entry = (object) [
-            'timecreated' => time(),
-            'userid' => $context->get_userid(),
-            'contextid' => $context->get_contextid(),
-            'courseid' => $context->get_courseid(),
-            'actionname' => $context->get_action_name(),
-            'placement' => $context->get_placement(),
-            'ruleid' => $rule === null ? null : (int) $rule->get('id'),
-            'rulename' => $rule === null ? null : $rule->get('name'),
-            'targetid' => $target === null ? null : (int) $target->id,
-            'targetname' => $target === null ? null : $target->name,
-            'targetprovider' => $target === null ? null : self::component_of($target),
-            'model' => self::modelled($data['model'] ?? null),
-            'success' => (int) $success,
-            'errorcode' => $success ? null : $this->failurecode,
-            'reason' => $success ? null : $this->reason,
-            'attempts' => $attempts,
-            'keysource' => $resolver->get_keysource(),
-            'keyid' => $keyid === null ? null : (int) $keyid,
-            'prompttokens' => self::counted($data['prompttokens'] ?? null),
-            'completiontokens' => self::counted($data['completiontokens'] ?? null),
-        ];
-
-        // A row that is not a request is still priced, still names its target and
-        // still names the key that paid for it. What it is not is a second request:
-        // the person asked once, and a budget counted in requests must agree.
-        $entry->counted = (int) $counted;
-        $images = $this->get_image_count($success);
-        $used = (int) ($entry->prompttokens ?? 0) + (int) ($entry->completiontokens ?? 0) + $images;
-        if (!$counted && $used === 0) {
-            // An attempt that used nothing anybody can point at leaves nothing to
-            // attribute, and a row saying so would be a row about nothing.
-            return;
-        }
-
-        $this->get_logger()->record($entry, $images);
-    }
-
-
-    /**
      * Which plugin an instance belongs to, which is what rates are looked up by.
      *
      * Core's own get_name() resolves the component from the class and returns null when
@@ -594,20 +514,6 @@ abstract class abstract_processor extends \core_ai\process_base {
         unset($success);
 
         return 0;
-    }
-
-    /**
-     * The monitor this processor reports to.
-     *
-     * The old record, one row per request in local_airouter_log, written alongside
-     * the new one until the reports read the new tables. It goes with the table.
-     *
-     * @return usage_logger The logger.
-     */
-    protected function get_logger(): usage_logger {
-        global $DB;
-
-        return new usage_logger($DB);
     }
 
     /**

@@ -16,6 +16,7 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
 use local_airouter\privacy\provider;
 use local_airouter\record\summariser;
 use local_airouter\record\usage_recorder;
@@ -46,100 +47,6 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
         parent::setUp();
         $this->resetAfterTest();
         $this->keys = new key_repository($DB);
-    }
-
-    /**
-     * Write one summary row for somebody.
-     *
-     * @param int $userid Whose day it is.
-     * @param array $fields What to record, over the defaults.
-     * @return int The row id.
-     */
-    protected function summarise(int $userid, array $fields = []): int {
-        global $DB;
-
-        return $DB->insert_record(usage_aggregator::TABLE, (object) ($fields + [
-            'daystart' => make_timestamp(2026, 9, 1, 0, 0, 0),
-            'courseid' => null,
-            'userid' => $userid,
-            'actionname' => 'generate_text',
-            'targetid' => 1,
-            'targetname' => 'Target one',
-            'targetprovider' => 'aiprovider_openai',
-            'model' => 'gpt-4o',
-            'keysource' => usage_logger::KEY_SITE,
-            'currency' => 'USD',
-            'requests' => 4,
-            'failures' => 0,
-            'calls' => 4,
-            'prompttokens' => 100,
-            'completiontokens' => 50,
-            'cost' => 0.5,
-            'costedcalls' => 4,
-            'timecreated' => time(),
-        ]));
-    }
-
-    public function test_a_summarised_day_is_exported_to_the_person_it_belongs_to(): void {
-        $user = $this->getDataGenerator()->create_user();
-        $this->summarise((int) $user->id);
-        $context = \context_user::instance($user->id);
-
-        $this->export_context_data_for_user((int) $user->id, $context, 'local_airouter');
-
-        $data = writer::with_context($context)->get_data([
-            get_string('privacy:path:summaries', 'local_airouter'),
-        ]);
-        $this->assertCount(1, $data->days);
-        $this->assertSame(4, (int) $data->days[0]->requests);
-    }
-
-    public function test_a_summarised_day_is_found_in_the_persons_own_context(): void {
-        $user = $this->getDataGenerator()->create_user();
-        $this->summarise((int) $user->id);
-
-        $contexts = provider::get_contexts_for_userid((int) $user->id)->get_contextids();
-
-        $this->assertContainsEquals(\context_user::instance($user->id)->id, $contexts);
-    }
-
-    public function test_a_deletion_request_takes_a_person_out_of_the_summaries(): void {
-        global $DB;
-        $user = $this->getDataGenerator()->create_user();
-        $other = $this->getDataGenerator()->create_user();
-        $this->summarise((int) $user->id);
-        $this->summarise((int) $other->id);
-        $context = \context_user::instance($user->id);
-
-        provider::delete_data_for_user(new approved_contextlist(
-            $user,
-            'local_airouter',
-            [$context->id],
-        ));
-
-        // This is what makes naming people in the summary affordable: one delete, and
-        // nobody else's figures move. Taking somebody out of an anonymous total would
-        // mean recomputing it from detail rows that have long been purged.
-        $this->assertSame(0, $DB->count_records(usage_aggregator::TABLE, ['userid' => $user->id]));
-        $this->assertSame(1, $DB->count_records(usage_aggregator::TABLE, ['userid' => $other->id]));
-    }
-
-    public function test_summaries_written_before_anybody_was_named_belong_to_nobody(): void {
-        global $DB;
-        $user = $this->getDataGenerator()->create_user();
-        // What an upgrade leaves behind: days counted when the column did not exist.
-        $this->summarise(0, ['userid' => null]);
-        $this->summarise((int) $user->id);
-
-        provider::delete_data_for_user(new approved_contextlist(
-            $user,
-            'local_airouter',
-            [\context_user::instance($user->id)->id],
-        ));
-
-        // Null is not zero and not anybody: a deletion request cannot claim those rows,
-        // and neither can a report attribute them.
-        $this->assertSame(1, $DB->count_records_select(usage_aggregator::TABLE, 'userid IS NULL'));
     }
 
     public function test_a_brought_key_is_never_exported(): void {
@@ -256,25 +163,15 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
     }
 
     /**
-     * Record one request against a context.
+     * Record one request somebody made, as the request record holds it.
      *
      * @param int $userid Who made it.
      * @param int $contextid Where it was made.
      */
     protected function log(int $userid, int $contextid): void {
-        global $DB;
-
-        $DB->insert_record(usage_logger::TABLE, (object) [
-            'timecreated' => time(),
+        $this->getDataGenerator()->get_plugin_generator('local_airouter')->create_request([
             'userid' => $userid,
             'contextid' => $contextid,
-            'actionname' => 'generate_text',
-            'targetid' => 1,
-            'targetname' => 'Target one',
-            'targetprovider' => 'aiprovider_openai',
-            'success' => 1,
-            'attempts' => 1,
-            'keysource' => usage_logger::KEY_SITE,
         ]);
     }
 
@@ -289,7 +186,7 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
         $DB->insert_record(budget_notifier::TABLE, (object) [
             'kind' => budget_notifier::KIND_USER,
             'subjectid' => $userid,
-            'metric' => spend_ledger::METRIC_COST,
+            'metric' => ledger::METRIC_COST,
             'limitamount' => 100.0,
             'threshold' => 100,
             'timenotified' => time(),
@@ -506,7 +403,7 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
         $DB->insert_record(budget_notifier::TABLE, (object) [
             'kind' => budget_notifier::KIND_KEY,
             'subjectid' => (int) $saved->get('id'),
-            'metric' => spend_ledger::METRIC_COST,
+            'metric' => ledger::METRIC_COST,
             'limitamount' => 20.0,
             'threshold' => 100,
             'timenotified' => time(),

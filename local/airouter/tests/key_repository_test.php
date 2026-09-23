@@ -97,10 +97,10 @@ final class key_repository_test extends \advanced_testcase {
         // the key or lower what it may spend. The object being held was read before any
         // of that, and saving it whole afterwards would put all of it back.
         $tested = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'the-old-key-aaaa');
-        $this->repository->set_cap($tested, 100.0, spend_ledger::PERIOD_MONTH, 30);
+        $this->repository->set_cap($tested, 100.0, ledger::PERIOD_MONTH, 30);
 
         $meanwhile = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'the-new-key-bbbb');
-        $this->repository->set_cap($meanwhile, 10.0, spend_ledger::PERIOD_MONTH, 30);
+        $this->repository->set_cap($meanwhile, 10.0, ledger::PERIOD_MONTH, 30);
 
         $this->repository->record_verification($tested, key::VERIFY_OK, 1000);
 
@@ -127,28 +127,28 @@ final class key_repository_test extends \advanced_testcase {
 
         $this->assertFalse($saved->has_cap());
         $this->assertSame(0.0, $saved->get_cap_amount());
-        $this->assertSame(spend_ledger::PERIOD_MONTH, $saved->get_cap_period());
+        $this->assertSame(ledger::PERIOD_MONTH, $saved->get_cap_period());
     }
 
     public function test_an_owner_can_limit_their_own_key_and_lift_it_again(): void {
         $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-a-key-abcd');
 
-        $this->repository->set_cap($saved, 25.0, spend_ledger::PERIOD_ROLLING, 7);
+        $this->repository->set_cap($saved, 25.0, ledger::PERIOD_ROLLING, 7);
         $reloaded = $this->repository->find(key::SCOPE_USER, 7, 3);
         $this->assertTrue($reloaded->has_cap());
         $this->assertSame(25.0, $reloaded->get_cap_amount());
-        $this->assertSame(spend_ledger::PERIOD_ROLLING, $reloaded->get_cap_period());
+        $this->assertSame(ledger::PERIOD_ROLLING, $reloaded->get_cap_period());
         $this->assertSame(7, $reloaded->get_cap_days());
 
         // Emptying the amount is how somebody says they want no limit, which is not
         // the same as a limit of nothing.
-        $this->repository->set_cap($reloaded, null, spend_ledger::PERIOD_MONTH, 30);
+        $this->repository->set_cap($reloaded, null, ledger::PERIOD_MONTH, 30);
         $this->assertFalse($this->repository->find(key::SCOPE_USER, 7, 3)->has_cap());
     }
 
     public function test_replacing_a_key_keeps_the_limit_its_owner_set(): void {
         $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-the-first-aaaa');
-        $this->repository->set_cap($saved, 25.0, spend_ledger::PERIOD_MONTH, 30);
+        $this->repository->set_cap($saved, 25.0, ledger::PERIOD_MONTH, 30);
 
         $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-the-second-bbbb');
 

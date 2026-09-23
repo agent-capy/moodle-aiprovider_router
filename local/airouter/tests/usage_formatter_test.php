@@ -66,7 +66,7 @@ final class usage_formatter_test extends \advanced_testcase {
             $this->row(rule::KEYSOURCE_USER, 96),
         ];
 
-        $this->assertSame('', usage_formatter::elsewhere($rows, usage_report::KEYSOURCE_ALL));
+        $this->assertSame('', usage_formatter::elsewhere($rows, reader::KEYSOURCE_ALL));
     }
 
     public function test_an_empty_period_leaves_nothing_out(): void {

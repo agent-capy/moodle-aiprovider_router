@@ -100,7 +100,7 @@ if ($action === 'edit') {
             ? get_string('rates:saved:currency', 'local_airouter', [
                 'currency' => $currency,
                 'rates' => $changed['rates'],
-                'calls' => $changed['attempts'] + $changed['logs'],
+                'calls' => $changed['attempts'],
                 'days' => $changed['summaries'],
             ])
             : get_string('rates:saved', 'local_airouter');

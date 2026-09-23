@@ -71,8 +71,8 @@ function local_airouter_extend_navigation_course(
     global $DB;
 
     $used = has_capability('local/airouter:viewusage', $context)
-        && ($DB->record_exists(\local_airouter\usage_logger::TABLE, ['courseid' => $course->id])
-            || $DB->record_exists(\local_airouter\usage_aggregator::TABLE, ['courseid' => $course->id]));
+        && ($DB->record_exists(\local_airouter\record\usage_recorder::REQUEST_TABLE, ['courseid' => $course->id])
+            || $DB->record_exists(\local_airouter\record\summariser::TABLE, ['courseid' => $course->id]));
 
     if ($used) {
         $navigation->add(

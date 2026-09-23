@@ -16,7 +16,7 @@
 
 namespace local_airouter\form;
 
-use local_airouter\spend_ledger;
+use local_airouter\record\ledger;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -57,8 +57,8 @@ class key_cap_form extends \moodleform {
                 (string) ($this->_customdata['currency'] ?? ''),
             ),
             $mform->createElement('select', 'capperiod', '', [
-                spend_ledger::PERIOD_MONTH => get_string('keys:cap:month', 'local_airouter'),
-                spend_ledger::PERIOD_ROLLING => get_string('keys:cap:rolling', 'local_airouter'),
+                ledger::PERIOD_MONTH => get_string('keys:cap:month', 'local_airouter'),
+                ledger::PERIOD_ROLLING => get_string('keys:cap:rolling', 'local_airouter'),
             ]),
             $mform->createElement('text', 'capdays', '', ['size' => 4]),
             $mform->createElement('static', 'capunit', '', get_string('keys:cap:days', 'local_airouter')),
@@ -66,10 +66,10 @@ class key_cap_form extends \moodleform {
         $mform->addGroup($group, 'capgroup', get_string('keys:cap', 'local_airouter'), ' ', false);
         $mform->setType('capamount', PARAM_RAW_TRIMMED);
         $mform->setType('capdays', PARAM_INT);
-        $mform->setDefault('capperiod', spend_ledger::PERIOD_MONTH);
+        $mform->setDefault('capperiod', ledger::PERIOD_MONTH);
         $mform->setDefault('capdays', 30);
-        $mform->hideIf('capdays', 'capperiod', 'eq', spend_ledger::PERIOD_MONTH);
-        $mform->hideIf('capunit', 'capperiod', 'eq', spend_ledger::PERIOD_MONTH);
+        $mform->hideIf('capdays', 'capperiod', 'eq', ledger::PERIOD_MONTH);
+        $mform->hideIf('capunit', 'capperiod', 'eq', ledger::PERIOD_MONTH);
         $mform->addHelpButton('capgroup', 'keys:cap', 'local_airouter');
 
         $this->add_action_buttons(true, get_string('keys:cap:save', 'local_airouter'));

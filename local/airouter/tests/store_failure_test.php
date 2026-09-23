@@ -16,6 +16,8 @@
 
 namespace local_airouter;
 
+use local_airouter\record\usage_recorder;
+use local_airouter\record\request_state;
 use core_ai\aiactions\generate_text;
 use core_ai\manager;
 
@@ -150,7 +152,7 @@ final class store_failure_test extends \advanced_testcase {
         // to save anything. A lost core record therefore does not also lose the
         // knowledge that a provider was called, and charged for it.
         $this->routing_site();
-        $before = $DB->count_records(usage_logger::TABLE);
+        $before = $DB->count_records(usage_recorder::REQUEST_TABLE);
         $this->break_the_register();
 
         try {
@@ -159,7 +161,7 @@ final class store_failure_test extends \advanced_testcase {
             unset($e);
         }
 
-        $this->assertSame($before + 1, $DB->count_records(usage_logger::TABLE));
+        $this->assertSame($before + 1, $DB->count_records(usage_recorder::REQUEST_TABLE));
     }
 
     public function test_the_attempt_is_recorded_as_having_reached_the_provider(): void {
@@ -176,9 +178,10 @@ final class store_failure_test extends \advanced_testcase {
             unset($e);
         }
 
-        $logged = $DB->get_records(usage_logger::TABLE, null, 'id DESC', '*', 0, 1);
+        $logged = $DB->get_records(usage_recorder::REQUEST_TABLE, null, 'id DESC', '*', 0, 1);
         $this->assertCount(1, $logged);
         $this->assertEquals(1, reset($logged)->attempts);
-        $this->assertEquals(1, reset($logged)->success);
+        $this->assertSame(request_state::SUCCEEDED, reset($logged)->state);
+        $this->assertSame(1, $DB->count_records(usage_recorder::ATTEMPT_TABLE, ['requestid' => reset($logged)->id]));
     }
 }

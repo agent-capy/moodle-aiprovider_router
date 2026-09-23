@@ -16,6 +16,8 @@
 
 namespace local_airouter;
 
+use local_airouter\record\reader;
+
 /**
  * Turns the monitor's figures into the few shapes the dashboard is allowed to have.
  *
@@ -67,7 +69,7 @@ class usage_formatter {
      * @return string HTML, empty when nothing is being left out.
      */
     public static function elsewhere(array $bykeysource, string $keysource): string {
-        if ($keysource === usage_report::KEYSOURCE_ALL) {
+        if ($keysource === reader::KEYSOURCE_ALL) {
             return '';
         }
 

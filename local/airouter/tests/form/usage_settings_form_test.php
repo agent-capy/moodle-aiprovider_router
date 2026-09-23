@@ -16,12 +16,12 @@
 
 namespace local_airouter\form;
 
+use local_airouter\record\ledger;
 use local_airouter\condition\budget;
 use local_airouter\key;
 use local_airouter\key_repository;
 use local_airouter\rule;
 use local_airouter\rule_repository;
-use local_airouter\spend_ledger;
 
 /**
  * Tests for what a site is allowed to throw away.
@@ -57,9 +57,9 @@ final class usage_settings_form_test extends \advanced_testcase {
         $record->set('name', 'While there is money left');
         $record->set('targetid', 3);
         (new rule_repository($DB))->save($record, ['budget' => [
-            'scope' => spend_ledger::SCOPE_SITE,
+            'scope' => ledger::SCOPE_SITE,
             'direction' => budget::DIRECTION_UNDER,
-            'metric' => spend_ledger::METRIC_COST,
+            'metric' => ledger::METRIC_COST,
             'amount' => 100.0,
             'period' => $period,
             'days' => $days,
@@ -88,7 +88,7 @@ final class usage_settings_form_test extends \advanced_testcase {
     }
 
     public function test_keeping_less_than_a_rolling_budget_reaches_back_is_refused(): void {
-        $this->budget_rule(spend_ledger::PERIOD_ROLLING, 30);
+        $this->budget_rule(ledger::PERIOD_ROLLING, 30);
 
         $errors = $this->validate(1, 2);
 
@@ -97,7 +97,7 @@ final class usage_settings_form_test extends \advanced_testcase {
 
     public function test_keeping_less_than_a_month_is_refused_for_a_monthly_budget(): void {
         // A calendar month is counted as the longest one can be.
-        $this->budget_rule(spend_ledger::PERIOD_MONTH);
+        $this->budget_rule(ledger::PERIOD_MONTH);
 
         $this->assertArrayHasKey('summaryretentiondays', $this->validate(1, 30));
         $this->assertArrayNotHasKey('summaryretentiondays', $this->validate(1, 31));
@@ -113,13 +113,13 @@ final class usage_settings_form_test extends \advanced_testcase {
         $this->setUser($user);
         $repository = new key_repository($DB);
         $key = $repository->save(key::SCOPE_USER, (int) $user->id, 3, 'their-own-key-ab');
-        $repository->set_cap($key, 50.0, spend_ledger::PERIOD_MONTH, 30);
+        $repository->set_cap($key, 50.0, ledger::PERIOD_MONTH, 30);
 
         $this->assertArrayHasKey('summaryretentiondays', $this->validate(1, 2));
     }
 
     public function test_keeping_everything_for_ever_is_always_allowed(): void {
-        $this->budget_rule(spend_ledger::PERIOD_MONTH);
+        $this->budget_rule(ledger::PERIOD_MONTH);
 
         // Zero is not a short period, it is no limit at all.
         $this->assertArrayNotHasKey('summaryretentiondays', $this->validate(1, 0));

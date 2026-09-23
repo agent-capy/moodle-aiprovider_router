@@ -19,6 +19,8 @@ namespace local_airouter;
 use local_airouter\record\ledger;
 use local_airouter\condition\budget;
 use local_airouter\exception\declined_request;
+use local_airouter\record\usage_recorder;
+use local_airouter\record\request_state;
 use core_ai\aiactions\generate_text;
 use core_ai\aiactions\responses\response_base;
 use core_ai\manager;
@@ -375,7 +377,7 @@ final class core_dispatch_test extends \advanced_testcase {
             $this->assertSame(abstract_processor::REASON_RATE_LIMITED, $e->get_reason());
         }
 
-        $refused = $DB->get_records(usage_logger::TABLE, ['success' => 0]);
+        $refused = $DB->get_records(usage_recorder::REQUEST_TABLE, ['state' => request_state::DECLINED]);
         $this->assertCount(1, $refused);
         $this->assertSame(
             abstract_processor::REASON_RATE_LIMITED,
@@ -452,7 +454,7 @@ final class core_dispatch_test extends \advanced_testcase {
         $this->add_router(['nomatch' => provider::NOMATCH_DECLINE]);
         $this->add_budget_rule((int) $target->id, 2);
         $this->spend(2);
-        $before = $DB->count_records(usage_logger::TABLE);
+        $before = $DB->count_records(usage_recorder::REQUEST_TABLE);
 
         try {
             $this->ask();
@@ -462,10 +464,10 @@ final class core_dispatch_test extends \advanced_testcase {
 
         // Throwing takes core's own record of the action away, so the router's has to
         // be written first. A refusal nobody can count is a refusal nobody can audit.
-        $rows = $DB->get_records(usage_logger::TABLE, null, 'id DESC', '*', 0, 1);
-        $this->assertSame($before + 1, $DB->count_records(usage_logger::TABLE));
+        $rows = $DB->get_records(usage_recorder::REQUEST_TABLE, null, 'id DESC', '*', 0, 1);
+        $this->assertSame($before + 1, $DB->count_records(usage_recorder::REQUEST_TABLE));
         $row = reset($rows);
-        $this->assertSame(0, (int) $row->success);
+        $this->assertSame(request_state::DECLINED, $row->state);
         $this->assertSame(abstract_processor::REASON_BUDGET_SPENT, $row->reason);
     }
 

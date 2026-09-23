@@ -21,8 +21,6 @@ use local_airouter\record\summariser;
 use local_airouter\record\usage_recorder;
 use local_airouter\key;
 use local_airouter\key_repository;
-use local_airouter\usage_aggregator;
-use local_airouter\usage_logger;
 use core_privacy\local\metadata\collection;
 use core_privacy\local\request\approved_contextlist;
 use core_privacy\local\request\approved_userlist;
@@ -61,23 +59,6 @@ class provider implements
     \core_privacy\local\request\plugin\provider {
     #[\Override]
     public static function get_metadata(collection $collection): collection {
-        $collection->add_database_table(
-            usage_logger::TABLE,
-            [
-                'userid' => 'privacy:metadata:log:userid',
-                'contextid' => 'privacy:metadata:log:contextid',
-                'courseid' => 'privacy:metadata:log:courseid',
-                'actionname' => 'privacy:metadata:log:actionname',
-                'targetname' => 'privacy:metadata:log:targetname',
-                'model' => 'privacy:metadata:log:model',
-                'prompttokens' => 'privacy:metadata:log:prompttokens',
-                'completiontokens' => 'privacy:metadata:log:completiontokens',
-                'cost' => 'privacy:metadata:log:cost',
-                'timecreated' => 'privacy:metadata:log:timecreated',
-            ],
-            'privacy:metadata:log',
-        );
-
         $collection->add_database_table(
             usage_recorder::REQUEST_TABLE,
             [
@@ -127,23 +108,6 @@ class provider implements
                 'cost' => 'privacy:metadata:summary:cost',
             ],
             'privacy:metadata:summary',
-        );
-
-        $collection->add_database_table(
-            usage_aggregator::TABLE,
-            [
-                'userid' => 'privacy:metadata:daily:userid',
-                'courseid' => 'privacy:metadata:daily:courseid',
-                'actionname' => 'privacy:metadata:daily:actionname',
-                'targetname' => 'privacy:metadata:daily:targetname',
-                'model' => 'privacy:metadata:daily:model',
-                'requests' => 'privacy:metadata:daily:requests',
-                'prompttokens' => 'privacy:metadata:daily:prompttokens',
-                'completiontokens' => 'privacy:metadata:daily:completiontokens',
-                'cost' => 'privacy:metadata:daily:cost',
-                'daystart' => 'privacy:metadata:daily:daystart',
-            ],
-            'privacy:metadata:daily',
         );
 
         $collection->add_database_table(
@@ -205,10 +169,6 @@ class provider implements
     public static function get_contexts_for_userid(int $userid): contextlist {
         $contextlist = new contextlist();
         $contextlist->add_from_sql(
-            'SELECT DISTINCT contextid FROM {' . usage_logger::TABLE . '} WHERE userid = :userid',
-            ['userid' => $userid],
-        );
-        $contextlist->add_from_sql(
             'SELECT DISTINCT contextid FROM {' . usage_recorder::REQUEST_TABLE . '} WHERE userid = :userid',
             ['userid' => $userid],
         );
@@ -216,13 +176,6 @@ class provider implements
         // The summaries carry no context of their own: a day of somebody's usage is not
         // an event in a course, it is a fact about them. Their own user context is where
         // it belongs, and it is the context a deletion request reaches it through.
-        $contextlist->add_from_sql(
-            'SELECT ctx.id
-               FROM {context} ctx
-              WHERE ctx.contextlevel = :level AND ctx.instanceid = :userid
-                AND EXISTS (SELECT 1 FROM {' . usage_aggregator::TABLE . '} d WHERE d.userid = :duserid)',
-            ['level' => CONTEXT_USER, 'userid' => $userid, 'duserid' => $userid],
-        );
         $contextlist->add_from_sql(
             'SELECT ctx.id
                FROM {context} ctx
@@ -282,11 +235,6 @@ class provider implements
         // and summaries there missed anybody whose usage had not been summarised yet.
         $userlist->add_from_sql(
             'userid',
-            'SELECT userid FROM {' . usage_logger::TABLE . '} WHERE contextid = :contextid',
-            ['contextid' => $context->id],
-        );
-        $userlist->add_from_sql(
-            'userid',
             'SELECT userid FROM {' . usage_recorder::REQUEST_TABLE . '} WHERE contextid = :contextid',
             ['contextid' => $context->id],
         );
@@ -302,11 +250,6 @@ class provider implements
                 'SELECT DISTINCT scopeid FROM {' . key_repository::WALLET_TABLE . '}
                   WHERE scope = :scope AND scopeid = :userid',
                 ['scope' => key::SCOPE_USER, 'userid' => $context->instanceid],
-            );
-            $userlist->add_from_sql(
-                'userid',
-                'SELECT DISTINCT userid FROM {' . usage_aggregator::TABLE . '} WHERE userid = :userid',
-                ['userid' => $context->instanceid],
             );
             $userlist->add_from_sql(
                 'userid',
@@ -341,10 +284,8 @@ class provider implements
             return;
         }
         $userid = $contextlist->get_user()->id;
-        self::export_requests($contextlist, $userid);
         self::export_recorded_requests($contextlist, (int) $userid);
         self::export_record_summaries($contextlist, (int) $userid);
-        self::export_summaries($contextlist, (int) $userid);
         self::export_notices($contextlist, (int) $userid);
 
         foreach ($contextlist->get_contexts() as $context) {
@@ -385,12 +326,10 @@ class provider implements
     public static function delete_data_for_all_users_in_context(\context $context): void {
         global $DB;
 
-        $DB->delete_records(usage_logger::TABLE, ['contextid' => $context->id]);
         self::delete_recorded_requests('contextid = :contextid', ['contextid' => $context->id]);
 
         $repository = new key_repository($DB);
         if ($context instanceof \context_user) {
-            $DB->delete_records(usage_aggregator::TABLE, ['userid' => (int) $context->instanceid]);
             $DB->delete_records(summariser::TABLE, ['userid' => (int) $context->instanceid]);
             self::forget_notices((int) $context->instanceid, self::key_ids_of((int) $context->instanceid));
             $repository->delete_for_user((int) $context->instanceid);
@@ -410,7 +349,6 @@ class provider implements
         $userid = (int) $contextlist->get_user()->id;
         [$insql, $params] = $DB->get_in_or_equal($contextlist->get_contextids(), SQL_PARAMS_NAMED);
         $params['userid'] = $userid;
-        $DB->delete_records_select(usage_logger::TABLE, "userid = :userid AND contextid {$insql}", $params);
         self::delete_recorded_requests("userid = :userid AND contextid {$insql}", $params);
 
         self::delete_summaries($contextlist->get_contexts(), $userid);
@@ -427,7 +365,6 @@ class provider implements
         $context = $userlist->get_context();
         [$insql, $params] = $DB->get_in_or_equal($userlist->get_userids(), SQL_PARAMS_NAMED);
         $params['contextid'] = $context->id;
-        $DB->delete_records_select(usage_logger::TABLE, "contextid = :contextid AND userid {$insql}", $params);
         self::delete_recorded_requests("contextid = :contextid AND userid {$insql}", $params);
 
         foreach ($userlist->get_userids() as $userid) {
@@ -452,64 +389,11 @@ class provider implements
 
         foreach ($contexts as $context) {
             if ($context instanceof \context_user && (int) $context->instanceid === $userid) {
-                $DB->delete_records(usage_aggregator::TABLE, ['userid' => $userid]);
                 $DB->delete_records(summariser::TABLE, ['userid' => $userid]);
 
                 return;
             }
         }
-    }
-
-    /**
-     * Export the summarised days of one person's usage.
-     *
-     * Exported without a course, even though the rows have one. The summary says how
-     * much was used and when, and the detail export beside it already says where each
-     * request was made; repeating the course here would only make the same fact look
-     * like two.
-     *
-     * @param approved_contextlist $contextlist The contexts approved for export.
-     * @param int $userid The user.
-     */
-    protected static function export_summaries(approved_contextlist $contextlist, int $userid): void {
-        global $DB;
-
-        $usercontext = null;
-        foreach ($contextlist->get_contexts() as $context) {
-            if ($context instanceof \context_user && (int) $context->instanceid === $userid) {
-                $usercontext = $context;
-                break;
-            }
-        }
-        if ($usercontext === null) {
-            return;
-        }
-
-        $records = $DB->get_records(usage_aggregator::TABLE, ['userid' => $userid], 'daystart ASC');
-        if (!$records) {
-            return;
-        }
-
-        $days = [];
-        foreach ($records as $record) {
-            $days[] = (object) [
-                'day' => transform::datetime($record->daystart),
-                'action' => $record->actionname,
-                'delegatedto' => $record->targetname,
-                'model' => $record->model,
-                'requests' => $record->requests,
-                'prompttokens' => $record->prompttokens,
-                'completiontokens' => $record->completiontokens,
-                'cost' => $record->cost,
-                'currency' => $record->currency,
-                'paidwith' => $record->keysource,
-            ];
-        }
-
-        writer::with_context($usercontext)->export_data(
-            [get_string('privacy:path:summaries', 'local_airouter')],
-            (object) ['days' => $days],
-        );
     }
 
     /**
@@ -664,52 +548,6 @@ class provider implements
             'timecreated' => transform::datetime($record->timecreated),
             'timeremoved' => transform::datetime($record->timereleased),
         ];
-    }
-
-    /**
-     * Export the history of what this user asked the router to do.
-     *
-     * @param approved_contextlist $contextlist The contexts approved for export.
-     * @param int $userid The user.
-     */
-    protected static function export_requests(approved_contextlist $contextlist, int $userid): void {
-        global $DB;
-
-        [$insql, $params] = $DB->get_in_or_equal($contextlist->get_contextids(), SQL_PARAMS_NAMED);
-        $params['userid'] = $userid;
-
-        $records = $DB->get_records_select(
-            usage_logger::TABLE,
-            "userid = :userid AND contextid {$insql}",
-            $params,
-            'timecreated ASC',
-        );
-
-        $bycontext = [];
-        foreach ($records as $record) {
-            $bycontext[(int) $record->contextid][] = (object) [
-                'timecreated' => transform::datetime($record->timecreated),
-                'action' => $record->actionname,
-                'delegatedto' => $record->targetname,
-                'model' => $record->model,
-                'prompttokens' => $record->prompttokens,
-                'completiontokens' => $record->completiontokens,
-                'cost' => $record->cost,
-                'currency' => $record->currency,
-                'success' => transform::yesno($record->success),
-            ];
-        }
-
-        foreach ($bycontext as $contextid => $requests) {
-            $context = \context::instance_by_id($contextid, IGNORE_MISSING);
-            if (!$context) {
-                continue;
-            }
-            writer::with_context($context)->export_data(
-                [get_string('privacy:path:log', 'local_airouter')],
-                (object) ['requests' => $requests],
-            );
-        }
     }
 
     /**

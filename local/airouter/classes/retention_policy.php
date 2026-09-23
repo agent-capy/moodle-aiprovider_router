@@ -41,10 +41,16 @@ use local_airouter\record\summariser;
  */
 class retention_policy {
     /** @var string The setting saying how many days of detail are kept. */
-    public const DETAIL_SETTING = usage_aggregator::RETENTION_SETTING;
+    public const DETAIL_SETTING = 'logretentiondays';
 
     /** @var string The setting saying how many days of summaries are kept. */
-    public const SUMMARY_SETTING = usage_aggregator::SUMMARY_RETENTION_SETTING;
+    public const SUMMARY_SETTING = 'summaryretentiondays';
+
+    /** @var int How many days of detail are kept until the site says otherwise. */
+    public const DEFAULT_DETAIL_DAYS = 90;
+
+    /** @var int How many days of summaries are kept until the site says otherwise: all of them. */
+    public const DEFAULT_SUMMARY_DAYS = 0;
 
     /**
      * Constructor.

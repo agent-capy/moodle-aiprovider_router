@@ -16,12 +16,12 @@
 
 namespace local_airouter\condition;
 
+use local_airouter\retention_policy;
 use local_airouter\evaluation_context;
 use local_airouter\rule;
 use local_airouter\price;
 use local_airouter\record\ledger;
 use local_airouter\token_estimator;
-use local_airouter\usage_aggregator;
 use core_ai\aiactions\generate_text;
 
 /**
@@ -303,7 +303,7 @@ final class budget_test extends \advanced_testcase {
         // the spending reads lower than it was and a limit already reached comes back
         // under the line. The retention screen refuses the other direction; this is
         // the half that was missing.
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'local_airouter');
+        set_config(retention_policy::SUMMARY_SETTING, 2, 'local_airouter');
         $this->assertArrayHasKey('budgetgroup', budget::validate_form($long));
 
         // A budget that fits inside what is kept is fine.

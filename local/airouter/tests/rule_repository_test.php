@@ -16,6 +16,7 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
 /**
  * Tests for reading and writing routing rules.
  *
@@ -212,17 +213,17 @@ final class rule_repository_test extends \advanced_testcase {
         // switched on after the retention had been shortened and the history it needs
         // thrown away, and it then reported a limit as having room left.
         $rule = $this->add('budgeted', 7, ['budget' => [
-            'scope' => spend_ledger::SCOPE_SITE,
+            'scope' => ledger::SCOPE_SITE,
             'direction' => 'under',
-            'metric' => spend_ledger::METRIC_COST,
+            'metric' => ledger::METRIC_COST,
             'amount' => 100.0,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]]);
         $id = (int) $rule->get('id');
         $this->assertNull($this->repository->set_enabled($id, false));
 
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'local_airouter');
+        set_config(retention_policy::SUMMARY_SETTING, 2, 'local_airouter');
 
         $refused = $this->repository->set_enabled($id, true);
         $this->assertIsString($refused);
@@ -231,21 +232,21 @@ final class rule_repository_test extends \advanced_testcase {
         $this->assertSame([], $this->repository->get_budgets(time(), true));
 
         // Lengthening the retention is what makes it measurable, and then it goes on.
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 60, 'local_airouter');
+        set_config(retention_policy::SUMMARY_SETTING, 60, 'local_airouter');
         $this->assertNull($this->repository->set_enabled($id, true));
         $this->assertSame(1, (int) $this->repository->get($id)->get('enabled'));
     }
 
     public function test_switching_a_rule_off_is_never_refused(): void {
         $rule = $this->add('budgeted', 7, ['budget' => [
-            'scope' => spend_ledger::SCOPE_SITE,
+            'scope' => ledger::SCOPE_SITE,
             'direction' => 'under',
-            'metric' => spend_ledger::METRIC_COST,
+            'metric' => ledger::METRIC_COST,
             'amount' => 100.0,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]]);
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'local_airouter');
+        set_config(retention_policy::SUMMARY_SETTING, 2, 'local_airouter');
 
         // Whatever is wrong with a rule, turning it off is the direction that stops it
         // happening. Refusing that would leave somebody unable to stop a rule they can

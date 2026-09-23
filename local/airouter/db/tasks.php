@@ -26,18 +26,7 @@ defined('MOODLE_INTERNAL') || die();
 
 $tasks = [
     [
-        // Runs once a day, after midnight, because it summarises whole finished days.
-        // The minute is randomised so that sites do not all read their logs at once.
-        'classname' => 'local_airouter\task\summarise_usage',
-        'blocking' => 0,
-        'minute' => 'R',
-        'hour' => '3',
-        'day' => '*',
-        'dayofweek' => '*',
-        'month' => '*',
-    ],
-    [
-        // The same hour as the older summariser, for the newer record. Adds each
+        // Runs once a day, after midnight, because it summarises whole finished days. Adds each
         // finished request and attempt into its day once, closes what was left open,
         // and purges what has been counted and is past keeping.
         'classname' => 'local_airouter\task\summarise_records',

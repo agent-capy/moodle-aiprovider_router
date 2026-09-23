@@ -18,7 +18,6 @@ namespace local_airouter\form;
 
 use local_airouter\budget_notifier;
 use local_airouter\retention_policy;
-use local_airouter\usage_aggregator;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -43,7 +42,7 @@ class usage_settings_form extends \moodleform {
             ['size' => 8],
         );
         $mform->setType('logretentiondays', PARAM_INT);
-        $mform->setDefault('logretentiondays', usage_aggregator::DEFAULT_RETENTION);
+        $mform->setDefault('logretentiondays', retention_policy::DEFAULT_DETAIL_DAYS);
         $mform->addHelpButton('logretentiondays', 'usage:retention', 'local_airouter');
 
         $mform->addElement(
@@ -53,7 +52,7 @@ class usage_settings_form extends \moodleform {
             ['size' => 8],
         );
         $mform->setType('summaryretentiondays', PARAM_INT);
-        $mform->setDefault('summaryretentiondays', usage_aggregator::DEFAULT_SUMMARY_RETENTION);
+        $mform->setDefault('summaryretentiondays', retention_policy::DEFAULT_SUMMARY_DAYS);
         $mform->addHelpButton('summaryretentiondays', 'usage:summaryretention', 'local_airouter');
 
         $mform->addElement('advcheckbox', 'budgetnotify', get_string('usage:notify', 'local_airouter'));

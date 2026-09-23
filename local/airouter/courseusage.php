@@ -32,7 +32,6 @@ require_once(__DIR__ . '/lib.php');
 
 use local_airouter\rule_repository;
 use local_airouter\record\ledger;
-use local_airouter\usage_aggregator;
 use local_airouter\usage_formatter;
 use local_airouter\record\reader;
 use local_airouter\record\summariser;
@@ -58,8 +57,6 @@ if (!in_array($days, $periods, true)) {
 }
 
 // The figures come from the request and attempt records, each finished fact once.
-// The budget bars below still read the older record until the ledger has moved.
-$aggregator = new usage_aggregator($DB);
 $report = new reader($DB);
 $now = time();
 $from = summariser::add_days(summariser::day_of($now), -($days - 1));

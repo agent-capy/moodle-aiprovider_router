@@ -35,7 +35,6 @@ use local_airouter\budget_notifier;
 use local_airouter\form\usage_settings_form;
 use local_airouter\price_book;
 use local_airouter\rule;
-use local_airouter\usage_aggregator;
 use local_airouter\usage_formatter;
 use local_airouter\record\reader;
 use local_airouter\record\summariser;
@@ -95,10 +94,10 @@ if ($data = $form->get_data()) {
     );
 }
 
-$aggregator = new usage_aggregator($DB);
+$retention = new retention_policy($DB);
 $form->set_data([
-    'logretentiondays' => $aggregator->get_retention_days(),
-    'summaryretentiondays' => $aggregator->get_summary_retention_days(),
+    'logretentiondays' => $retention->get_detail_days(),
+    'summaryretentiondays' => $retention->get_summary_days(),
     'budgetnotify' => budget_notifier::is_enabled() ? 1 : 0,
     'budgetnotifyshare' => budget_notifier::get_share(),
 ]);

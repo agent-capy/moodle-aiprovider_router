@@ -707,10 +707,10 @@ administrator maintains. Neither they nor the prices can change where a request 
 
 ### How long the history is kept
 
-A scheduled task, **Summarise AI Router usage**, runs once a day. It summarises each
-finished day into counts by person, course, action, target, model, payer and currency,
-and then removes detail rows older than the retention period, which is 90 days unless the
-site changes it.
+A scheduled task, **Summarise AI Router requests and attempts**, runs once a day. It
+summarises each finished day into counts by person, course, action, target, model, payer,
+wallet and currency, and then removes detail rows older than the retention period, which
+is 90 days unless the site changes it.
 Setting the retention to zero keeps everything.
 
 The two halves are deliberately unequal. A detail row is close to personal information:

@@ -60,26 +60,6 @@ class price_book {
     }
 
     /**
-     * The one currency the rates are in, for what still thinks a site has one.
-     *
-     * Transitional. The old spending ledger, the budget conditions and the key limits
-     * were written when the site had one currency, and read their limits as figures in
-     * it. Until they read money by currency they are given the currency every rate is
-     * entered in, and the default when there are no rates or more than one currency:
-     * on such a site their comparisons are not sound, and they were not before either.
-     * This goes when they do.
-     *
-     * @return string The currency code.
-     */
-    public static function legacy_currency(): string {
-        global $DB;
-
-        $currencies = (new self($DB))->get_currencies();
-
-        return count($currencies) === 1 ? (string) reset($currencies) : self::DEFAULT_CURRENCY;
-    }
-
-    /**
      * The rate that applied to a provider and model at a given moment.
      *
      * @param string $provider The provider component.
@@ -295,7 +275,6 @@ class price_book {
                 $counts = [
                     'rates' => $this->db->count_records(price::TABLE, ['provider' => $provider]),
                     'attempts' => $this->recost_attempts($provider),
-                    'logs' => $this->recost_log($provider),
                     'summaries' => $this->recost_summaries($provider),
                 ];
                 // The record has changed underneath any reader in the middle of
@@ -352,38 +331,6 @@ class price_book {
             $count++;
         }
         $attempts->close();
-
-        return $count;
-    }
-
-    /**
-     * Work every row of the older log for a provider out again.
-     *
-     * The older log kept no image count, so an image is not priced here. It goes when
-     * the log does.
-     *
-     * @param string $provider The provider component.
-     * @return int How many rows were touched.
-     */
-    protected function recost_log(string $provider): int {
-        $count = 0;
-        $rows = $this->db->get_recordset_select(
-            usage_logger::TABLE,
-            'targetprovider = :provider',
-            ['provider' => $provider],
-            'id ASC',
-            'id, model, prompttokens, completiontokens, timecreated',
-        );
-        foreach ($rows as $row) {
-            $price = $this->find($provider, $row->model, (int) $row->timecreated);
-            $this->db->update_record(usage_logger::TABLE, (object) [
-                'id' => $row->id,
-                'cost' => $price?->cost(self::tokens($row->prompttokens), self::tokens($row->completiontokens)),
-                'currency' => $price?->get('currency'),
-            ]);
-            $count++;
-        }
-        $rows->close();
 
         return $count;
     }

@@ -226,23 +226,10 @@ final class price_test extends \advanced_testcase {
         // A provider bills in one currency, so the currency is changed for the provider.
         $changed = $book->recost_provider('aiprovider_openai', 'EUR');
 
-        $this->assertSame(['rates' => 2, 'attempts' => 0, 'logs' => 0, 'summaries' => 0], $changed);
+        $this->assertSame(['rates' => 2, 'attempts' => 0, 'summaries' => 0], $changed);
         $this->assertSame('EUR', $book->currency_of('aiprovider_openai'));
         $this->assertSame(2, $DB->count_records(price::TABLE, ['provider' => 'aiprovider_openai', 'currency' => 'EUR']));
         $this->assertSame('JPY', $book->currency_of('aiprovider_sakuraaiengine'), 'The other provider is untouched.');
-    }
-
-    public function test_what_still_needs_one_currency_is_given_the_one_in_use_or_the_default(): void {
-        // The old ledger and the budget conditions still read their limits as figures
-        // in one currency. Until they read money by currency they are given the one
-        // every rate is in, and the default when there is no such currency.
-        $this->assertSame(price_book::DEFAULT_CURRENCY, price_book::legacy_currency(), 'No rates.');
-
-        $this->add('aiprovider_sakuraaiengine', '', 100.0, 200.0, currency: 'JPY');
-        $this->assertSame('JPY', price_book::legacy_currency(), 'Every rate is in yen.');
-
-        $this->add('aiprovider_openai', '', 1.0, 2.0);
-        $this->assertSame(price_book::DEFAULT_CURRENCY, price_book::legacy_currency(), 'Two currencies: no one currency.');
     }
 
     public function test_a_currency_is_stored_the_way_codes_are_written(): void {

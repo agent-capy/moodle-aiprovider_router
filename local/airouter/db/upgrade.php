@@ -370,5 +370,23 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092306, 'local', 'airouter');
     }
 
+    if ($oldversion < 2026092307) {
+        // The older record goes: one row per request in local_airouter_log and its
+        // daily summary, written alongside the request and attempt record until every
+        // reader had moved to the new one. Nothing is carried over. The plugin has not
+        // been released, and what those tables held on a development site is in the
+        // new tables already, written in parallel since the new record began.
+        foreach (['local_airouter_log', 'local_airouter_daily'] as $name) {
+            $table = new xmldb_table($name);
+            if ($dbman->table_exists($table)) {
+                $dbman->drop_table($table);
+            }
+        }
+        // The older summariser's watermark, which nothing reads any more.
+        unset_config('lastaggregated', 'local_airouter');
+
+        upgrade_plugin_savepoint(true, 2026092307, 'local', 'airouter');
+    }
+
     return true;
 }

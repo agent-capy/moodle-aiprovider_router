@@ -16,6 +16,7 @@
 
 namespace local_airouter;
 
+use local_airouter\record\usage_recorder;
 /**
  * Tests for what happens to a course's key when the course is deleted.
  *
@@ -72,23 +73,15 @@ final class course_deletion_test extends \advanced_testcase {
         global $DB;
 
         $course = $this->getDataGenerator()->create_course();
-        $DB->insert_record(usage_logger::TABLE, (object) [
-            'timecreated' => time(),
+        $this->getDataGenerator()->get_plugin_generator('local_airouter')->create_request([
             'userid' => 5,
             'courseid' => (int) $course->id,
             'contextid' => \context_course::instance((int) $course->id)->id,
-            'actionname' => 'generate_text',
-            'targetid' => 3,
-            'targetname' => 'Target',
-            'targetprovider' => 'aiprovider_openai',
-            'success' => 1,
-            'attempts' => 1,
-            'keysource' => usage_logger::KEY_SITE,
         ]);
 
         delete_course($course, false);
 
         // Removing a course does not unspend the money it spent.
-        $this->assertSame(1, $DB->count_records(usage_logger::TABLE, ['courseid' => (int) $course->id]));
+        $this->assertSame(1, $DB->count_records(usage_recorder::REQUEST_TABLE, ['courseid' => (int) $course->id]));
     }
 }
