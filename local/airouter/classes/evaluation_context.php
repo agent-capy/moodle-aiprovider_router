@@ -106,6 +106,19 @@ class evaluation_context {
     }
 
     /**
+     * Whether this is what the rules are told about this very action.
+     *
+     * The same object, not an equal one: two requests for the same text by the same
+     * person are still two requests, each with its own reading of the record.
+     *
+     * @param action_base $action The action.
+     * @return bool True when this context was made for it.
+     */
+    public function is_for(action_base $action): bool {
+        return $this->action === $action;
+    }
+
+    /**
      * The action class being routed.
      *
      * @return string The fully qualified class name.

@@ -470,4 +470,43 @@ final class routing_manager_test extends \advanced_testcase {
 
         $this->assertTrue($this->ask()->get_success());
     }
+
+    public function test_an_action_switched_off_at_the_router_is_refused_not_redirected(): void {
+        global $DB;
+
+        // The router is on and has somewhere to delegate, but the action is switched off
+        // on it. The setting is read from the row the router was found in rather than
+        // asked of core, which would read that row again; it has to decide all the same.
+        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
+        $target = $this->add_target('Routed', ['content' => 'Answered through the router']);
+        $router = $this->add_router();
+        $this->add_rule((int) $target->id);
+        $this->manager->update_provider_instance($router, actionconfig: [generate_text::class => ['enabled' => false]]);
+        $this->manage_text();
+
+        $response = $this->ask();
+
+        $this->assertFalse($response->get_success());
+        $this->assertSame(503, $response->get_errorcode());
+        $this->assertNull($response->get_response_data()['generatedcontent']);
+        $this->assertSame(0, $DB->count_records('ai_action_register'));
+    }
+
+    public function test_a_provider_changed_between_two_requests_is_seen_by_the_next(): void {
+        // The instances are read once for each request, not once for the manager. The
+        // manager is shared for as long as the process runs, so anything kept on it
+        // would hold a change an administrator saved back from every request after.
+        $target = $this->add_target('Routed', ['content' => 'Before the change']);
+        $this->add_router();
+        $this->add_rule((int) $target->id);
+        $this->manage_text();
+        $this->assertSame('Before the change', $this->ask()->get_response_data()['generatedcontent']);
+
+        $this->manager->update_provider_instance(
+            $target,
+            config: ['scenario' => \aiprovider_mock\provider::SUCCESS, 'content' => 'After the change'],
+        );
+
+        $this->assertSame('After the change', $this->ask()->get_response_data()['generatedcontent']);
+    }
 }

@@ -86,13 +86,31 @@ class target_settings {
     /**
      * Every target's settings, read once for this object and forgotten when it writes.
      *
-     * The two questions a request asks -- where only a brought key may go, and where a
-     * brought key may not -- are answered from one read.
+     * The questions a request asks -- where only a brought key may go, where a brought
+     * key may not, whether one can be brought to the target a rule named and which field
+     * it goes in -- are answered from one read. An object lives for one page or one
+     * request, so a setting saved elsewhere meanwhile is seen by the next one.
      *
      * @return \stdClass[] The rows.
      */
     protected function rows(): array {
         return $this->rows ??= $this->db->get_records(self::TABLE);
+    }
+
+    /**
+     * One target's settings, from the rows read for this object.
+     *
+     * @param int $targetid The delegation target.
+     * @return \stdClass|null The row, or null when nothing has been said about the target.
+     */
+    protected function row(int $targetid): ?\stdClass {
+        foreach ($this->rows() as $record) {
+            if ((int) $record->targetid === $targetid) {
+                return $record;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -107,9 +125,9 @@ class target_settings {
      * @return string|null The field name, the empty string for none, or null if unanswered.
      */
     public function get_key_field(int $targetid): ?string {
-        $record = $this->db->get_record(self::TABLE, ['targetid' => $targetid]);
+        $record = $this->row($targetid);
 
-        return $record === false ? null : (string) $record->keyfield;
+        return $record === null ? null : (string) $record->keyfield;
     }
 
     /**
@@ -324,8 +342,8 @@ class target_settings {
      * @return bool True when a key brought here would be used.
      */
     public function supports_byok(int $targetid): bool {
-        $record = $this->db->get_record(self::TABLE, ['targetid' => $targetid]);
-        if ($record === false || (string) $record->keyfield === self::NO_KEY) {
+        $record = $this->row($targetid);
+        if ($record === null || (string) $record->keyfield === self::NO_KEY) {
             return false;
         }
 

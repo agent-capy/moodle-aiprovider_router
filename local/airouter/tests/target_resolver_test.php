@@ -673,4 +673,70 @@ final class target_resolver_test extends \advanced_testcase {
         );
         $this->assertSame('Editor only', $resolver->get_matched_rule()?->get('name'));
     }
+
+    /**
+     * A router carrying the instances a request read, as the routing manager hands it on.
+     *
+     * @param ai_provider[] $instances The instances, as read.
+     * @param array $config The router instance configuration.
+     * @return \aiprovider_router\provider The router.
+     */
+    protected function carrying_router(array $instances, array $config = ['defaulttarget' => 7]): \aiprovider_router\provider {
+        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: json_encode($config), id: 1);
+        $router->carry_request_instances($instances);
+
+        return $router;
+    }
+
+    public function test_the_instances_the_request_began_with_are_the_ones_chosen_from(): void {
+        // Nothing in ai_providers: the target exists only as the request read it. The
+        // resolver that finds it has chosen from what the router was found among, not
+        // from a second reading of the table.
+        $resolver = new target_resolver($this->carrying_router([7 => $this->instance(7)]));
+
+        $this->assertSame([7], $this->candidates($resolver));
+    }
+
+    public function test_a_brought_key_goes_into_a_copy_not_the_instances_the_request_read(): void {
+        // The instances the request read are shared by everything that chooses a target
+        // for it. A key somebody brought must reach the request it pays for and nothing
+        // else, so the instance it goes into is a copy and the one read stays as it was.
+        $user = $this->key_holder(8);
+        $this->add_byok('their own key', 8, rule::KEYSOURCE_USER);
+        $read = [7 => $this->instance(7), 8 => $this->instance(8)];
+        $resolver = new target_resolver($this->carrying_router($read));
+
+        $candidates = $resolver->get_candidates($this->action((int) $user->id));
+
+        $this->assertSame('their-own-key', $candidates[0]->target->config['apikey']);
+        $this->assertNotSame($read[8], $candidates[0]->target);
+        $this->assertArrayNotHasKey('apikey', $read[8]->config);
+    }
+
+    public function test_the_context_the_start_was_recorded_with_is_the_one_the_rules_are_told(): void {
+        // The start of a request is recorded with what the rules will be told, before
+        // they run. Working it out again for the rules made two contexts for one
+        // request, each with its own reading of the record.
+        $resolver = new target_resolver($this->carrying_router([7 => $this->instance(7)]));
+        $action = $this->action();
+        $recorded = $resolver->get_evaluated_context($action);
+
+        $resolver->get_candidates($action);
+
+        $this->assertSame($recorded, $resolver->get_evaluated_context($action));
+    }
+
+    public function test_another_action_is_not_told_what_the_last_one_was(): void {
+        $resolver = new target_resolver($this->carrying_router([7 => $this->instance(7)]));
+        $first = $this->action();
+        $recorded = $resolver->get_evaluated_context($first);
+        $second = $this->action();
+
+        $resolver->get_candidates($second);
+
+        $told = $resolver->get_evaluated_context($second);
+        $this->assertNotSame($recorded, $told);
+        $this->assertTrue($told->is_for($second));
+        $this->assertFalse($told->is_for($first));
+    }
 }

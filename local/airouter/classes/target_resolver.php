@@ -137,7 +137,11 @@ class target_resolver {
         $this->targetsettings = null;
         $instances = $this->get_instances_by_id();
 
-        $this->evaluated = $context ?? $this->get_evaluation_context($action);
+        // The context the start of this request was recorded with, when there is one
+        // for this action, so that what the rules are told and the record of the
+        // request come from one working out and the record is read under one ledger.
+        $this->evaluated = $context
+            ?? ($this->evaluated?->is_for($action) ? $this->evaluated : $this->get_evaluation_context($action));
         foreach ($this->get_evaluator()->matches($this->evaluated) as $rule) {
             $target = $instances[(int) $rule->get('targetid')] ?? null;
             if ($target === null || !$this->is_usable($target, $action, $rule->is_byok())) {
@@ -400,7 +404,9 @@ class target_resolver {
     protected function get_injector(): key_injector {
         global $DB;
 
-        return new key_injector($DB);
+        // The targets' settings this resolution already read, so that whether a key may
+        // be brought to the target and which field it goes in are answered from them.
+        return new key_injector($DB, $this->get_target_settings());
     }
 
     /**
@@ -665,10 +671,15 @@ class target_resolver {
     /**
      * All provider instances known to the site.
      *
+     * The ones read when the request began, when the router carries them, so that the
+     * instance chosen to answer and the router that chose it were read together. A
+     * screen asking where a request would go has none carried and reads them now.
+     *
      * @return ai_provider[] The instances.
      */
     protected function get_instances(): array {
-        return \core\di::get(\core_ai\manager::class)->get_provider_instances();
+        return $this->router->get_request_instances()
+            ?? \core\di::get(\core_ai\manager::class)->get_provider_instances();
     }
 
     /**

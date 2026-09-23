@@ -64,7 +64,11 @@ class routing_manager extends \core_ai\manager {
             return parent::process_action($action);
         }
 
-        $router = $this->router_for_dispatch($action::class, $policy);
+        // Every provider instance, read once for this request: the router is found in
+        // them, and the router hands the same ones to whatever chooses its target, so
+        // that the router and the instance it delegates to were read together.
+        $instances = $this->get_provider_instances();
+        $router = $this->router_for_dispatch($action::class, $policy, $instances);
         if ($router === null) {
             // The site says this action goes through the router and the router cannot
             // take it. Answering it with another provider would be the one thing the
@@ -100,6 +104,9 @@ class routing_manager extends \core_ai\manager {
             );
         }
 
+        if ($router instanceof provider) {
+            $router->carry_request_instances($instances);
+        }
         $dispatch = new single_router_dispatch($this->db, $router);
 
         return $dispatch->process_action($action);
@@ -120,17 +127,23 @@ class routing_manager extends \core_ai\manager {
      * @param string $actionclass The action class being requested.
      * @param request_policy|null $policy The settings this request began with, when
      *                                    the answer is going to carry it out.
+     * @param ai_provider[]|null $instances The provider instances this request read,
+     *                                      or null to read them now.
      * @return ai_provider|null The instance, or null if none can answer.
      */
-    public function find_router(string $actionclass, ?request_policy $policy = null): ?ai_provider {
+    public function find_router(
+        string $actionclass,
+        ?request_policy $policy = null,
+        ?array $instances = null,
+    ): ?ai_provider {
         $actionclass = ltrim($actionclass, '\\');
-        $instances = $this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]);
+        $routers = $this->stored_routers($instances);
 
-        if ($instances === []) {
+        if ($routers === []) {
             return $this->adapter_for($actionclass, null, $policy);
         }
 
-        foreach ($instances as $instance) {
+        foreach ($routers as $instance) {
             if (!$instance->enabled || !$instance->is_provider_configured()) {
                 continue;
             }
@@ -141,7 +154,11 @@ class routing_manager extends \core_ai\manager {
             if (!in_array($actionclass, $carried, true)) {
                 continue;
             }
-            if (!$this->is_action_enabled($instance->provider, $actionclass, $instance->id)) {
+            // What core's is_action_enabled() answers for a provider instance, taken
+            // from the row already read: core reads the same row again by its id and
+            // looks at the same setting, which here would be a second reading of it.
+            $settings = $instance->actionconfig[$actionclass] ?? null;
+            if (!is_array($settings) || empty($settings['enabled'])) {
                 continue;
             }
 
@@ -149,6 +166,24 @@ class routing_manager extends \core_ai\manager {
         }
 
         return null;
+    }
+
+    /**
+     * The router instances stored in ai_providers.
+     *
+     * @param ai_provider[]|null $instances Every instance as this request read them,
+     *                                      or null to read the routers now.
+     * @return ai_provider[] The stored routers, in the order the table gave them.
+     */
+    protected function stored_routers(?array $instances): array {
+        if ($instances === null) {
+            return $this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]);
+        }
+
+        return array_filter(
+            $instances,
+            static fn(ai_provider $instance): bool => get_class($instance) === provider::INSTANCE_CLASS,
+        );
     }
 
     /**
@@ -164,21 +199,27 @@ class routing_manager extends \core_ai\manager {
      *
      * @param string $actionclass The action class being requested.
      * @param request_policy|null $policy The settings this request began with.
+     * @param ai_provider[]|null $instances The provider instances this request read,
+     *                                      or null to read them now.
      * @return ai_provider|null The router, or null when nothing could even explain itself.
      */
-    protected function router_for_dispatch(string $actionclass, ?request_policy $policy = null): ?ai_provider {
+    protected function router_for_dispatch(
+        string $actionclass,
+        ?request_policy $policy = null,
+        ?array $instances = null,
+    ): ?ai_provider {
         $actionclass = ltrim($actionclass, '\\');
         // The settings go with the request all the way to the object that carries it
         // out. Finding the router one way and building it another is how a request
         // came to be judged by this morning's settings and this minute's switch.
-        $found = $this->find_router($actionclass, $policy);
+        $found = $this->find_router($actionclass, $policy, $instances);
         if ($found !== null) {
             return $found;
         }
 
         // A stored instance is the site's router and its own state is the answer:
         // one that is switched off has been switched off on purpose.
-        if ($this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]) !== []) {
+        if ($this->stored_routers($instances) !== []) {
             return null;
         }
 

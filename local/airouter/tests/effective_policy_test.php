@@ -186,10 +186,14 @@ final class effective_policy_test extends \advanced_testcase {
             }
 
             #[\Override]
-            protected function router_for_dispatch(string $actionclass, ?request_policy $policy = null): ?\core_ai\provider {
+            protected function router_for_dispatch(
+                string $actionclass,
+                ?request_policy $policy = null,
+                ?array $instances = null,
+            ): ?\core_ai\provider {
                 ($this->interrupt)();
 
-                return parent::router_for_dispatch($actionclass, $policy);
+                return parent::router_for_dispatch($actionclass, $policy, $instances);
             }
         };
 

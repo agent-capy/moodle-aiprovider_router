@@ -90,6 +90,33 @@ abstract class provider extends \core_ai\provider {
     /** @var string Turn down a request no rule claimed. */
     public const NOMATCH_DECLINE = 'decline';
 
+    /** @var \core_ai\provider[]|null Every provider instance, as read for the request this router answers. */
+    private ?array $requestinstances = null;
+
+    /**
+     * Carry the provider instances read when the request this router answers began.
+     *
+     * The router object is made for one request: core builds a new one each time the
+     * instances are read, and the adapter is built per request. What it carries goes
+     * with it and nowhere else, so a change saved meanwhile reaches the next request,
+     * which reads the instances again. The instances themselves are not changed on the
+     * way: a key somebody brought is put into a copy.
+     *
+     * @param \core_ai\provider[] $instances The instances, as read.
+     */
+    public function carry_request_instances(array $instances): void {
+        $this->requestinstances = $instances;
+    }
+
+    /**
+     * The provider instances read when the request this router answers began.
+     *
+     * @return \core_ai\provider[]|null The instances, or null when none were carried.
+     */
+    public function get_request_instances(): ?array {
+        return $this->requestinstances;
+    }
+
     /**
      * The operating mode of this router instance.
      *

@@ -179,4 +179,38 @@ final class target_settings_test extends \advanced_testcase {
         $this->assertNull($this->settings->get_key_field(1));
         $this->assertSame('apikey', $this->settings->get_key_field(2));
     }
+
+    public function test_one_read_answers_every_question_a_request_asks(): void {
+        global $DB;
+
+        // Whether only a brought key may go to a target, whether one may not, whether
+        // one can be brought at all and which field it goes in: one request asks all of
+        // these, and they are answered from a single reading of the settings.
+        $this->settings->set_key_field(7, 'apikey');
+        $this->settings->set_mode(8, target_settings::MODE_ONLY);
+        $settings = new target_settings($DB);
+        $reads = $DB->perf_get_reads();
+
+        $settings->get_byok_only_ids();
+        $settings->get_byok_disallowed_ids();
+        $this->assertTrue($settings->supports_byok(7));
+        $this->assertSame('apikey', $settings->get_key_field(7));
+        $this->assertNull($settings->get_key_field(9));
+
+        $this->assertSame(1, $DB->perf_get_reads() - $reads);
+    }
+
+    public function test_a_setting_saved_elsewhere_is_seen_by_the_next_reader(): void {
+        global $DB;
+
+        // One object is one page or one request. It answers from what it read; the next
+        // one reads again, and sees what was saved in between.
+        $this->settings->set_key_field(7, 'apikey');
+        $this->assertTrue($this->settings->supports_byok(7));
+
+        (new target_settings($DB))->set_mode(7, target_settings::MODE_DISALLOWED);
+
+        $this->assertTrue($this->settings->supports_byok(7));
+        $this->assertFalse((new target_settings($DB))->supports_byok(7));
+    }
 }
