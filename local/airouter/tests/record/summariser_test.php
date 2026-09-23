@@ -136,7 +136,25 @@ final class summariser_test extends \advanced_testcase {
             + $DB->count_records(usage_recorder::REQUEST_TABLE, ['applied' => 0]));
     }
 
-    public function test_an_interrupted_run_rerun_equals_a_clean_run(): void {
+    /**
+     * Where a run is stopped, and on which pass of that point.
+     *
+     * @return array Point name and how many times it is passed before the stop.
+     */
+    public static function stop_points(): array {
+        return [
+            'after reading the requests' => ['requests_read', 1],
+            'between two attempts' => ['attempt_added', 2],
+            'after writing the summary and marking the facts' => ['marked', 1],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('stop_points')]
+    public function test_an_interrupted_run_rerun_equals_a_clean_run(string $point, int $pass): void {
+        // C18. Stopped at any point inside the transaction, a run leaves nothing
+        // behind: neither the summary written nor the facts marked. Stopped only
+        // between two attempts, this could not tell a run that commits the summary
+        // and the marks together from one that commits them one after the other.
         global $DB;
         // On PostgreSQL the test framework wraps each test in a transaction of its own,
         // and a rollback inside it marks the whole thing for rollback, so that the next
@@ -152,8 +170,8 @@ final class summariser_test extends \advanced_testcase {
         $DB->set_field(usage_recorder::REQUEST_TABLE, 'applied', 0);
 
         $hits = 0;
-        $interrupted = new summariser($DB, function (string $at) use (&$hits): void {
-            if ($at === 'attempt_added' && ++$hits === 2) {
+        $interrupted = new summariser($DB, function (string $at) use (&$hits, $point, $pass): void {
+            if ($at === $point && ++$hits === $pass) {
                 throw new \RuntimeException('interrupted');
             }
         });
@@ -165,6 +183,7 @@ final class summariser_test extends \advanced_testcase {
         }
         $this->assertSame([], $this->summary(), 'A half applied run leaves nothing behind.');
         $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE, ['applied' => 1]));
+        $this->assertSame(0, $DB->count_records(usage_recorder::REQUEST_TABLE, ['applied' => 1]));
 
         $this->assertNotFalse((new summariser($DB))->run($this->now + DAYSECS));
         $this->assertSame($clean, $this->summary());
