@@ -73,7 +73,17 @@ if ($data = $form->get_data()) {
     $rule->set('timestart', (int) ($data->timestart ?? 0));
     $rule->set('timeend', (int) ($data->timeend ?? 0));
 
-    $repository->save($rule, rule_form::read_conditions($data, $existingconditions));
+    try {
+        $repository->save($rule, rule_form::read_conditions($data, $existingconditions));
+    } catch (\moodle_exception $e) {
+        // The form weighed the budget against the retention already. These are the two
+        // ways the save can still be refused: the retention was shortened since, or
+        // another change to it or to a budget was being saved at that moment.
+        if (!in_array($e->errorcode, ['condition:budget:error:retention', 'limits:error:busy'], true)) {
+            throw $e;
+        }
+        redirect($url, $e->getMessage(), null, \core\output\notification::NOTIFY_ERROR);
+    }
 
     redirect(
         $listurl,

@@ -137,11 +137,43 @@ class rule_repository {
      * the form is a condition the administrator no longer wants, and leaving it behind
      * would silently keep a rule narrower than the screen says it is.
      *
+     * A rule saved switched on with a budget is held to the retention, under the lock
+     * the retention is changed under, and checked against the retention as stored once
+     * the lock is held. The form asks the same question first, so that the answer is
+     * shown beside the field; this is the check that holds when the retention was
+     * shortened in between.
+     *
+     * @param rule $rule The rule to save. Saved as a new rule when it has no id.
+     * @param array[] $conditions Configuration arrays keyed by condition type.
+     * @return rule The saved rule.
+     * @throws \moodle_exception When the budget reaches further back than the site keeps
+     *                           its summaries, or another change to the retention or a
+     *                           budget does not finish in time.
+     */
+    public function save(rule $rule, array $conditions = []): rule {
+        $budget = $conditions[budget::get_type()] ?? null;
+        if (!$rule->get('enabled') || !is_array($budget)) {
+            return $this->write($rule, $conditions);
+        }
+
+        return (new retention_policy($this->db))->exclusively(function () use ($rule, $conditions, $budget): rule {
+            $short = budget::stored_retention_shortfall($budget);
+            if ($short !== null) {
+                throw new \moodle_exception('condition:budget:error:retention', 'local_airouter', '', $short);
+            }
+
+            return $this->write($rule, $conditions);
+        });
+    }
+
+    /**
+     * Write a rule and the whole of its condition set, in one transaction.
+     *
      * @param rule $rule The rule to save. Saved as a new rule when it has no id.
      * @param array[] $conditions Configuration arrays keyed by condition type.
      * @return rule The saved rule.
      */
-    public function save(rule $rule, array $conditions = []): rule {
+    protected function write(rule $rule, array $conditions): rule {
         $transaction = $this->db->start_delegated_transaction();
 
         if (!$rule->get('id')) {
@@ -219,27 +251,47 @@ class rule_repository {
      * measures part of its own period and reads lower than the spending was.
      *
      * Switching one off is never refused. Whatever is wrong with a rule, turning it
-     * off is the direction that stops it happening.
+     * off is the direction that stops it happening. Switching one on is done under the
+     * lock the retention is changed under, and weighed against the retention as stored
+     * once the lock is held.
      *
      * @param int $id The rule id.
      * @param bool $enabled The state to set.
      * @return string|null Null when done, or why it was refused.
      */
     public function set_enabled(int $id, bool $enabled): ?string {
-        $rule = $this->get($id);
-        if ($rule === null) {
+        if (!$enabled) {
+            $rule = $this->get($id);
+            if ($rule !== null) {
+                $rule->set('enabled', false);
+                $rule->update();
+            }
+
             return null;
         }
-        if ($enabled) {
-            $problem = $this->why_not_enabled($id);
-            if ($problem !== null) {
-                return $problem;
-            }
-        }
-        $rule->set('enabled', $enabled);
-        $rule->update();
 
-        return null;
+        try {
+            return (new retention_policy($this->db))->exclusively(function () use ($id): ?string {
+                $rule = $this->get($id);
+                if ($rule === null) {
+                    return null;
+                }
+                $problem = $this->why_not_enabled($id);
+                if ($problem !== null) {
+                    return $problem;
+                }
+                $rule->set('enabled', true);
+                $rule->update();
+
+                return null;
+            });
+        } catch (\moodle_exception $e) {
+            if ($e->errorcode !== 'limits:error:busy') {
+                throw $e;
+            }
+
+            return $e->getMessage();
+        }
     }
 
     /**

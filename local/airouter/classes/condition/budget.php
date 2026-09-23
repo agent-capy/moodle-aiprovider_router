@@ -405,13 +405,27 @@ class budget extends base {
      * @return string|null The problem, or null when there is none.
      */
     public static function stored_retention_problem(array $config): ?string {
+        $short = self::stored_retention_shortfall($config);
+
+        return $short === null ? null : get_string('condition:budget:error:retention', 'local_airouter', $short);
+    }
+
+    /**
+     * By how much the summaries kept fall short of the budget a stored condition describes.
+     *
+     * @param array $config The stored configuration of a budget condition.
+     * @return \stdClass|null The days the budget reaches and the days kept, or null when they cover it.
+     */
+    public static function stored_retention_shortfall(array $config): ?\stdClass {
+        global $DB;
+
         $condition = new self($config);
         if ($condition->get_amount() <= 0 || $condition->get_scope() === '') {
             // An unfinished condition sets no budget, so it needs no history.
             return null;
         }
 
-        return self::retention_problem($condition->get_period(), $condition->get_days());
+        return (new retention_policy($DB))->shortfall_of($condition->get_period(), $condition->get_days());
     }
 
     #[\Override]

@@ -737,18 +737,20 @@ Nothing is ever removed that has not been summarised first, whatever the retenti
 says. A site whose cron has been stopped for a month catches up on the days it missed
 before anything is deleted.
 
-Nothing a limit still reaches back into is removed either. Budgets are worked out from
-what is still stored, so throwing away history inside a budget's period does not make the
-figure unknown -- it makes it smaller, and a limit that had been reached comes back under
-the line. Limits people put on brought keys count, and so do budgets on rules that have
-not started yet: a rule written today to begin next week looks back over its whole period
-from its first day, and those days are in the table now. A retention shorter than the
-longest limit is refused however it is saved, not only from the settings screen; the
-rule screen refuses a budget longer than the summaries are kept for, and switching such
-a rule back on is refused too; and the purge itself refuses whatever the settings say. A
-limit somebody puts on their own key is the one exception: it is theirs to set and the
-retention is not, so it is saved, and they are told that the figure against it is a
-floor.
+The summaries are kept at least as long as the furthest limit looks back. Budgets are
+worked out from what is still stored, so throwing away history inside a budget's period
+does not make the figure unknown -- it makes it smaller, and a limit that had been reached
+comes back under the line. Limits people put on brought keys count, and so do budgets on
+rules that have not started yet: a rule written today to begin next week looks back over
+its whole period from its first day, and those days are in the table now. A retention
+shorter than the longest budget is refused however it is saved, not only from the
+settings screen; the rule screen refuses a budget longer than the summaries are kept for,
+and switching such a rule back on is refused too. A retention and a budget saved at the
+same moment are not both let through: one waits for the other and is checked against
+what it saved. The purge itself follows the retention as set, so these refusals are what
+keep a budget's history in place. A limit somebody puts on their own key is the one
+exception: it is theirs to set and the retention is not, so it is saved, and they are
+told that the figure against it is a floor.
 
 The one way round the refusals is `config.php`, which can fix the retention beyond the
 reach of any screen. That cannot be refused, so the **Budget history** check reports it

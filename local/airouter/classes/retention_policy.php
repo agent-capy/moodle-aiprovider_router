@@ -31,6 +31,11 @@ use local_airouter\record\summariser;
  * lives. Every way of changing the retention goes through save(), and every way of
  * setting a limit asks shortfall_of(), so that the rule holds whichever side moves.
  *
+ * The two sides are changed under one lock, and each checks the other under it: the
+ * retention against the budgets as they are stored, a budget against the retention as
+ * it is stored. Checked apart, a retention being shortened and a budget being switched
+ * on would each pass its check before the other was written.
+ *
  * The one way round it is config.php, which fixes a setting beyond the reach of any
  * screen. That cannot be refused, so it is reported instead, by the status check, and
  * the figures a short retention produces are shown as floors rather than as totals.
@@ -51,6 +56,12 @@ class retention_policy {
 
     /** @var int How many days of summaries are kept until the site says otherwise: all of them. */
     public const DEFAULT_SUMMARY_DAYS = 0;
+
+    /** @var string The lock the retention, and the budgets that depend on it, are changed under. */
+    public const LOCK = 'limits';
+
+    /** @var int How long a change waits for another, in seconds. */
+    public const LOCK_TIMEOUT = 5;
 
     /**
      * Constructor.
@@ -124,16 +135,49 @@ class retention_policy {
      * @param int $detail Days of detail to keep, zero for ever.
      * @param int $summary Days of summaries to keep, zero for ever.
      * @return string[] Problems, keyed by setting, and nothing saved; or empty and both saved.
+     * @throws \moodle_exception When another change to the retention or a budget does not finish in time.
      */
     public function save(int $detail, int $summary): array {
-        $problems = $this->problems($detail, $summary);
-        if ($problems) {
-            return $problems;
-        }
-        set_config(self::DETAIL_SETTING, $detail, 'local_airouter');
-        set_config(self::SUMMARY_SETTING, $summary, 'local_airouter');
+        return $this->exclusively(function () use ($detail, $summary): array {
+            $problems = $this->problems($detail, $summary);
+            if ($problems) {
+                return $problems;
+            }
+            set_config(self::DETAIL_SETTING, $detail, 'local_airouter');
+            set_config(self::SUMMARY_SETTING, $summary, 'local_airouter');
 
-        return [];
+            return [];
+        });
+    }
+
+    /**
+     * Change the retention, or a budget that depends on it, with no other such change beside it.
+     *
+     * The change does its own check inside, against what is stored once the lock is
+     * held: a check made before the lock is only as good as the moment it was made.
+     *
+     * @param \Closure $change The check and the change, run inside one transaction.
+     * @return mixed What the change returned.
+     * @throws \moodle_exception When another change to the retention or a budget does not finish in time.
+     */
+    public function exclusively(\Closure $change): mixed {
+        $lock = \core\lock\lock_config::get_lock_factory('local_airouter')->get_lock(self::LOCK, static::LOCK_TIMEOUT);
+        if (!$lock) {
+            throw new \moodle_exception('limits:error:busy', 'local_airouter');
+        }
+        try {
+            $transaction = $this->db->start_delegated_transaction();
+            try {
+                $result = $change();
+                $transaction->allow_commit();
+            } catch (\Throwable $e) {
+                $transaction->rollback($e);
+            }
+        } finally {
+            $lock->release();
+        }
+
+        return $result;
     }
 
     /**
@@ -178,12 +222,34 @@ class retention_policy {
      * @return \stdClass|null The reach and the days kept, or null when kept covers it.
      */
     protected function compare(int $reach): ?\stdClass {
-        $kept = $this->get_summary_days();
+        $kept = $this->get_summary_days_now();
         if ($reach <= 0 || $kept <= 0 || $reach <= $kept) {
             return null;
         }
 
         return (object) ['reach' => $reach, 'kept' => $kept];
+    }
+
+    /**
+     * How many days of summaries the site keeps, as stored at this moment.
+     *
+     * Not through get_config(), which keeps a copy for the rest of the request: a
+     * retention another request saved since the page began would not be seen, and a
+     * budget switched on under the lock would be weighed against the old figure. A
+     * setting fixed in config.php is read the way core reads it.
+     *
+     * @return int Days, or zero to keep everything.
+     */
+    protected function get_summary_days_now(): int {
+        if (self::is_forced(self::SUMMARY_SETTING)) {
+            return $this->get_summary_days();
+        }
+        $stored = $this->db->get_field('config_plugins', 'value', [
+            'plugin' => 'local_airouter',
+            'name' => self::SUMMARY_SETTING,
+        ]);
+
+        return $stored === false || $stored === null || $stored === '' ? self::DEFAULT_SUMMARY_DAYS : max(0, (int) $stored);
     }
 
     /**

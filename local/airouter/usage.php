@@ -68,10 +68,17 @@ if ($data = $form->get_data()) {
     // Through the policy, which refuses a retention the site's limits could not be
     // measured over; the form has asked it the same question, so this is not
     // expected to refuse, and a refusal is shown rather than swallowed.
-    $problems = (new retention_policy($DB))->save(
-        max(0, (int) $data->logretentiondays),
-        max(0, (int) $data->summaryretentiondays),
-    );
+    try {
+        $problems = (new retention_policy($DB))->save(
+            max(0, (int) $data->logretentiondays),
+            max(0, (int) $data->summaryretentiondays),
+        );
+    } catch (\moodle_exception $e) {
+        if ($e->errorcode !== 'limits:error:busy') {
+            throw $e;
+        }
+        $problems = [$e->getMessage()];
+    }
     if ($problems) {
         redirect(
             new moodle_url($url, ['days' => $days]),

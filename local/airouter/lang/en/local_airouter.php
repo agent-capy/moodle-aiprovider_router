@@ -307,6 +307,7 @@ $string['keysource:all'] = 'Every key';
 $string['keysource:course'] = 'A key registered for the course';
 $string['keysource:site'] = 'The site\'s own key';
 $string['keysource:user'] = 'A key the person asking has brought';
+$string['limits:error:busy'] = 'Another change to how long the history is kept, or to a budget, is being saved at the moment, so nothing was saved. Try again in a minute.';
 $string['managed:coexist'] = 'This AI Router instance is set to run alongside other providers, which means letting them answer whatever no rule claimed. An action placed under the router cannot do that: nothing else is offered the request. Set the router to answer everything, or take these actions back out.';
 $string['managed:confirmstuck'] = 'No enabled AI Router instance can currently carry {$a}. Placing it under the router means requests for it are refused rather than passed to another provider, so this will stop it working across the site until the router can carry it. Save anyway?';
 $string['managed:heading'] = 'Actions the AI Router must answer';
