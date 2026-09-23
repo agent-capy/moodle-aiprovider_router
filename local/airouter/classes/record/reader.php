@@ -626,6 +626,10 @@ class reader {
      * @param int|null $userid Limit to one person, or null for everybody.
      * @param int|null $targetid Limit to one delegation target, or null for all.
      * @param int|null $walletid Limit to what one wallet paid for, or null for all.
+     * @param bool $requests Whether the requests are wanted. Wanted without the calls,
+     *                       they are only counted, and nobody asks which provider
+     *                       answered them.
+     * @param bool $calls Whether the calls, and what they cost, are wanted.
      * @return \stdClass[] Rows carrying the provider, the currency and the metrics.
      */
     protected function detailed_by_provider(
@@ -636,6 +640,8 @@ class reader {
         ?int $userid = null,
         ?int $targetid = null,
         ?int $walletid = null,
+        bool $requests = true,
+        bool $calls = true,
     ): array {
         [$rwhere, $awhere, $params] = $this->detail_conditions($from, $to, $courseid, $keysource, $userid, $targetid, $walletid);
         $params += [
@@ -646,8 +652,26 @@ class reader {
         ];
         $rows = [];
 
+        if ($requests && !$calls && $walletid === null) {
+            // Counted, and nothing more: no call is joined to find who answered.
+            $count = $this->db->get_record_sql(
+                'SELECT COUNT(1) AS requests, SUM(CASE WHEN r.state = :answered THEN 0 ELSE 1 END) AS failures
+                   FROM {' . usage_recorder::REQUEST_TABLE . '} r
+                  WHERE ' . $rwhere,
+                $params,
+            );
+            $row = self::blank();
+            $row->targetprovider = '-';
+            $row->currency = '-';
+            $row->requests = (int) $count->requests;
+            $row->failures = (int) $count->failures;
+            $this->at('detailed');
+
+            return [$row];
+        }
+
         // A request sits with the provider that answered it, as in the summary.
-        $recordset = $this->db->get_recordset_sql(
+        $recordset = $requests ? $this->db->get_recordset_sql(
             'SELECT s.targetprovider, COUNT(1) AS requests,
                     SUM(CASE WHEN r.state = :answered THEN 0 ELSE 1 END) AS failures
                FROM {' . usage_recorder::REQUEST_TABLE . '} r
@@ -655,7 +679,7 @@ class reader {
               WHERE ' . $rwhere . '
            GROUP BY s.targetprovider',
             $params,
-        );
+        ) : [];
         foreach ($recordset as $group) {
             $row = self::blank();
             $row->targetprovider = $group->targetprovider ?? '-';
@@ -664,9 +688,11 @@ class reader {
             $row->failures = (int) $group->failures;
             $rows[] = $row;
         }
-        $recordset->close();
+        if ($requests) {
+            $recordset->close();
+        }
 
-        $recordset = $this->db->get_recordset_sql(
+        $recordset = $calls ? $this->db->get_recordset_sql(
             'SELECT a.targetprovider, a.currency, CASE WHEN a.cost IS NULL THEN 0 ELSE 1 END AS costed,
                     COUNT(1) AS calls, SUM(a.usageknown) AS knowncalls,
                     SUM(CASE WHEN a.usageknown = 1 THEN a.prompttokens ELSE 0 END) AS prompttokens,
@@ -677,7 +703,7 @@ class reader {
               WHERE ' . $awhere . '
            GROUP BY a.targetprovider, a.currency, CASE WHEN a.cost IS NULL THEN 0 ELSE 1 END',
             $params,
-        );
+        ) : [];
         foreach ($recordset as $group) {
             $costed = (int) $group->costed === 1;
             $provider = (string) ($group->targetprovider ?? '-');
@@ -694,7 +720,9 @@ class reader {
             self::settle($row);
             $rows[] = $row;
         }
-        $recordset->close();
+        if ($calls) {
+            $recordset->close();
+        }
         $this->at('detailed');
 
         return $rows;

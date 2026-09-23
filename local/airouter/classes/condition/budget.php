@@ -107,6 +107,7 @@ class budget extends base {
             $this->get_period(),
             $this->get_days(),
             time(),
+            $metric,
         );
         $reached = $spend->has_reached($amount, $metric, $provider);
         if ($reached === null) {

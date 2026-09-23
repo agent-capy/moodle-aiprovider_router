@@ -246,12 +246,17 @@ class ledger extends reader {
      * @param string $period One of the PERIOD_ constants.
      * @param int $length How many days a rolling period counts.
      * @param int $now The moment the period ends at.
+     * @param string|null $metric The one measure the answer is wanted for, or null for
+     *                            all of them. Asked for money, the figure need not count
+     *                            requests, and asked for requests it need not add up what
+     *                            the calls cost; the answer is then good for that measure
+     *                            only, and is held apart from a full one.
      * @return spend The spending.
      */
-    public function get_spend(string $scope, int $scopeid, string $period, int $length, int $now): spend {
+    public function get_spend(string $scope, int $scopeid, string $period, int $length, int $now, ?string $metric = null): spend {
         [$from, $to] = self::get_window($period, $length, $now);
 
-        return $this->remembered($this->filters_for($scope, $scopeid), $scope . '_' . $scopeid, $from, $to);
+        return $this->remembered($this->filters_for($scope, $scopeid), $scope . '_' . $scopeid, $from, $to, $metric);
     }
 
     /**
@@ -261,14 +266,16 @@ class ledger extends reader {
      * @param string $period One of the PERIOD_ constants.
      * @param int $length How many days a rolling period counts.
      * @param int $now The moment the period ends at.
+     * @param string|null $metric The one measure the answer is wanted for, or null for
+     *                            all of them, as for get_spend().
      * @return spend The spending.
      */
-    public function get_key_spend(key $key, string $period, int $length, int $now): spend {
+    public function get_key_spend(key $key, string $period, int $length, int $now, ?string $metric = null): spend {
         [$from, $to] = self::get_window($period, $length, $now);
 
         // Held by wallet rather than by key: a key that has just been moved to a new
         // wallet must not be answered for with the old wallet's figure.
-        return $this->remembered($this->filters_for_key($key), 'wallet_' . $key->get_wallet(), $from, $to);
+        return $this->remembered($this->filters_for_key($key), 'wallet_' . $key->get_wallet(), $from, $to, $metric);
     }
 
     /**
@@ -424,15 +431,16 @@ class ledger extends reader {
      * @param string $subject What is being measured, for the cache key.
      * @param int $from The first moment counted.
      * @param int $to The first moment not counted.
+     * @param string|null $metric The one measure the answer is wanted for, or null for all.
      * @return spend The spending.
      */
-    protected function remembered(array $filters, string $subject, int $from, int $to): spend {
+    protected function remembered(array $filters, string $subject, int $from, int $to, ?string $metric = null): spend {
         if (!$this->cached) {
-            return $this->read($filters, $from, $to);
+            return $this->read($filters, $from, $to, $metric);
         }
 
         $cache = \core_cache\cache::make('local_airouter', self::CACHE_AREA);
-        $cachekey = $subject . '_' . $from . '_';
+        $cachekey = $subject . '_' . ($metric ?? 'all') . '_' . $from . '_';
         $now = $this->onegeneration
             ? ($this->lookupgeneration ??= generation::get($this->db))
             : generation::get($this->db);
@@ -446,7 +454,7 @@ class ledger extends reader {
             return new spend($held['requests'], $held['calls'], $from, $to, $providers, (int) ($held['coveredfrom'] ?? 0));
         }
 
-        $spend = $this->read($filters, $from, $to);
+        $spend = $this->read($filters, $from, $to, $metric);
         $generation = $this->get_read_generation();
         if ($generation === null) {
             // Read while the summary kept moving. Good enough to answer with once,
@@ -473,9 +481,12 @@ class ledger extends reader {
      * @param array $filters Filters the reader understands.
      * @param int $from The first moment counted.
      * @param int $to The first moment not counted.
+     * @param string|null $metric The one measure the answer is wanted for, or null for
+     *                            all. The part of the detail no answer for it needs is
+     *                            not read: the requests for money, the calls for requests.
      * @return spend The spending.
      */
-    protected function read(array $filters, int $from, int $to): spend {
+    protected function read(array $filters, int $from, int $to, ?string $metric = null): spend {
         $courseid = $filters['courseid'] ?? null;
         $userid = $filters['userid'] ?? null;
         $targetid = $filters['targetid'] ?? null;
@@ -488,7 +499,17 @@ class ledger extends reader {
         $this->pendinghistory = null;
         [$summary, $detail, $currencies] = $this->consistently(fn() => [
             $this->settled($filters, $fields, $from, $to),
-            $this->detailed_by_provider($from, $to, $courseid, $keysource, $userid, $targetid, $walletid),
+            $this->detailed_by_provider(
+                $from,
+                $to,
+                $courseid,
+                $keysource,
+                $userid,
+                $targetid,
+                $walletid,
+                $metric !== self::METRIC_COST,
+                $metric !== self::METRIC_REQUESTS,
+            ),
             $this->prices->get_provider_currencies(),
         ]);
         $this->keep_history();

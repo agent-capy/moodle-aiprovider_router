@@ -173,10 +173,11 @@ class key extends \core\persistent {
      *
      * @param ledger $ledger The ledger to measure with.
      * @param int $now The moment the period ends at.
+     * @param string|null $metric The one measure the answer is wanted for, or null for all.
      * @return spend The spending over the period the limit is counted in.
      */
-    public function get_cap_spend(ledger $ledger, int $now): spend {
-        return $ledger->get_key_spend($this, $this->get_cap_period(), $this->get_cap_days(), $now);
+    public function get_cap_spend(ledger $ledger, int $now, ?string $metric = null): spend {
+        return $ledger->get_key_spend($this, $this->get_cap_period(), $this->get_cap_days(), $now, $metric);
     }
 
     /**
@@ -198,7 +199,7 @@ class key extends \core\persistent {
         }
         // The key is registered for one target, so its calls went to one provider,
         // and the limit is a figure in that provider's currency.
-        $spend = $this->get_cap_spend($ledger, $now);
+        $spend = $this->get_cap_spend($ledger, $now, ledger::METRIC_COST);
 
         return $spend->has_reached($this->get_cap_amount(), ledger::METRIC_COST, $spend->sole_provider()) === true;
     }

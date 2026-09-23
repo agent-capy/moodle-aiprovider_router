@@ -579,8 +579,8 @@ final class ledger_test extends \advanced_testcase {
             public ?\Closure $pause = null;
 
             #[\Override]
-            protected function read(array $filters, int $from, int $to): spend {
-                $spend = parent::read($filters, $from, $to);
+            protected function read(array $filters, int $from, int $to, ?string $metric = null): spend {
+                $spend = parent::read($filters, $from, $to, $metric);
                 if ($this->pause !== null) {
                     $pause = $this->pause;
                     $this->pause = null;
@@ -751,6 +751,8 @@ final class ledger_test extends \advanced_testcase {
                 ?int $userid = null,
                 ?int $targetid = null,
                 ?int $walletid = null,
+                bool $requests = true,
+                bool $calls = true,
             ): array {
                 return $this->detailed(['targetprovider'], $from, $to, $courseid, $keysource, $userid, $targetid, $walletid);
             }
@@ -774,10 +776,11 @@ final class ledger_test extends \advanced_testcase {
              * @param array $filters Filters the reader understands.
              * @param int $from The first moment counted.
              * @param int $to The first moment not counted.
+             * @param string|null $metric The one measure wanted, or null for all.
              * @return spend The spending.
              */
-            public function spent(array $filters, int $from, int $to): spend {
-                return $this->read($filters, $from, $to);
+            public function spent(array $filters, int $from, int $to, ?string $metric = null): spend {
+                return $this->read($filters, $from, $to, $metric);
             }
         };
         [$from, $to] = $this->week();
@@ -797,6 +800,9 @@ final class ledger_test extends \advanced_testcase {
             $this->assertSame($expected->requests, $actual->requests, $label);
             $this->assertSame($expected->calls, $actual->calls, $label);
             $this->assertEquals($expected->providers, $actual->providers, $label);
+            // Read for one measure, the figure is the same for that measure.
+            $this->assertEquals($expected->providers, $summed->spent($filters, $from, $to, ledger::METRIC_COST)->providers, $label);
+            $this->assertSame($expected->requests, $summed->spent($filters, $from, $to, ledger::METRIC_REQUESTS)->requests, $label);
         }
         $this->assertGreaterThan(0, $summed->spent(['keysource' => rule::KEYSOURCE_SITE], $from, $to)->requests);
     }
