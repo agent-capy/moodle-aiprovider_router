@@ -318,4 +318,72 @@ final class usage_recorder_test extends \advanced_testcase {
         $this->assertSame('JPY', $row->currency, 'The ending was seen by the correction that came after it.');
         $this->assertSame('JPY', (new \local_airouter\price_book($DB))->currency_of('aiprovider_openai'));
     }
+    /**
+     * Take the record lock on a second connection and keep it, as another process would.
+     *
+     * @return \core\lock\lock The lock, to be released by the test.
+     */
+    private function hold_lock_elsewhere(): \core\lock\lock {
+        global $DB, $CFG;
+        $original = $DB;
+        $other = \moodle_database::get_driver_instance($CFG->dbtype, $CFG->dblibrary);
+        $other->connect($CFG->dbhost, $CFG->dbuser, $CFG->dbpass, $CFG->dbname, $CFG->prefix, $CFG->dboptions);
+        try {
+            // The site's lock factory binds to the connection that is $DB when it is made.
+            $DB = $other;
+            $lock = usage_recorder::lock_factory()->get_lock(usage_recorder::LOCK, 0);
+        } finally {
+            $DB = $original;
+        }
+        $this->assertNotFalse($lock, 'The other connection holds the record lock.');
+        $this->otherconnections[] = $other;
+
+        return $lock;
+    }
+
+    /** @var \moodle_database[] Connections kept open for a lock held elsewhere. */
+    private array $otherconnections = [];
+
+    #[\Override]
+    protected function tearDown(): void {
+        foreach ($this->otherconnections as $other) {
+            $other->dispose();
+        }
+        $this->otherconnections = [];
+        parent::tearDown();
+    }
+
+    public function test_an_ending_that_cannot_take_the_lock_keeps_its_usage_and_is_priced_by_the_next_holder(): void {
+        global $DB;
+        // R8-05. The lock is held by something that may be pricing this provider's
+        // record again; a price worked out beside it could be in a currency the
+        // rates no longer say. The ending is kept, unpriced, for whoever holds the
+        // lock next.
+        $this->rate(1.0);
+        $request = $this->recorder->begin_request($this->context());
+        $first = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
+        $second = $this->recorder->begin_attempt($request, 2, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
+        $held = $this->hold_lock_elsewhere();
+
+        $this->recorder->end_attempt($first, attempt_state::SUCCEEDED, new usage(1000000, 0), 'm', null, 'aiprovider_openai');
+
+        $this->assertDebuggingCalled(null, DEBUG_NORMAL);
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $first], '*', MUST_EXIST);
+        $this->assertSame(attempt_state::SUCCEEDED, $row->state);
+        $this->assertSame(1000000, (int) $row->prompttokens, 'The usage is kept.');
+        $this->assertNull($row->cost, 'Not priced beside a lock somebody else holds.');
+        $this->assertNull($row->currency);
+        $this->assertSame(1, (int) $row->unpriced);
+        $this->assertSame(1, usage_recorder::get_deferred_count());
+
+        // The next ending that takes the lock prices what was left.
+        $held->release();
+        $this->recorder->end_attempt($second, attempt_state::SUCCEEDED, new usage(1, 0), 'm', null, 'aiprovider_openai');
+
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $first], '*', MUST_EXIST);
+        $this->assertSame(0, (int) $row->unpriced);
+        $this->assertEqualsWithDelta(1.0, (float) $row->cost, 0.000001);
+        $this->assertSame('USD', $row->currency);
+        $this->assertSame(0, usage_recorder::get_deferred_count());
+    }
 }

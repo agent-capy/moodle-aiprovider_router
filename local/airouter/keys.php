@@ -159,7 +159,9 @@ if ($allowed && $action === 'cap') {
         redirect($url);
     }
     if ($capdata = $capform->get_data()) {
-        $repository->set_cap(
+        // Refused when the key was replaced by one for another account meanwhile:
+        // the limit was decided about the key that was on the screen.
+        $applied = $repository->set_cap(
             $capkey,
             key_cap_form::read_amount($capdata),
             (string) ($capdata->capperiod ?? ledger::PERIOD_MONTH),
@@ -167,9 +169,9 @@ if ($allowed && $action === 'cap') {
         );
         redirect(
             $url,
-            get_string('keys:cap:saved', 'local_airouter'),
+            get_string($applied ? 'keys:cap:saved' : 'keys:cap:changed', 'local_airouter'),
             null,
-            \core\output\notification::NOTIFY_SUCCESS,
+            $applied ? \core\output\notification::NOTIFY_SUCCESS : \core\output\notification::NOTIFY_WARNING,
         );
     }
     $capform->set_data([
@@ -199,7 +201,10 @@ if ($allowed && $action === 'replace') {
         'courseid' => $courseid,
         'target' => $names[$currenttarget],
         'cap' => $current->has_cap() ? key_formatter::limit($current, $currencies[$currenttarget] ?? null) : null,
-        'issame' => fn(string $secret): bool => $repository->is_same_secret($current, $secret),
+        // The same key again, or one this wallet or an earlier one held: known, and
+        // not asked about.
+        'issame' => fn(string $secret): bool => $repository->is_same_secret($current, $secret)
+            || $repository->is_known_secret($scope, $scopeid, $currenttarget, $secret),
     ]);
     if ($walletform->is_cancelled()) {
         redirect($url);

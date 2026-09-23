@@ -57,15 +57,6 @@ class summariser {
     /** @var string Config holding the first moment this site can still account for. Shared with the older record. */
     public const HISTORY_SETTING = 'historyfrom';
 
-    /**
-     * @var string Config counting how many times the summary has changed.
-     *
-     * Bumped inside the transaction that applies facts, and after a purge, so that a
-     * reader which read the summary and then the detail can tell whether anything
-     * moved between the two, and read again if it did.
-     */
-    public const GENERATION_SETTING = 'summarygeneration';
-
     /** @var int How many ids one marking statement carries. */
     protected const CHUNK = 500;
 
@@ -118,6 +109,7 @@ class summariser {
         }
         try {
             $lost = $this->sweep($now);
+            $priced = $this->price();
             try {
                 $applied = $this->summarise($now);
             } catch (facts_changed_underneath $e) {
@@ -134,10 +126,33 @@ class summariser {
 
         return [
             'lost' => $lost,
+            'priced' => $priced,
             'applied' => $applied,
             'purged' => $purged,
             'purgedsummaries' => $purgedsummaries,
         ];
+    }
+
+    /**
+     * Price the endings that were written while the record was busy.
+     *
+     * Under the record lock, which is what they were written without. Taken with the
+     * ordinary wait; if the record is busy now as well, they wait for the next run,
+     * or for the next ending that takes the lock, whichever comes first. Nothing is
+     * summarised until it is priced, so nothing here is lost by waiting.
+     *
+     * @return int How many endings were priced, or zero when the record was busy.
+     */
+    protected function price(): int {
+        $lock = ($this->locks ?? usage_recorder::lock_factory())->get_lock(usage_recorder::LOCK, usage_recorder::LOCK_TIMEOUT);
+        if (!$lock) {
+            return 0;
+        }
+        try {
+            return (new usage_recorder($this->db))->price_deferred(true);
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
@@ -210,11 +225,15 @@ class summariser {
                 $this->add_request($request);
             }
 
+            // An ending still waiting to be priced is left in the detail, where it
+            // reads as unpriced, until it has been: the summary keeps a day's cost
+            // and the calls it covers, and an ending folded in unpriced would make
+            // that day read as one no rate covered.
             $attempts = $this->db->get_records_sql(
                 'SELECT a.*, r.userid, r.courseid, r.actionname
                    FROM {' . usage_recorder::ATTEMPT_TABLE . '} a
                    JOIN {' . usage_recorder::REQUEST_TABLE . '} r ON r.id = a.requestid
-                  WHERE a.applied = 0 AND a.state <> :started
+                  WHERE a.applied = 0 AND a.state <> :started AND a.unpriced = 0
                     AND a.timeended IS NOT NULL AND a.timeended < :today
                ORDER BY a.id',
                 ['started' => attempt_state::STARTED, 'today' => $today],
@@ -229,7 +248,7 @@ class summariser {
             $this->mark(usage_recorder::ATTEMPT_TABLE, array_keys($attempts));
             $this->at('marked');
             if ($requests || $attempts) {
-                self::bump_generation();
+                generation::bump();
             }
             $transaction->allow_commit();
         } catch (\Throwable $e) {
@@ -299,37 +318,10 @@ class summariser {
         if ($count > 0) {
             $this->db->delete_records_select(self::TABLE, 'daystart < :cutoff', $params);
             self::record_history_from($params['cutoff']);
-            self::bump_generation();
+            generation::bump();
         }
 
         return $count;
-    }
-
-    /**
-     * The number of times the summary has changed, read from the database itself.
-     *
-     * Not through get_config(), which a process keeps a copy of: what is wanted here
-     * is whether another process has changed the summary since a moment ago.
-     *
-     * @param \moodle_database $db The database to read.
-     * @return int The generation.
-     */
-    public static function get_generation(\moodle_database $db): int {
-        $value = $db->get_field('config_plugins', 'value', ['plugin' => 'local_airouter', 'name' => self::GENERATION_SETTING]);
-
-        return $value === false || $value === null ? 0 : (int) $value;
-    }
-
-    /**
-     * Note that the summary has changed.
-     *
-     * Written with set_config() so that the row exists and the config caches are
-     * told, and read back directly, so that no cache stands between two processes.
-     */
-    protected static function bump_generation(): void {
-        global $DB;
-
-        set_config(self::GENERATION_SETTING, self::get_generation($DB) + 1, 'local_airouter');
     }
 
     /**

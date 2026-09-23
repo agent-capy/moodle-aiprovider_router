@@ -101,6 +101,7 @@ class local_airouter_generator extends component_generator_base {
             'usageknown' => 1,
             'cost' => null,
             'currency' => null,
+            'unpriced' => 0,
             'timestarted' => $now,
             'timeended' => $now,
             'applied' => 0,

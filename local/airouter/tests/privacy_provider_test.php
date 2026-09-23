@@ -216,14 +216,19 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
         $this->assertStringContainsString('qrst', $exported);
         $this->assertStringNotContainsString('sk-removed-later-qrst', $exported);
         // Not the hash either. It reveals nothing, but it is about the key.
-        $this->assertStringNotContainsString(
-            $DB->get_field(key_repository::WALLET_TABLE, 'keyhash', ['id' => $saved->get_wallet()]),
-            $exported,
+        $hashes = $DB->get_fieldset_select(
+            key_repository::WALLET_KEY_TABLE,
+            'keyhash',
+            'walletid = :id',
+            ['id' => $saved->get_wallet()],
         );
+        $this->assertCount(1, $hashes);
+        $this->assertStringNotContainsString($hashes[0], $exported);
 
         provider::delete_data_for_user(new approved_contextlist($user, 'local_airouter', [$context->id]));
 
         $this->assertSame(0, $DB->count_records(key_repository::WALLET_TABLE));
+        $this->assertSame(0, $DB->count_records(key_repository::WALLET_KEY_TABLE));
     }
 
     public function test_a_deletion_request_leaves_a_course_key_and_clears_the_name_on_it(): void {

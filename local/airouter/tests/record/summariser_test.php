@@ -106,7 +106,7 @@ final class summariser_test extends \advanced_testcase {
         $this->request($this->now);
         $result = (new summariser($DB))->run($this->now + DAYSECS);
 
-        $this->assertSame(['lost' => 0, 'applied' => 3, 'purged' => 0, 'purgedsummaries' => 0], $result);
+        $this->assertSame(['lost' => 0, 'priced' => 0, 'applied' => 3, 'purged' => 0, 'purgedsummaries' => 0], $result);
         $summary = $this->summary();
         // The request sits on the row of the target and model that answered it.
         $this->assertSame(1, $summary['2026-09-20/5/2/m2/site/-']['requests']);
@@ -439,5 +439,89 @@ final class summariser_test extends \advanced_testcase {
 
     public function test_the_check_stands_down_on_a_site_that_has_not_set_the_router_up(): void {
         $this->assertSame(result::NA, (new recordgaps())->get_result()->get_status());
+    }
+    public function test_an_ending_left_unpriced_waits_in_the_detail_until_the_run_prices_it(): void {
+        global $DB;
+        // R8-05. An ending written while the record was busy has no price yet. Folded
+        // into the summary as it is, the day would read as one no rate covered; so
+        // it waits, and the run prices it first, at the rate in force when it ended.
+        $rate = new \local_airouter\price();
+        $rate->set('provider', 'aiprovider_mock');
+        $rate->set('currency', 'USD');
+        $rate->set('promptrate', 1.0);
+        $rate->create();
+        $ended = $this->now - DAYSECS;
+        $request = $this->generator->create_request([
+            'userid' => 5, 'answeredby' => 1, 'timestarted' => $ended - 10, 'timeended' => $ended,
+        ]);
+        $waiting = $this->generator->create_attempt([
+            'requestid' => $request->id, 'targetid' => 1, 'prompttokens' => 1000000, 'completiontokens' => 0,
+            'cost' => null, 'currency' => null, 'unpriced' => 1, 'timestarted' => $ended - 8, 'timeended' => $ended,
+        ]);
+
+        $result = (new summariser($DB))->run($this->now);
+
+        $this->assertSame(1, $result['priced']);
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $waiting->id], '*', MUST_EXIST);
+        $this->assertSame(0, (int) $row->unpriced);
+        $this->assertEqualsWithDelta(1.0, (float) $row->cost, 0.000001);
+        $this->assertSame('USD', $row->currency);
+        $this->assertSame(1, (int) $row->applied, 'Priced, and then counted.');
+        $summary = $DB->get_record(summariser::TABLE, ['targetid' => 1, 'currency' => 'USD'], '*', MUST_EXIST);
+        $this->assertEqualsWithDelta(1.0, (float) $summary->cost, 0.000001);
+        $this->assertSame(1, (int) $summary->costedcalls);
+    }
+
+    public function test_an_ending_left_unpriced_is_not_counted_while_the_record_is_busy(): void {
+        global $DB;
+        // The run could not take the record lock, so nothing was priced, and the
+        // unpriced ending stays in the detail rather than being counted as unpriced.
+        $ended = $this->now - DAYSECS;
+        $request = $this->generator->create_request([
+            'userid' => 5, 'answeredby' => 1, 'timestarted' => $ended - 10, 'timeended' => $ended,
+        ]);
+        $waiting = $this->generator->create_attempt([
+            'requestid' => $request->id, 'targetid' => 1, 'cost' => null, 'currency' => null, 'unpriced' => 1,
+            'timestarted' => $ended - 8, 'timeended' => $ended,
+        ]);
+        $busy = new class ('busy') implements \core\lock\lock_factory {
+            #[\Override]
+            public function __construct($type) {
+            }
+
+            #[\Override]
+            public function is_available() {
+                return true;
+            }
+
+            #[\Override]
+            public function supports_timeout() {
+                return true;
+            }
+
+            #[\Override]
+            public function supports_auto_release() {
+                return true;
+            }
+
+            #[\Override]
+            public function get_lock($resource, $timeout, $maxlifetime = 86400) {
+                // The summariser's own lock is given; the record lock is not.
+                return $resource === summariser::LOCK ? new \core\lock\lock($resource, $this) : false;
+            }
+
+            #[\Override]
+            public function release_lock(\core\lock\lock $lock) {
+                return true;
+            }
+        };
+
+        $result = (new summariser($DB, null, $busy))->run($this->now);
+
+        $this->assertSame(0, $result['priced']);
+        $this->assertSame(1, $result['applied'], 'The request, but not the ending.');
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $waiting->id], '*', MUST_EXIST);
+        $this->assertSame(1, (int) $row->unpriced);
+        $this->assertSame(0, (int) $row->applied);
     }
 }

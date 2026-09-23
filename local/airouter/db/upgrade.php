@@ -330,5 +330,45 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092305, 'local', 'airouter');
     }
 
+    if ($oldversion < 2026092306) {
+        // A wallet remembers every key it has held, not only the last, so that a key
+        // renewed within the wallet is still known as the wallet's afterwards.
+        $table = new xmldb_table('local_airouter_walletkey');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('walletid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('keyhash', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_key('walletid', XMLDB_KEY_FOREIGN, ['walletid'], 'local_airouter_wallet', ['id']);
+        $table->add_index('walletid-keyhash', XMLDB_INDEX_UNIQUE, ['walletid', 'keyhash']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+        $wallets = new xmldb_table('local_airouter_wallet');
+        $field = new xmldb_field('keyhash', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null, 'targetid');
+        if ($dbman->field_exists($wallets, $field)) {
+            $known = $DB->get_records_select('local_airouter_wallet', "keyhash <> ''", [], 'id ASC', 'id, keyhash, timecreated');
+            foreach ($known as $wallet) {
+                $DB->insert_record('local_airouter_walletkey', (object) [
+                    'walletid' => $wallet->id,
+                    'keyhash' => $wallet->keyhash,
+                    'timecreated' => $wallet->timecreated,
+                ]);
+            }
+            $dbman->drop_field($wallets, $field);
+        }
+
+        // An ending written while the record was busy keeps its usage and waits to
+        // be priced by whoever next holds the lock, rather than pricing itself under
+        // rates that may be in the middle of being corrected.
+        $table = new xmldb_table('local_airouter_attempt');
+        $field = new xmldb_field('unpriced', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'currency');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026092306, 'local', 'airouter');
+    }
+
     return true;
 }

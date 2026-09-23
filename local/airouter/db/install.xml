@@ -181,7 +181,6 @@
         <FIELD NAME="scope" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="Whose it is: user or course, as on the key."/>
         <FIELD NAME="scopeid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance, as on the key. A wallet is for one account at one provider."/>
-        <FIELD NAME="keyhash" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="A keyed hash of the key this wallet holds, or held last. It is how the same key entered again is known to be the same, after the key itself has been removed. It cannot be turned back into the key. Empty for a wallet made for a key that was registered before wallets existed, until that key is replaced or removed. Declared without a default, because XMLDB refuses an empty string as one."/>
         <FIELD NAME="hint" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="The last few characters of the key held last, so that the owner can be told which record they would be going on with. Declared without a default, because XMLDB refuses an empty string as one."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timereleased" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the key holding this wallet was removed or replaced by one for another account. Zero while a key holds it."/>
@@ -191,6 +190,21 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="scope-scopeid-targetid" UNIQUE="false" FIELDS="scope, scopeid, targetid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_walletkey" COMMENT="Every key a wallet has held, as a keyed hash of each. It is how a key entered again is known to be one the wallet held, after the key itself has been replaced or removed, so that the same key always goes back to the same wallet. A hash cannot be turned back into the key.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="walletid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="keyhash" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="The keyed hash of one key the wallet held, in hexadecimal."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the wallet first held the key."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="walletid" TYPE="foreign" FIELDS="walletid" REFTABLE="local_airouter_wallet" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="walletid-keyhash" UNIQUE="true" FIELDS="walletid, keyhash"/>
       </INDEXES>
     </TABLE>
     <TABLE NAME="local_airouter_notice" COMMENT="What has already been said about a budget or a key limit, so that a daily task does not say it again every day. A row exists while a threshold is over; it is removed once the spending falls back under it, which is what makes a new month start the count again without anything having to know about months.">
@@ -266,6 +280,7 @@
         <FIELD NAME="usageknown" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="One when the token counts can be believed as counts. A report adds up the attempts where this is one and says how many it left out."/>
         <FIELD NAME="cost" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="Worked out when the attempt ended, never recalculated. Null when no rate was known, which is not free."/>
         <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="unpriced" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="One when the ending was written without the record lock, so that its cost is still to be worked out by whoever next holds the lock. Not counted into the summary until it is. Zero for an ending priced as it was written, including one no rate covered."/>
         <FIELD NAME="timestarted" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timeended" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="When the outcome was written. Null while started. The day an attempt is counted in."/>
         <FIELD NAME="applied" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether the summary has counted this row yet."/>

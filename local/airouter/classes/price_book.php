@@ -17,6 +17,7 @@
 namespace local_airouter;
 
 use local_airouter\record\attempt_state;
+use local_airouter\record\generation;
 use local_airouter\record\ledger;
 use local_airouter\record\summariser;
 use local_airouter\record\usage_recorder;
@@ -297,10 +298,19 @@ class price_book {
                     'logs' => $this->recost_log($provider),
                     'summaries' => $this->recost_summaries($provider),
                 ];
+                // The record has changed underneath any reader in the middle of
+                // reading it. Moved inside the transaction, so that a reader sees
+                // the new number exactly when it sees the new figures.
+                generation::bump();
                 $transaction->allow_commit();
             } catch (\Throwable $e) {
                 $transaction->rollback($e);
             }
+            // An ending that could not take the lock while this ran was written
+            // without a price. Still holding the lock, price it now, at the rates
+            // as they are now; anything that arrives later is priced by whoever
+            // holds the lock next.
+            (new usage_recorder($this->db, $this))->price_deferred(true);
         } finally {
             $summarylock->release();
             $recordlock->release();
@@ -336,6 +346,8 @@ class price_book {
                     (int) $attempt->images,
                 ),
                 'currency' => $price?->get('currency'),
+                // Priced now, whatever it was waiting for.
+                'unpriced' => 0,
             ]);
             $count++;
         }

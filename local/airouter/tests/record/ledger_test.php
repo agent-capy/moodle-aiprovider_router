@@ -19,6 +19,7 @@ namespace local_airouter\record;
 use local_airouter\key;
 use local_airouter\key_repository;
 use local_airouter\price;
+use local_airouter\price_book;
 use local_airouter\rule;
 
 /**
@@ -488,6 +489,36 @@ final class ledger_test extends \advanced_testcase {
         $this->assertTrue($measured->has_reached(8.0, ledger::METRIC_COST, 'aiprovider_mock'));
         $this->assertSame(1, $measured->requests);
         $this->assertEqualsWithDelta(9.0, $held->get_amount('aiprovider_mock'), 0.000001);
+    }
+
+    public function test_a_budget_is_read_in_one_currency_when_a_correction_commits_between_the_reads(): void {
+        global $DB;
+        // R8-06. A correction rewrites the summary and the detail together, and moves
+        // the generation with them; a reader that saw the summary before and the
+        // detail after reads again rather than adding dollars to yen.
+        $this->preventResetByRollback();
+        $this->spend(1.0, ['ended' => $this->now - DAYSECS]);
+        (new summariser($DB))->run($this->now);
+        $this->spend(1.0);
+        $passes = 0;
+        $ledger = new ledger($DB, true, null, function (string $point) use (&$passes): void {
+            if ($point === 'summarised' && $passes++ === 0) {
+                $this->separately(fn($db) => (new price_book($db))->recost_provider('aiprovider_mock', 'JPY'));
+            }
+        });
+
+        $measured = $ledger->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now);
+        $held = (new ledger($DB, true))->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now + 1);
+
+        // Both facts priced again in yen, from their tokens: one figure, comparable.
+        $expected = 2 * (new price_book($DB))->find('aiprovider_mock', null, $this->now)->cost(10, 5, 0);
+        foreach ([$measured, $held] as $spend) {
+            $this->assertTrue($ledger->was_consistent());
+            $this->assertTrue($spend->is_known(ledger::METRIC_COST, 'aiprovider_mock'));
+            $this->assertSame('JPY', $spend->get_currency('aiprovider_mock'));
+            $this->assertEqualsWithDelta($expected, $spend->get_amount('aiprovider_mock'), 0.0000001);
+            $this->assertSame(2, $spend->calls);
+        }
     }
 
     public function test_what_each_course_spent_survives_the_summariser_committing_between_the_reads(): void {

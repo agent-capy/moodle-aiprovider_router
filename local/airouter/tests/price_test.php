@@ -16,6 +16,9 @@
 
 namespace local_airouter;
 
+use local_airouter\record\generation;
+use local_airouter\record\usage_recorder;
+
 /**
  * Tests for costing a request against the rates an administrator entered.
  *
@@ -449,5 +452,89 @@ final class price_test extends \advanced_testcase {
             $this->assertSame('-', $summary->currency);
             $this->assertSame(0, (int) $summary->costedcalls);
         }
+    }
+    /**
+     * Run something on a second connection, as another process would.
+     *
+     * @param \Closure $operation Given the other connection.
+     * @return mixed What it returned.
+     */
+    private function separately(\Closure $operation): mixed {
+        global $DB, $CFG;
+        $original = $DB;
+        $other = \moodle_database::get_driver_instance($CFG->dbtype, $CFG->dblibrary);
+        $other->connect($CFG->dbhost, $CFG->dbuser, $CFG->dbpass, $CFG->dbname, $CFG->prefix, $CFG->dboptions);
+        try {
+            $DB = $other;
+
+            return $operation($other);
+        } finally {
+            $DB = $original;
+            $other->dispose();
+        }
+    }
+
+    public function test_a_correction_moves_the_record_generation(): void {
+        // R8-06. A reader in the middle of reading must be able to tell that the
+        // record it is reading has been priced again underneath it.
+        global $DB;
+        $this->add('aiprovider_openai', '', 1.0, 2.0);
+        $before = generation::get($DB);
+
+        (new price_book($DB))->recost_provider('aiprovider_openai', 'JPY');
+
+        $this->assertGreaterThan($before, generation::get($DB));
+    }
+
+    public function test_an_ending_that_arrives_unpriced_during_a_correction_is_priced_by_it(): void {
+        // R8-05. The correction holds the record lock for its run; an ending that
+        // cannot take it is written unpriced, and the correction, still holding the
+        // lock once it has committed, prices it at the rates as they now are.
+        global $DB;
+        $this->preventResetByRollback();
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $now = time();
+        $this->add('aiprovider_openai', '', 1.0, 0.0);
+        $request = $generator->create_request(['timestarted' => $now - 100, 'timeended' => null, 'state' => 'open']);
+        $attempt = $generator->create_attempt([
+            'requestid' => $request->id, 'targetprovider' => 'aiprovider_openai', 'model' => 'm',
+            'state' => \local_airouter\record\attempt_state::STARTED, 'usageknown' => 0,
+            'prompttokens' => null, 'completiontokens' => null, 'cost' => null, 'currency' => null, 'timeended' => null,
+        ]);
+        // A book that, once it has priced the attempts again and before it commits,
+        // lets another connection end the attempt. That ending waits for the lock
+        // this book holds, gives up, and writes without a price.
+        $book = new class ($DB) extends price_book {
+            /** @var \Closure|null What to do before pricing the summaries. */
+            public ?\Closure $pause = null;
+
+            #[\Override]
+            protected function recost_summaries(string $provider): int {
+                if ($this->pause !== null) {
+                    $pause = $this->pause;
+                    $this->pause = null;
+                    $pause();
+                }
+
+                return parent::recost_summaries($provider);
+            }
+        };
+        $book->pause = fn() => $this->separately(fn($db) => (new usage_recorder($db))->end_attempt(
+            (int) $attempt->id,
+            \local_airouter\record\attempt_state::SUCCEEDED,
+            new \local_airouter\record\usage(1000000, 0),
+            'm',
+            null,
+            'aiprovider_openai',
+        ));
+
+        $book->recost_provider('aiprovider_openai', 'JPY');
+
+        $this->assertDebuggingCalled(null, DEBUG_NORMAL);
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $attempt->id], '*', MUST_EXIST);
+        $this->assertSame(\local_airouter\record\attempt_state::SUCCEEDED, $row->state);
+        $this->assertSame(0, (int) $row->unpriced);
+        $this->assertSame('JPY', $row->currency, 'Priced by the correction, in the corrected currency.');
+        $this->assertEqualsWithDelta(1.0, (float) $row->cost, 0.000001);
     }
 }

@@ -692,6 +692,12 @@ the old figures in force for the old dates, and the recalculation would reproduc
 Editing a rate's numbers without changing the currency recalculates nothing; that is an
 ordinary revision, and last month keeps last month's figures.
 
+A correction holds the record while it runs, and a call that ends while it is held is
+recorded without a price rather than priced beside it: the price is worked out by the
+next thing to hold the record, at the rates by then in force, which is the correction
+itself once it has finished, the next call to end, or the daily summariser. Until then
+the call reads as unpriced. The status check counts these among the record's gaps.
+
 Nothing is converted between currencies: choosing an exchange rate source, a moment and
 a rounding rule would lay a second layer of error over a figure that is already an
 estimate. Figures from different providers are kept apart rather than added.
@@ -862,9 +868,10 @@ so that its owner can tell their keys apart. Nothing shows a key again, to anybo
 nothing exports one. A key that is registered is changed through *Replace* beside it,
 which is described next.
 
-Beside the key's spending record is a keyed, one-way hash of the key, so that the same
-key can be recognised if it is entered again after being removed. The hash is made with
-a secret of the site's and cannot be turned back into the key.
+Beside the key's spending record is a keyed, one-way hash of every key that record has
+held, so that a key can be recognised if it is entered again after being replaced or
+removed. The hashes are made with a secret of the site's and cannot be turned back into
+a key.
 
 The encryption key lives in a file under the site data directory, not in the database.
 **A site restored from a database backup without that file keeps every key and can read
@@ -895,8 +902,10 @@ fresh start.
 Behind this is a record the plugin calls a wallet: what a key's spending is counted
 against. Every key has one. A key rotated within an account keeps its wallet, a key for
 another account gets a new one, and a wallet outlives its key. A wallet keeps a keyed,
-one-way hash of the key it holds, which is how the same key is recognised after the key
-itself has gone, and which cannot be turned back into the key.
+one-way hash of every key it has held, which is how a key is recognised as the wallet's
+after the key itself has gone, and which cannot be turned back into the key. A key the
+wallets recognise goes back to its wallet whichever way it is entered and whatever is
+answered.
 
 ### What happens when a brought key is used
 
@@ -939,7 +948,9 @@ Two things behave the way they do on purpose.
 **Replacing a key asks whether the period goes on.** The spending is counted by the
 account the provider bills, not by the row in the database, and only the owner knows
 whether a new key is for the same account, so the page asks rather than assuming (see
-*Replacing a key* above).
+*Replacing a key* above). A limit saved from a screen opened before the key was moved to
+another account is refused, and the owner told, since it was decided about the account
+that was on the screen; a limit saved while the key was only renewed lands as usual.
 
 **A limit nobody can measure does not stop anything.** Spending is estimated from the
 rates the site has entered, so a site that has entered none measures nothing; a budget

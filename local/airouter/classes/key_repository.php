@@ -30,9 +30,14 @@ use local_airouter\record\ledger;
  * an account, and the key is only the way in. Rotating a key within one account does not
  * start a new bill, while a key for another account does, and nothing in a key says
  * which, so the owner is asked when they replace one and the answer is kept as which
- * wallet the key belongs to. The one case nobody need be asked about is the same key
- * entered again: a wallet keeps a keyed hash of the key it holds, so the same key can be
- * known as the same after the key itself has been removed, without the key being kept.
+ * wallet the key belongs to. The one case nobody need be asked about is a key entered
+ * again: a wallet keeps a keyed hash of every key it has held, so a key can be known as
+ * one of the wallet's after the key itself has been replaced or removed, without any
+ * key being kept. A key the wallets know goes back to its wallet whatever was answered.
+ *
+ * Every change to a key and its wallets is one transaction, and a key that is held is
+ * written column by column: the object a screen read may be older than the row, and
+ * what it did not mean to change it must not change.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -41,6 +46,9 @@ use local_airouter\record\ledger;
 class key_repository {
     /** @var string The table holding wallets. */
     public const WALLET_TABLE = 'local_airouter_wallet';
+
+    /** @var string The table holding the hash of every key a wallet has held. */
+    public const WALLET_KEY_TABLE = 'local_airouter_walletkey';
 
     /** @var string The setting holding the secret the key hashes are keyed with. */
     public const SECRET_SETTING = 'walletsecret';
@@ -62,8 +70,8 @@ class key_repository {
      * Where a key is held already, it is replaced within its wallet, which is what
      * rotating a key means; whether it should instead move to a new wallet is a
      * question for replace(), which asks. Where none is held, the key opens a wallet
-     * of its own -- unless it is a key this subject had here before and removed, in
-     * which case it goes on with the wallet it had, or the owner has chosen an earlier
+     * of its own -- unless it is a key one of this subject's wallets here has held,
+     * in which case it goes back to that wallet, or the owner has chosen an earlier
      * wallet to go on with.
      *
      * @param string $scope One of the key scopes.
@@ -71,111 +79,147 @@ class key_repository {
      * @param int $targetid The delegation target it is for.
      * @param string $secret The key as the owner typed it.
      * @param int|null $continue An earlier wallet of theirs to go on with, or null to
-     *                           let the key decide. Only for a key not held already.
+     *                           let the key decide. Only for a key not held already,
+     *                           and not heeded for a key the wallets know.
      * @return key The stored key.
      */
     public function save(string $scope, int $scopeid, int $targetid, string $secret, ?int $continue = null): key {
         $secret = trim($secret);
-        $record = $this->find($scope, $scopeid, $targetid);
-        if ($record !== null) {
-            if ($continue !== null) {
-                throw new \coding_exception('A key that is held has its wallet already; replace() decides whether it keeps it');
+        $transaction = $this->db->start_delegated_transaction();
+        try {
+            $record = $this->find($scope, $scopeid, $targetid);
+            if ($record !== null) {
+                if ($continue !== null) {
+                    throw new \coding_exception('A key that is held has its wallet already; replace() decides whether it keeps it');
+                }
+                $this->write($record, $secret, $record->get_wallet());
+            } else {
+                $record = new key();
+                $record->set('scope', $scope);
+                $record->set('scopeid', $scopeid);
+                $record->set('targetid', $targetid);
+                // A key the wallets know is the same account, whatever else was chosen.
+                $wallet = $this->find_wallet_of($scope, $scopeid, $targetid, $secret);
+                if ($wallet === null && $continue !== null) {
+                    $wallet = $this->get_released_wallet($continue, $scope, $scopeid, $targetid);
+                }
+                $walletid = $wallet === null
+                    ? $this->open_wallet($scope, $scopeid, $targetid, $secret)
+                    : (int) $wallet->id;
+                $this->write($record, $secret, $walletid);
             }
-
-            return $this->write($record, $secret, $record->get_wallet());
+            $transaction->allow_commit();
+        } catch (\Throwable $e) {
+            $transaction->rollback($e);
         }
 
-        $record = new key();
-        $record->set('scope', $scope);
-        $record->set('scopeid', $scopeid);
-        $record->set('targetid', $targetid);
-        // The same key is the same account, whatever else was chosen.
-        $wallet = $this->find_wallet_of($scope, $scopeid, $targetid, $secret);
-        if ($wallet === null && $continue !== null) {
-            $wallet = $this->get_released_wallet($continue, $scope, $scopeid, $targetid);
-        }
-        $walletid = $wallet === null
-            ? $this->open_wallet($scope, $scopeid, $targetid, $secret)
-            : (int) $wallet->id;
-
-        return $this->write($record, $secret, $walletid);
+        return $record;
     }
 
     /**
      * Replace a key that is held, as its owner has said it should be.
      *
-     * The same key entered again is the same account, and is not asked about: it
-     * keeps its wallet and its limit whatever was answered. Otherwise the owner has
-     * to have said whether the new key is for the same account, and, where the key
-     * carries a limit, whether the limit stays.
+     * A key one of this subject's wallets here has held is that wallet's, and is not
+     * asked about: it goes back to the wallet, its limit stays, and whatever was
+     * answered is not heeded. Otherwise the owner has to have said whether the new
+     * key is for the same account, and, where the key carries a limit, whether the
+     * limit stays.
      *
      * @param key $record The key being replaced.
      * @param string $secret The new key as the owner typed it.
      * @param bool|null $sameaccount Whether the new key is for the same account as the
-     *                               old one. Null only where the key is the same.
+     *                               old one. Null only where the key is known.
      * @param bool|null $keepcap Whether the limit stays. Null where there is no limit,
-     *                           or where the key is the same.
+     *                           or where the key is known.
      * @return key The stored key, which is the object given, updated.
      */
     public function replace(key $record, string $secret, ?bool $sameaccount, ?bool $keepcap = null): key {
         $secret = trim($secret);
-        if ($this->is_same_secret($record, $secret)) {
-            $sameaccount = true;
-            $keepcap ??= true;
-        }
-        if ($sameaccount === null) {
-            throw new \coding_exception('Replacing a key with another has to say whether it is for the same account');
-        }
-        if ($keepcap === null && $record->has_cap()) {
-            throw new \coding_exception('Replacing a key that carries a limit has to say whether the limit stays');
+        $scope = (string) $record->get('scope');
+        $scopeid = (int) $record->get('scopeid');
+        $targetid = (int) $record->get('targetid');
+        $current = $record->get_wallet();
+        $transaction = $this->db->start_delegated_transaction();
+        try {
+            $known = $this->is_same_secret($record, $secret)
+                ? $current
+                : $this->find_wallet_of($scope, $scopeid, $targetid, $secret)?->id;
+            if ($known !== null) {
+                $walletid = (int) $known;
+                $keepcap ??= true;
+            } else {
+                if ($sameaccount === null) {
+                    throw new \coding_exception('Replacing a key with another has to say whether it is for the same account');
+                }
+                if ($keepcap === null && $record->has_cap()) {
+                    throw new \coding_exception('Replacing a key that carries a limit has to say whether the limit stays');
+                }
+                $walletid = $sameaccount ? $current : 0;
+            }
+            if ($walletid !== $current) {
+                // Another account, or an earlier one: what the current wallet holds
+                // is not this key's to count.
+                $this->release_wallet($current, $record);
+                if ($walletid === 0) {
+                    $walletid = $this->open_wallet($scope, $scopeid, $targetid, $secret);
+                }
+            }
+            $this->write($record, $secret, $walletid, $keepcap === false);
+            $transaction->allow_commit();
+        } catch (\Throwable $e) {
+            $transaction->rollback($e);
         }
 
-        $walletid = $record->get_wallet();
-        if (!$sameaccount) {
-            // Another account: what the old key spent is not this key's to count.
-            $this->release_wallet($walletid, $record);
-            $walletid = $this->open_wallet(
-                (string) $record->get('scope'),
-                (int) $record->get('scopeid'),
-                (int) $record->get('targetid'),
-                $secret,
-            );
-        }
-        if ($keepcap === false) {
-            $record->set('capamount', null);
-        }
-
-        return $this->write($record, $secret, $walletid);
+        return $record;
     }
 
     /**
-     * Write a key, and let its wallet know which key it holds now.
+     * Write a key, and let its wallet know it holds it.
+     *
+     * A key that is held is written column by column, and only the columns this is
+     * about: the object was read some time ago, and a limit set on the key since
+     * must not be put back to what it was.
      *
      * @param key $record The key, with its subject and target set.
      * @param string $secret The key as the owner typed it, trimmed.
      * @param int $walletid The wallet the key belongs to.
-     * @return key The stored key.
+     * @param bool $dropcap Whether the limit goes with the old key.
      */
-    protected function write(key $record, string $secret, int $walletid): key {
-        $hint = key::hint_of($secret);
-        $record->set('walletid', $walletid);
-        $record->set('secret', \core\encryption::encrypt($secret));
-        $record->set('hint', $hint);
-        // A replaced key has not been tested, whatever the one before it managed.
-        $record->set('timeverified', 0);
-        $record->set('verifystatus', null);
-        $record->save();
+    protected function write(key $record, string $secret, int $walletid, bool $dropcap = false): void {
+        global $USER;
 
-        // The wallet remembers the key it holds, as a hash, so that the same key
-        // entered again after this one is removed can be known as the same.
+        $hint = key::hint_of($secret);
+        $values = [
+            'walletid' => $walletid,
+            'secret' => \core\encryption::encrypt($secret),
+            'hint' => $hint,
+            // A replaced key has not been tested, whatever the one before it managed.
+            'timeverified' => 0,
+            'verifystatus' => null,
+        ];
+        if ($dropcap) {
+            $values['capamount'] = null;
+        }
+        foreach ($values as $property => $value) {
+            $record->set($property, $value);
+        }
+        if ((int) $record->get('id') > 0) {
+            $this->db->update_record(key::TABLE, (object) ($values + [
+                'id' => (int) $record->get('id'),
+                'usermodified' => (int) $USER->id,
+                'timemodified' => time(),
+            ]));
+        } else {
+            $record->create();
+        }
+
+        // The wallet holds this key now, and remembers it among the keys it has held.
         $this->db->update_record(self::WALLET_TABLE, (object) [
             'id' => $walletid,
-            'keyhash' => $this->hash_secret($secret),
             'hint' => $hint,
             'timereleased' => 0,
         ]);
-
-        return $record;
+        $this->remember($walletid, $this->hash_secret($secret));
     }
 
     /**
@@ -185,21 +229,53 @@ class key_repository {
      * again. Whether a limit survives the key being replaced is asked at that moment,
      * by replace().
      *
-     * @param key $record The key.
+     * Written as the limit's columns alone, and only while the key is still in the
+     * wallet it was read in. The key object came from a screen, and the key may have
+     * been replaced since it was read: writing the object back would put the old
+     * secret and the old wallet back with it, and a limit meant for one account
+     * would land on another. A key that has moved is refused, and the owner is told.
+     *
+     * @param key $record The key, as it was read.
      * @param float|null $amount The limit, or null for none.
      * @param string $period One of the ledger's periods.
      * @param int $days How many days a rolling period counts.
-     * @return key The saved key.
+     * @return bool True when the limit was recorded, false when the key had changed.
      */
-    public function set_cap(key $record, ?float $amount, string $period, int $days): key {
-        $record->set('capamount', $amount !== null && $amount > 0 ? $amount : null);
-        $record->set('capperiod', $period === ledger::PERIOD_ROLLING
-            ? ledger::PERIOD_ROLLING
-            : ledger::PERIOD_MONTH);
-        $record->set('capdays', max(1, $days));
-        $record->save();
+    public function set_cap(key $record, ?float $amount, string $period, int $days): bool {
+        global $USER;
 
-        return $record;
+        $amount = $amount !== null && $amount > 0 ? $amount : null;
+        $period = $period === ledger::PERIOD_ROLLING ? ledger::PERIOD_ROLLING : ledger::PERIOD_MONTH;
+        $days = max(1, $days);
+        $this->db->execute(
+            'UPDATE {' . key::TABLE . '}
+                SET capamount = :amount, capperiod = :period, capdays = :days,
+                    usermodified = :usermodified, timemodified = :timemodified
+              WHERE id = :id AND walletid = :walletid',
+            [
+                'amount' => $amount,
+                'period' => $period,
+                'days' => $days,
+                'usermodified' => (int) $USER->id,
+                'timemodified' => time(),
+                'id' => (int) $record->get('id'),
+                'walletid' => $record->get_wallet(),
+            ],
+        );
+        // Whether the statement reached the row: it did exactly when the key is still
+        // in that wallet. A key moved in the instant since reads as refused, which
+        // errs on the side of asking the owner to look again.
+        $applied = $this->db->record_exists(key::TABLE, [
+            'id' => (int) $record->get('id'),
+            'walletid' => $record->get_wallet(),
+        ]);
+        if ($applied) {
+            $record->set('capamount', $amount);
+            $record->set('capperiod', $period);
+            $record->set('capdays', $days);
+        }
+
+        return $applied;
     }
 
     /**
@@ -237,10 +313,10 @@ class key_repository {
     }
 
     /**
-     * Whether a key this subject would register here is for an account they had before.
+     * Whether a key is one that a wallet of this subject's at this target has held.
      *
-     * True exactly when save() would go on with an earlier wallet without being told
-     * to: the key is one they held here and removed.
+     * True exactly when save() or replace() would put the key back in that wallet
+     * without asking: the wallet may be the one held now, or one released since.
      *
      * @param string $scope One of the key scopes.
      * @param int $scopeid The user or course.
@@ -253,7 +329,12 @@ class key_repository {
     }
 
     /**
-     * The released wallet that last held this very key, if any.
+     * The wallet of this subject's at this target that has held this very key, if any.
+     *
+     * Held or released: a key renewed within a wallet is still that wallet's. A key
+     * is only ever put into one wallet of a subject's at a target, since a known key
+     * goes back to its wallet before anything else is considered; the newest is taken
+     * all the same, so that the answer is one wallet whatever the rows hold.
      *
      * @param string $scope One of the key scopes.
      * @param int $scopeid The user or course.
@@ -262,14 +343,21 @@ class key_repository {
      * @return \stdClass|null The wallet row, or null when no wallet held this key.
      */
     protected function find_wallet_of(string $scope, int $scopeid, int $targetid, string $secret): ?\stdClass {
-        $hash = $this->hash_secret($secret);
-        foreach ($this->get_previous_wallets($scope, $scopeid, $targetid) as $wallet) {
-            if ((string) $wallet->keyhash !== '' && hash_equals((string) $wallet->keyhash, $hash)) {
-                return $wallet;
-            }
-        }
+        $wallets = $this->db->get_records_sql(
+            'SELECT w.*
+               FROM {' . self::WALLET_TABLE . '} w
+               JOIN {' . self::WALLET_KEY_TABLE . '} k ON k.walletid = w.id
+              WHERE w.scope = :scope AND w.scopeid = :scopeid AND w.targetid = :targetid AND k.keyhash = :hash
+           ORDER BY w.timereleased DESC, w.id DESC',
+            [
+                'scope' => $scope,
+                'scopeid' => $scopeid,
+                'targetid' => $targetid,
+                'hash' => $this->hash_secret($secret),
+            ],
+        );
 
-        return null;
+        return $wallets ? reset($wallets) : null;
     }
 
     /**
@@ -308,7 +396,6 @@ class key_repository {
             'scope' => $scope,
             'scopeid' => $scopeid,
             'targetid' => $targetid,
-            'keyhash' => $this->hash_secret($secret),
             'hint' => key::hint_of($secret),
             'timecreated' => time(),
             'timereleased' => 0,
@@ -318,26 +405,37 @@ class key_repository {
     /**
      * Let go of a wallet, keeping it so that it can be gone on with.
      *
-     * A wallet made for a key that was registered before wallets kept hashes has none
-     * yet, and this is the last moment the key is at hand to make one from.
+     * The key it held is remembered on the way out. A wallet made for a key that was
+     * registered before wallets kept hashes has no hash of it yet, and this is the
+     * last moment the key is at hand to make one from; for any other key this
+     * changes nothing.
      *
      * @param int $walletid The wallet.
      * @param key $record The key that held it, still readable.
      */
     protected function release_wallet(int $walletid, key $record): void {
-        $wallet = $this->db->get_record(self::WALLET_TABLE, ['id' => $walletid]);
-        if ($wallet === false) {
+        $plain = $this->decrypt($record);
+        if ($plain !== null) {
+            $this->remember($walletid, $this->hash_secret($plain));
+        }
+        $this->db->set_field(self::WALLET_TABLE, 'timereleased', time(), ['id' => $walletid]);
+    }
+
+    /**
+     * Note that a wallet has held a key.
+     *
+     * @param int $walletid The wallet.
+     * @param string $hash The key's hash.
+     */
+    protected function remember(int $walletid, string $hash): void {
+        if ($this->db->record_exists(self::WALLET_KEY_TABLE, ['walletid' => $walletid, 'keyhash' => $hash])) {
             return;
         }
-        $wallet->timereleased = time();
-        if ((string) $wallet->keyhash === '') {
-            $plain = $this->decrypt($record);
-            if ($plain !== null) {
-                $wallet->keyhash = $this->hash_secret($plain);
-                $wallet->hint = key::hint_of($plain);
-            }
-        }
-        $this->db->update_record(self::WALLET_TABLE, $wallet);
+        $this->db->insert_record(self::WALLET_KEY_TABLE, (object) [
+            'walletid' => $walletid,
+            'keyhash' => $hash,
+            'timecreated' => time(),
+        ]);
     }
 
     /**
@@ -539,13 +637,18 @@ class key_repository {
      * @param int $id The key id.
      */
     public function delete(int $id): void {
-        $record = $this->get($id);
-        if ($record === null) {
-            return;
+        $transaction = $this->db->start_delegated_transaction();
+        try {
+            $record = $this->get($id);
+            if ($record !== null) {
+                $this->release_wallet($record->get_wallet(), $record);
+                $this->db->delete_records(key::TABLE, ['id' => $id]);
+                $this->forget_notices([$id]);
+            }
+            $transaction->allow_commit();
+        } catch (\Throwable $e) {
+            $transaction->rollback($e);
         }
-        $this->release_wallet($record->get_wallet(), $record);
-        $this->db->delete_records(key::TABLE, ['id' => $id]);
-        $this->forget_notices([$id]);
     }
 
     /**
@@ -603,15 +706,26 @@ class key_repository {
      */
     protected function delete_all(string $scope, int $scopeid): int {
         $conditions = ['scope' => $scope, 'scopeid' => $scopeid];
-        $ids = $this->db->get_fieldset_select(
-            key::TABLE,
-            'id',
-            'scope = :scope AND scopeid = :scopeid',
-            $conditions,
-        );
-        $this->db->delete_records(key::TABLE, $conditions);
-        $this->db->delete_records(self::WALLET_TABLE, $conditions);
-        $this->forget_notices($ids);
+        $transaction = $this->db->start_delegated_transaction();
+        try {
+            $ids = $this->db->get_fieldset_select(
+                key::TABLE,
+                'id',
+                'scope = :scope AND scopeid = :scopeid',
+                $conditions,
+            );
+            $this->db->delete_records(key::TABLE, $conditions);
+            $this->db->delete_records_select(
+                self::WALLET_KEY_TABLE,
+                'walletid IN (SELECT id FROM {' . self::WALLET_TABLE . '} WHERE scope = :scope AND scopeid = :scopeid)',
+                $conditions,
+            );
+            $this->db->delete_records(self::WALLET_TABLE, $conditions);
+            $this->forget_notices($ids);
+            $transaction->allow_commit();
+        } catch (\Throwable $e) {
+            $transaction->rollback($e);
+        }
 
         return count($ids);
     }

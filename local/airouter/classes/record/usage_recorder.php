@@ -56,6 +56,9 @@ class usage_recorder {
      */
     public const FAILURES_SETTING = 'recordfailures';
 
+    /** @var string The setting counting endings written without the lock, whose cost is still to be worked out. */
+    public const DEFERRED_SETTING = 'unpricedendings';
+
     /**
      * @var string The lock under which an attempt is attached to its request.
      *
@@ -223,22 +226,25 @@ class usage_recorder {
         try {
             $lock = self::lock_factory()->get_lock(self::LOCK, self::LOCK_TIMEOUT) ?: null;
             if ($lock === null) {
-                // Written all the same: an ending that is lost is worse than the rare
-                // case of a correction in progress. Counted as a gap, so that the
-                // status check says the record may need correcting again.
+                // Written all the same, since an ending that is lost is worse than a
+                // wait: but written without a price. The lock is held by something
+                // that may be pricing this provider's record again, and a price
+                // worked out beside it could be in a currency the rates no longer
+                // say. The usage is kept and the pricing left to whoever holds the
+                // lock next. Counted as a gap, so that the status check says so.
                 $this->note_failure(
                     'take the record lock before closing an attempt',
                     new \RuntimeException('the record lock was not obtained in ' . self::LOCK_TIMEOUT . ' seconds'),
                 );
             }
             $now = $this->now();
-            $price = $this->prices->find($component, $model, $now);
+            $price = $lock === null ? null : $this->prices->find($component, $model, $now);
             $this->db->execute(
                 'UPDATE {' . self::ATTEMPT_TABLE . '}
                     SET state = :state, errorcode = :errorcode, model = :model,
                         prompttokens = :prompttokens, completiontokens = :completiontokens,
                         images = :images, usageknown = :usageknown,
-                        cost = :cost, currency = :currency, timeended = :timeended
+                        cost = :cost, currency = :currency, unpriced = :unpriced, timeended = :timeended
                   WHERE id = :id AND state = :started',
                 [
                     'state' => $state,
@@ -251,15 +257,102 @@ class usage_recorder {
                     'cost' => $price?->cost($usage->prompttokens, $usage->completiontokens, $usage->images),
                     // The currency of the rate, which is the one the provider bills in.
                     'currency' => $price?->get('currency'),
+                    'unpriced' => $lock === null ? 1 : 0,
                     'timeended' => $now,
                     'id' => $attemptid,
                     'started' => attempt_state::STARTED,
                 ],
             );
+            if ($lock === null) {
+                self::note_deferred();
+            } else {
+                // Holding the lock, this ending prices whatever was written without it.
+                $this->price_deferred();
+            }
         } catch (\Throwable $e) {
             $this->note_failure('close an attempt', $e);
         } finally {
             $lock?->release();
+        }
+    }
+
+    /**
+     * Price the endings that were written without the lock.
+     *
+     * To be called with the record lock held: that is the whole point. Each is priced
+     * at the rate in force when it ended, as a correction would price it, and stops
+     * being unpriced whether or not a rate covered it -- an ending no rate covers is
+     * simply unpriced the ordinary way, as one written under the lock would be.
+     *
+     * The count of deferred endings is kept in a setting so that this costs one
+     * small read on the ordinary path and a scan only when there is something to
+     * find. The count is approximate, since the endings that raise it hold no lock;
+     * a pass that ignores it is taken by the summariser, so nothing waits forever.
+     *
+     * @param bool $always Whether to look even when the count says there is nothing.
+     * @return int How many endings were priced.
+     */
+    public function price_deferred(bool $always = false): int {
+        if (!$always && self::get_deferred_count() === 0) {
+            return 0;
+        }
+        $count = 0;
+        $rows = $this->db->get_recordset_select(
+            self::ATTEMPT_TABLE,
+            'unpriced = 1 AND state <> :started',
+            ['started' => attempt_state::STARTED],
+            'id ASC',
+            'id, targetprovider, model, prompttokens, completiontokens, images, timestarted, timeended',
+        );
+        foreach ($rows as $row) {
+            $price = $this->prices->find(
+                (string) $row->targetprovider,
+                $row->model,
+                (int) ($row->timeended ?? $row->timestarted),
+            );
+            $this->db->execute(
+                'UPDATE {' . self::ATTEMPT_TABLE . '}
+                    SET cost = :cost, currency = :currency, unpriced = 0
+                  WHERE id = :id AND unpriced = 1',
+                [
+                    'cost' => $price?->cost(
+                        $row->prompttokens === null ? null : (int) $row->prompttokens,
+                        $row->completiontokens === null ? null : (int) $row->completiontokens,
+                        (int) $row->images,
+                    ),
+                    'currency' => $price?->get('currency'),
+                    'id' => $row->id,
+                ],
+            );
+            $count++;
+        }
+        $rows->close();
+        set_config(self::DEFERRED_SETTING, max(0, self::get_deferred_count() - $count), 'local_airouter');
+
+        return $count;
+    }
+
+    /**
+     * How many endings have been written without a price and not yet priced, roughly.
+     *
+     * @return int The count.
+     */
+    public static function get_deferred_count(): int {
+        global $DB;
+
+        $value = $DB->get_field('config_plugins', 'value', ['plugin' => 'local_airouter', 'name' => self::DEFERRED_SETTING]);
+
+        return $value === false || $value === null ? 0 : max(0, (int) $value);
+    }
+
+    /**
+     * Count one more ending written without a price.
+     */
+    protected static function note_deferred(): void {
+        try {
+            set_config(self::DEFERRED_SETTING, self::get_deferred_count() + 1, 'local_airouter');
+        } catch (\Throwable $e) {
+            unset($e);
         }
     }
 

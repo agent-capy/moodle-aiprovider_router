@@ -282,9 +282,10 @@ class ledger extends reader {
             default => throw new \coding_exception('Cannot measure each of: ' . $scope),
         };
         $fields = [$field, 'targetprovider'];
-        [$summary, $detail] = $this->consistently(fn() => [
+        [$summary, $detail, $currencies] = $this->consistently(fn() => [
             $this->summarised($fields, $from, $to, null, rule::KEYSOURCE_SITE),
             $this->detailed($fields, $from, $to, null, rule::KEYSOURCE_SITE),
+            $this->prices->get_provider_currencies(),
         ]);
         $rows = [];
         $this->collect($rows, $fields, $summary);
@@ -303,7 +304,7 @@ class ledger extends reader {
 
         $spending = [];
         foreach ($gathered as $subject => $subjectrows) {
-            $spending[$subject] = $this->build($subjectrows, $from, $to);
+            $spending[$subject] = $this->build($subjectrows, $from, $to, $currencies);
         }
         // In subject order: the database hands grouped rows out in no particular order.
         ksort($spending);
@@ -432,15 +433,19 @@ class ledger extends reader {
         $walletid = $filters['walletid'] ?? null;
         $keysource = (string) $filters['keysource'];
         $fields = ['targetprovider'];
-        [$summary, $detail] = $this->consistently(fn() => [
+        // The rates' currencies are read with the record, as part of the same
+        // consistent read: a correction changes both together, and a figure read
+        // before it weighed against a currency read after it would be about nothing.
+        [$summary, $detail, $currencies] = $this->consistently(fn() => [
             $this->summarised($fields, $from, $to, $courseid, $keysource, $userid, $targetid, $walletid),
             $this->detailed($fields, $from, $to, $courseid, $keysource, $userid, $targetid, $walletid),
+            $this->prices->get_provider_currencies(),
         ]);
         $rows = [];
         $this->collect($rows, $fields, $summary);
         $this->collect($rows, $fields, $detail);
 
-        return $this->build(array_values($rows), $from, $to);
+        return $this->build(array_values($rows), $from, $to, $currencies);
     }
 
     /**
@@ -455,9 +460,11 @@ class ledger extends reader {
      * @param \stdClass[] $rows Rows carrying targetprovider and the metrics.
      * @param int $from The first moment counted.
      * @param int $to The first moment not counted.
+     * @param string[] $currencies The currency each provider's rates are in, keyed by
+     *                             provider, read together with the rows.
      * @return spend The spending.
      */
-    protected function build(array $rows, int $from, int $to): spend {
+    protected function build(array $rows, int $from, int $to, array $currencies): spend {
         $requests = 0;
         $calls = 0;
         $providers = [];
@@ -485,7 +492,7 @@ class ledger extends reader {
                 // Money in two currencies at one provider is not one figure.
                 $entry->comparable = false;
             }
-            if ($entry->currency !== null && $entry->currency !== $this->prices->currency_of($provider)) {
+            if ($entry->currency !== null && $entry->currency !== ($currencies[$provider] ?? null)) {
                 // Recorded in a currency the provider's limits are not written in now,
                 // or the provider has no rates now and so no currency for a limit.
                 $entry->comparable = false;

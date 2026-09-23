@@ -167,12 +167,21 @@ class provider implements
                 'scope' => 'privacy:metadata:wallet:scope',
                 'scopeid' => 'privacy:metadata:wallet:scopeid',
                 'targetid' => 'privacy:metadata:wallet:targetid',
-                'keyhash' => 'privacy:metadata:wallet:keyhash',
                 'hint' => 'privacy:metadata:wallet:hint',
                 'timecreated' => 'privacy:metadata:wallet:timecreated',
                 'timereleased' => 'privacy:metadata:wallet:timereleased',
             ],
             'privacy:metadata:wallet',
+        );
+
+        $collection->add_database_table(
+            key_repository::WALLET_KEY_TABLE,
+            [
+                'walletid' => 'privacy:metadata:walletkey:walletid',
+                'keyhash' => 'privacy:metadata:walletkey:keyhash',
+                'timecreated' => 'privacy:metadata:walletkey:timecreated',
+            ],
+            'privacy:metadata:walletkey',
         );
 
         $collection->add_database_table(
@@ -642,8 +651,8 @@ class provider implements
     /**
      * What is said about a key that was removed, which is what its wallet remembers.
      *
-     * The hash the wallet keeps is left out. It reveals nothing on its own, but it is
-     * about the key, and nothing about the key is exported.
+     * The hashes the wallet keeps are left out. They reveal nothing on their own, but
+     * they are about the keys, and nothing about a key is exported.
      *
      * @param \stdClass $record The wallet record.
      * @return \stdClass The exportable description.

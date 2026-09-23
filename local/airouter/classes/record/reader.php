@@ -147,9 +147,9 @@ class reader {
     protected function consistently(\Closure $read): mixed {
         $this->consistent = true;
         for ($pass = 1; $pass <= self::MAX_READS; $pass++) {
-            $before = summariser::get_generation($this->db);
+            $before = generation::get($this->db);
             $result = $read();
-            if (summariser::get_generation($this->db) === $before) {
+            if (generation::get($this->db) === $before) {
                 return $result;
             }
         }
