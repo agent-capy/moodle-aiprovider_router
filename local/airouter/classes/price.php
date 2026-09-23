@@ -27,6 +27,11 @@ namespace local_airouter;
  * force when it happened, and the result is kept, so that editing a rate today does
  * not rewrite what last month cost.
  *
+ * Each rate also says what currency it is in. That is the currency the provider bills
+ * in, so it is the same for every rate of one provider, and a cost worked out from the
+ * rate is recorded in it. There is no site currency and nothing converts: a site using
+ * a provider billed in dollars and one billed in yen holds money in both.
+ *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -38,6 +43,9 @@ class price extends \core\persistent {
     /** @var int Rates are entered per this many tokens, the way providers publish them. */
     public const TOKEN_UNIT = 1000000;
 
+    /** @var int The longest currency code the table holds. */
+    public const CURRENCY_LENGTH = 10;
+
     #[\Override]
     protected static function define_properties(): array {
         return [
@@ -47,6 +55,9 @@ class price extends \core\persistent {
             'model' => [
                 'type' => PARAM_TEXT,
                 'default' => '',
+            ],
+            'currency' => [
+                'type' => PARAM_ALPHA,
             ],
             'promptrate' => [
                 'type' => PARAM_FLOAT,
@@ -68,6 +79,34 @@ class price extends \core\persistent {
                 'default' => 0,
             ],
         ];
+    }
+
+    /**
+     * A rate has to say what currency it is in.
+     *
+     * A rate with no currency would cost requests in nothing, and a figure in nothing
+     * cannot be added to, or weighed against, anything.
+     *
+     * @param mixed $value The submitted currency.
+     * @return true|\core\lang_string True when valid, otherwise the error to show.
+     */
+    protected function validate_currency($value): true|\core\lang_string {
+        $value = (string) $value;
+        if ($value === '' || strlen($value) > self::CURRENCY_LENGTH) {
+            return new \core\lang_string('price:error:nocurrency', 'local_airouter');
+        }
+
+        return true;
+    }
+
+    /**
+     * The currency as it is stored: upper case, the way currency codes are written.
+     *
+     * @param string $currency What was entered.
+     * @return string The code.
+     */
+    public static function normalise_currency(string $currency): string {
+        return strtoupper(trim($currency));
     }
 
     /**

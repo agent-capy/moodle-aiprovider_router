@@ -17,7 +17,6 @@
 namespace local_airouter\form;
 
 use local_airouter\price;
-use local_airouter\price_book;
 use local_airouter\target_resolver;
 
 defined('MOODLE_INTERNAL') || die();
@@ -55,12 +54,18 @@ class price_form extends \moodleform {
         $mform->setType('model', PARAM_TEXT);
         $mform->addHelpButton('model', 'price:model', 'local_airouter');
 
-        $currency = price_book::get_currency();
+        // The provider's currency, not the site's: there is no site currency. Typed
+        // rather than chosen from a list, since the codes are short and a list of every
+        // currency in the world would hide the two or three a site uses.
+        $mform->addElement('text', 'currency', get_string('price:currency', 'local_airouter'), ['size' => 8]);
+        $mform->setType('currency', PARAM_ALPHA);
+        $mform->addHelpButton('currency', 'price:currency', 'local_airouter');
+
         foreach (['promptrate', 'completionrate'] as $field) {
             $mform->addElement(
                 'text',
                 $field,
-                get_string('price:' . $field, 'local_airouter', $currency),
+                get_string('price:' . $field, 'local_airouter'),
                 ['size' => 12],
             );
             $mform->setType($field, PARAM_RAW_TRIMMED);
@@ -70,7 +75,7 @@ class price_form extends \moodleform {
         $mform->addElement(
             'text',
             'imagerate',
-            get_string('price:imagerate', 'local_airouter', $currency),
+            get_string('price:imagerate', 'local_airouter'),
             ['size' => 12],
         );
         $mform->setType('imagerate', PARAM_RAW_TRIMMED);
@@ -88,6 +93,10 @@ class price_form extends \moodleform {
 
         if (trim((string) ($data['provider'] ?? '')) === '') {
             $errors['provider'] = get_string('price:error:noprovider', 'local_airouter');
+        }
+        $currency = price::normalise_currency((string) ($data['currency'] ?? ''));
+        if ($currency === '' || strlen($currency) > price::CURRENCY_LENGTH) {
+            $errors['currency'] = get_string('price:error:nocurrency', 'local_airouter');
         }
 
         $given = 0;

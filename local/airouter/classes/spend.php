@@ -137,7 +137,7 @@ class spend {
             return false;
         }
 
-        return $this->amount === null || $this->currency === price_book::get_currency();
+        return $this->amount === null || $this->currency === price_book::legacy_currency();
     }
 
     /**

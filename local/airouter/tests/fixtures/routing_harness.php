@@ -105,6 +105,7 @@ trait routing_harness {
     protected function rate(string $model, float $promptrate, float $completionrate = 0.0): void {
         $rate = new price();
         $rate->set('provider', 'aiprovider_mock');
+        $rate->set('currency', 'USD');
         $rate->set('model', $model);
         $rate->set('promptrate', $promptrate);
         $rate->set('completionrate', $completionrate);

@@ -68,11 +68,13 @@ class usage_logger {
      */
     public function record(\stdClass $entry, int $images = 0): void {
         try {
-            $entry->currency = price_book::get_currency();
             // Each row is priced against the provider and model named on it. A
             // fallback chain crosses providers, so a request with more than one
-            // attempt has a row per attempt and each one is costed at its own rate.
-            $entry->cost = $this->cost($entry, $images);
+            // attempt has a row per attempt and each one is costed at its own rate,
+            // in the currency that rate is in.
+            $price = $this->find_price($entry);
+            $entry->cost = $price === null ? null : $this->cost($price, $entry, $images);
+            $entry->currency = $price?->get('currency');
             $entry->keysource = $entry->keysource ?? self::KEY_SITE;
             $this->db->insert_record(self::TABLE, $entry);
         } catch (\Throwable $e) {
@@ -90,24 +92,31 @@ class usage_logger {
      * quietly restates last month in this month's prices is of no use to anybody trying
      * to account for what was spent.
      *
+     * @param price $price The rate in force.
      * @param \stdClass $entry The row being written.
      * @param int $images How many images the request produced.
-     * @return float|null The cost, or null when no rate covered it.
+     * @return float|null The cost, or null when the rate does not cover what was used.
      */
-    protected function cost(\stdClass $entry, int $images): ?float {
-        $provider = (string) ($entry->targetprovider ?? '');
-        if ($provider === '') {
-            return null;
-        }
-        $price = $this->prices->find($provider, $entry->model ?? null, (int) $entry->timecreated);
-        if ($price === null) {
-            return null;
-        }
-
+    protected function cost(price $price, \stdClass $entry, int $images): ?float {
         return $price->cost(
             $entry->prompttokens === null ? null : (int) $entry->prompttokens,
             $entry->completiontokens === null ? null : (int) $entry->completiontokens,
             $images,
         );
+    }
+
+    /**
+     * The rate in force for the provider and model named on a row.
+     *
+     * @param \stdClass $entry The row being written.
+     * @return price|null The rate, or null when no rate covers this.
+     */
+    protected function find_price(\stdClass $entry): ?price {
+        $provider = (string) ($entry->targetprovider ?? '');
+        if ($provider === '') {
+            return null;
+        }
+
+        return $this->prices->find($provider, $entry->model ?? null, (int) $entry->timecreated);
     }
 }

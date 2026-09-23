@@ -437,7 +437,7 @@ final class usage_report_test extends \advanced_testcase {
         $this->log($this->day(1) + HOURSECS, ['currency' => 'JPY', 'cost' => null]);
 
         $this->assertSame(
-            price_book::get_currency(),
+            price_book::legacy_currency(),
             $this->report->currency_for($this->week(), $this->now),
         );
     }

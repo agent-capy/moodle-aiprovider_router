@@ -79,12 +79,12 @@ final class key_formatter_test extends \advanced_testcase {
     public function test_money_spent_in_another_currency_is_not_relabelled_as_this_one(): void {
         global $DB;
 
-        // The site was in yen when this was spent and is in dollars now. Handing the
-        // current currency to the figure printed 1000.00 USD for 1000 yen, next to
-        // the limit, as though the two could be compared.
+        // The rates, and so the limit, are in dollars, and this was recorded in yen.
+        // Handing the limit's currency to the figure would print 1000.00 USD for
+        // 1000 yen, next to the limit, as though the two could be compared.
         (new key_repository($DB))->set_cap($this->key, 2000.0, spend_ledger::PERIOD_MONTH, 30);
         $this->spend(1000.0, 'JPY');
-        set_config('currency', 'USD', 'local_airouter');
+        $this->rate_in('USD');
 
         $html = key_formatter::cap($this->key, new spend_ledger($DB, null, false), 'USD');
 
@@ -99,11 +99,24 @@ final class key_formatter_test extends \advanced_testcase {
 
         (new key_repository($DB))->set_cap($this->key, 500.0, spend_ledger::PERIOD_MONTH, 30);
         $this->spend(1000.0, 'JPY');
-        set_config('currency', 'USD', 'local_airouter');
+        $this->rate_in('USD');
 
         // 1000 yen is not 1000 dollars, and it is not over a limit of 500 dollars
         // either. The direction for somebody's own key is to keep using it.
         $this->assertFalse($this->key->is_spent(new spend_ledger($DB, null, false), time()));
+    }
+
+    /**
+     * Enter a rate, so that the limits on this site are read as figures in its currency.
+     *
+     * @param string $currency What the rate is in.
+     */
+    protected function rate_in(string $currency): void {
+        $rate = new price();
+        $rate->set('provider', 'aiprovider_openai');
+        $rate->set('currency', $currency);
+        $rate->set('promptrate', 1.0);
+        $rate->create();
     }
 
     /**

@@ -229,7 +229,8 @@ class usage_recorder {
                     'images' => $usage->images,
                     'usageknown' => (int) $usage->is_known(),
                     'cost' => $price?->cost($usage->prompttokens, $usage->completiontokens, $usage->images),
-                    'currency' => $price === null ? null : price_book::get_currency(),
+                    // The currency of the rate, which is the one the provider bills in.
+                    'currency' => $price?->get('currency'),
                     'timeended' => $now,
                     'id' => $attemptid,
                     'started' => attempt_state::STARTED,

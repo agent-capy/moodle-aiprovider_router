@@ -17,18 +17,24 @@
 namespace local_airouter;
 
 /**
- * Finds the rate that applied to a request, and the currency the site works in.
+ * Finds the rate that applied to a request, and the currency each provider bills in.
  *
  * Lookups prefer a rate entered for the exact model, and fall back to one entered for
  * the provider as a whole. Where neither exists the request has no cost recorded at
  * all, rather than a cost of zero.
+ *
+ * Currency belongs to the provider, not to the site. Each rate carries the currency
+ * its provider bills in, a cost is recorded in the currency of the rate that produced
+ * it, and nothing converts between currencies: picking exchange rates would mean
+ * choosing a source, a moment and a rounding rule, and would lay a second layer of
+ * error over a figure that is already an estimate.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class price_book {
-    /** @var string The currency used when the site has not chosen one. */
+    /** @var string What the old ledger falls back to when the rates do not name one currency. */
     public const DEFAULT_CURRENCY = 'USD';
 
     /**
@@ -43,19 +49,23 @@ class price_book {
     }
 
     /**
-     * The currency every rate and every recorded cost is expressed in.
+     * The one currency the rates are in, for what still thinks a site has one.
      *
-     * One currency for the whole site, and no conversion. Picking exchange rates would
-     * mean choosing a source, a moment and a rounding rule, and would lay a second
-     * layer of error over a figure that is already an estimate. An administrator who
-     * thinks in yen sets the currency to JPY and enters the rates in yen.
+     * Transitional. The old spending ledger, the budget conditions and the key limits
+     * were written when the site had one currency, and read their limits as figures in
+     * it. Until they read money by currency they are given the currency every rate is
+     * entered in, and the default when there are no rates or more than one currency:
+     * on such a site their comparisons are not sound, and they were not before either.
+     * This goes when they do.
      *
      * @return string The currency code.
      */
-    public static function get_currency(): string {
-        $currency = trim((string) get_config('local_airouter', 'currency'));
+    public static function legacy_currency(): string {
+        global $DB;
 
-        return $currency === '' ? self::DEFAULT_CURRENCY : $currency;
+        $currencies = (new self($DB))->get_currencies();
+
+        return count($currencies) === 1 ? (string) reset($currencies) : self::DEFAULT_CURRENCY;
     }
 
     /**
@@ -103,5 +113,96 @@ class price_book {
         }
 
         return $prices;
+    }
+
+    /**
+     * The currency a provider bills in, as its rates say.
+     *
+     * Every rate of a provider is entered in one currency, so this is simply the
+     * currency on its rates. Should the rows ever disagree, the rate entered most
+     * recently wins, so that the answer is one currency and the same one each time.
+     *
+     * @param string $provider The provider component.
+     * @return string|null The currency, or null when the provider has no rates.
+     */
+    public function currency_of(string $provider): ?string {
+        if ($provider === '') {
+            return null;
+        }
+        $records = $this->db->get_records(
+            price::TABLE,
+            ['provider' => $provider],
+            'timemodified DESC, id DESC',
+            'id, currency',
+            0,
+            1,
+        );
+        if (!$records) {
+            return null;
+        }
+
+        return (string) reset($records)->currency;
+    }
+
+    /**
+     * The currency of every provider that has rates.
+     *
+     * @return string[] Currency codes keyed by provider component.
+     */
+    public function get_provider_currencies(): array {
+        $currencies = [];
+        foreach ($this->db->get_records(price::TABLE, null, 'timemodified ASC, id ASC', 'id, provider, currency') as $row) {
+            // Later rows overwrite earlier ones, so a provider whose rows disagree is
+            // reported the way currency_of() reports it.
+            $currencies[(string) $row->provider] = (string) $row->currency;
+        }
+        ksort($currencies);
+
+        return $currencies;
+    }
+
+    /**
+     * Every currency any rate is in.
+     *
+     * @return string[] The currency codes, sorted.
+     */
+    public function get_currencies(): array {
+        $currencies = [];
+        foreach ($this->db->get_fieldset_select(price::TABLE, 'DISTINCT currency', '1 = 1') as $currency) {
+            $currencies[] = (string) $currency;
+        }
+        sort($currencies);
+
+        return $currencies;
+    }
+
+    /**
+     * Put every rate of a provider in one currency.
+     *
+     * A provider bills in one currency, so the currency is changed for the provider
+     * rather than for a rate at a time. Costs already recorded keep the currency they
+     * were recorded in: this relabels rates, and a recorded cost is not a rate.
+     *
+     * @param string $provider The provider component.
+     * @param string $currency The currency, already normalised.
+     * @return int How many rates were in another currency until now.
+     */
+    public function set_provider_currency(string $provider, string $currency): int {
+        $changed = $this->db->count_records_select(
+            price::TABLE,
+            'provider = :provider AND currency <> :currency',
+            ['provider' => $provider, 'currency' => $currency],
+        );
+        if ($changed > 0) {
+            $this->db->set_field_select(
+                price::TABLE,
+                'currency',
+                $currency,
+                'provider = :provider AND currency <> :currency',
+                ['provider' => $provider, 'currency' => $currency],
+            );
+        }
+
+        return $changed;
     }
 }

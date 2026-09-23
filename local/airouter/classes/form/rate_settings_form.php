@@ -16,8 +16,6 @@
 
 namespace local_airouter\form;
 
-use local_airouter\price;
-use local_airouter\price_book;
 use local_airouter\token_estimator;
 
 defined('MOODLE_INTERNAL') || die();
@@ -25,10 +23,10 @@ defined('MOODLE_INTERNAL') || die();
 require_once($CFG->libdir . '/formslib.php');
 
 /**
- * Sets the currency and the ratios the token estimate is worked out from.
+ * Sets the ratios the token estimate is worked out from.
  *
- * Neither of these changes where a request goes. Rules compare character counts, and
- * the estimate is shown as a guide when a threshold is being chosen, so getting these
+ * These do not change where a request goes. Rules compare character counts, and the
+ * estimate is shown as a guide when a threshold is being chosen, so getting these
  * wrong costs a misleading figure on a screen. The form says so, because a setting that
  * looks like it might reroute traffic will not be touched.
  *
@@ -47,11 +45,6 @@ class rate_settings_form extends \moodleform {
             '',
             get_string('rates:settings_intro', 'local_airouter'),
         );
-
-        $mform->addElement('text', 'currency', get_string('rates:currency', 'local_airouter'), ['size' => 8]);
-        $mform->setType('currency', PARAM_ALPHA);
-        $mform->setDefault('currency', price_book::DEFAULT_CURRENCY);
-        $mform->addHelpButton('currency', 'rates:currency', 'local_airouter');
 
         $mform->addElement(
             'text',
@@ -87,9 +80,6 @@ class rate_settings_form extends \moodleform {
                 // routes on.
                 $errors[$field] = get_string('rates:error:ratio', 'local_airouter');
             }
-        }
-        if (trim((string) ($data['currency'] ?? '')) === '') {
-            $errors['currency'] = get_string('rates:error:currency', 'local_airouter');
         }
 
         return $errors;

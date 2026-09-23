@@ -195,7 +195,7 @@ final class reader_test extends \advanced_testcase {
         global $DB;
         [$from, $to] = $this->week();
         $this->assertSame(
-            \local_airouter\price_book::get_currency(),
+            \local_airouter\price_book::legacy_currency(),
             $this->reader->currency_for($from, $to),
             'Nothing priced: the site currency, and the figures read as not known.'
         );

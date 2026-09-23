@@ -323,14 +323,19 @@ final class spend_ledger_test extends \advanced_testcase {
 
     public function test_money_recorded_in_another_currency_is_not_weighed_against_a_limit(): void {
         $this->log($this->day(0) + HOURSECS, ['cost' => 1000.0, 'currency' => 'JPY']);
-        set_config('currency', 'USD', 'local_airouter');
+        // The rates are in dollars, so the limits are read as dollars.
+        $rate = new price();
+        $rate->set('provider', 'aiprovider_openai');
+        $rate->set('currency', 'USD');
+        $rate->set('promptrate', 1.0);
+        $rate->create();
 
         [$from, $to] = $this->week();
         $spend = $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to);
 
-        // Every limit on this site is a figure in the site currency, and this is not
-        // a figure in the site currency. Weighing 1000 yen against a limit of 100
-        // dollars compares two different things while looking like a comparison.
+        // Every limit on this site is a figure in dollars, and this is not a figure in
+        // dollars. Weighing 1000 yen against a limit of 100 dollars compares two
+        // different things while looking like a comparison.
         $this->assertSame('JPY', $spend->currency);
         $this->assertFalse($spend->is_comparable());
         $this->assertFalse($spend->is_known());

@@ -218,7 +218,7 @@ class budget extends base {
             );
         }
 
-        return format_float($amount, 2, true) . ' ' . price_book::get_currency();
+        return format_float($amount, 2, true) . ' ' . price_book::legacy_currency();
     }
 
     /**
@@ -268,7 +268,7 @@ class budget extends base {
             $mform->createElement('text', 'budgetamount', '', ['size' => 10]),
             // One unit is shown at a time. A budget in requests labelled with the site
             // currency would be read as money by everybody who saw it.
-            $mform->createElement('static', 'budgetcurrency', '', price_book::get_currency()),
+            $mform->createElement('static', 'budgetcurrency', '', price_book::legacy_currency()),
             $mform->createElement('static', 'budgetrequests', '', get_string(
                 'condition:budget:unit:requests',
                 'local_airouter',

@@ -139,5 +139,24 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092301, 'local', 'airouter');
     }
 
+    if ($oldversion < 2026092302) {
+        // A rate now says what currency it is in. Until here one currency was a setting
+        // for the whole site, which cannot be right once two providers billing in
+        // different currencies are in use, so the setting goes and its value is
+        // written onto every rate that was entered under it.
+        $table = new xmldb_table('local_airouter_price');
+        $field = new xmldb_field('currency', XMLDB_TYPE_CHAR, '10', null, null, null, null, 'model');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+            $currency = strtoupper(trim((string) get_config('local_airouter', 'currency')));
+            $DB->set_field('local_airouter_price', 'currency', $currency === '' ? 'USD' : $currency);
+            $field->setNotNull(true);
+            $dbman->change_field_notnull($table, $field);
+        }
+        unset_config('currency', 'local_airouter');
+
+        upgrade_plugin_savepoint(true, 2026092302, 'local', 'airouter');
+    }
+
     return true;
 }

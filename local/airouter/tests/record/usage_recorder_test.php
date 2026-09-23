@@ -138,10 +138,12 @@ final class usage_recorder_test extends \advanced_testcase {
      *
      * @param float $promptrate Per million prompt tokens.
      * @param int $timefrom When the rate takes effect.
+     * @param string $currency What the rate is in.
      */
-    private function rate(float $promptrate, int $timefrom = 0): void {
+    private function rate(float $promptrate, int $timefrom = 0, string $currency = 'USD'): void {
         $rate = new \local_airouter\price();
         $rate->set('provider', 'aiprovider_openai');
+        $rate->set('currency', $currency);
         $rate->set('model', '');
         $rate->set('promptrate', $promptrate);
         $rate->set('timefrom', $timefrom);
@@ -165,6 +167,21 @@ final class usage_recorder_test extends \advanced_testcase {
         $after = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $id], '*', MUST_EXIST);
         $this->assertEquals($before, $after, 'An ending is written once. Rates and days move on; the record does not.');
         $this->assertDebuggingNotCalled();
+    }
+
+    public function test_a_cost_is_recorded_in_the_currency_of_the_rate_that_produced_it(): void {
+        global $DB;
+        // The provider bills in yen, so its rate is in yen, and so is the cost. There
+        // is no site currency for the row to be labelled with instead.
+        $this->rate(100.0, 0, 'JPY');
+        $request = $this->recorder->begin_request($this->context());
+        $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
+
+        $this->recorder->end_attempt($id, attempt_state::SUCCEEDED, new usage(1000000, 0), 'm', null, 'aiprovider_openai');
+
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $id], '*', MUST_EXIST);
+        $this->assertEqualsWithDelta(100.0, (float) $row->cost, 0.000001);
+        $this->assertSame('JPY', $row->currency);
     }
 
     public function test_a_different_ending_sent_later_is_not_believed_either(): void {

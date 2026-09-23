@@ -303,6 +303,7 @@ final class usage_logger_test extends \advanced_testcase {
     public function test_the_cost_is_worked_out_from_the_rate_in_force(): void {
         $rate = new price();
         $rate->set('provider', 'aiprovider_mock');
+        $rate->set('currency', 'JPY');
         $rate->set('promptrate', 1.0);
         $rate->set('completionrate', 2.0);
         $rate->create();
@@ -315,7 +316,8 @@ final class usage_logger_test extends \advanced_testcase {
 
         $row = $this->logged();
         $this->assertEqualsWithDelta(3.0, (float) $row->cost, 0.000001);
-        $this->assertSame(price_book::DEFAULT_CURRENCY, $row->currency);
+        // In the currency of the rate, which is the provider's, not a site default.
+        $this->assertSame('JPY', $row->currency);
     }
 
     public function test_a_request_nothing_prices_is_recorded_without_a_cost(): void {
@@ -532,12 +534,14 @@ final class usage_logger_test extends \advanced_testcase {
         $this->add('to seven', 7);
         $rate = new price();
         $rate->set('provider', 'aiprovider_mock');
+        $rate->set('currency', 'USD');
         $rate->set('model', 'expensive');
         $rate->set('promptrate', 10.0);
         $rate->create();
 
         $cheap = new price();
         $cheap->set('provider', 'aiprovider_mock');
+        $cheap->set('currency', 'USD');
         $cheap->set('model', 'cheap');
         $cheap->set('promptrate', 1.0);
         $cheap->create();
@@ -566,6 +570,7 @@ final class usage_logger_test extends \advanced_testcase {
         $this->add('to seven', 7);
         $cheap = new price();
         $cheap->set('provider', 'aiprovider_mock');
+        $cheap->set('currency', 'USD');
         $cheap->set('model', 'cheap');
         $cheap->set('promptrate', 1.0);
         $cheap->create();
@@ -597,6 +602,7 @@ final class usage_logger_test extends \advanced_testcase {
         // that has spent its whole limit.
         $rate = new price();
         $rate->set('provider', 'aiprovider_mock');
+        $rate->set('currency', 'USD');
         $rate->set('promptrate', 1.0);
         $rate->create();
 

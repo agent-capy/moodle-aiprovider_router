@@ -66,22 +66,33 @@ if ($action === 'edit') {
         redirect($url);
     }
     if ($data = $form->get_data()) {
+        $currency = price::normalise_currency((string) $data->currency);
         $record = $existing ?? new price();
         $record->set('provider', $data->provider);
         $record->set('model', trim((string) $data->model));
+        $record->set('currency', $currency);
         $record->set('promptrate', price_form::read_rate($data->promptrate));
         $record->set('completionrate', price_form::read_rate($data->completionrate));
         $record->set('imagerate', price_form::read_rate($data->imagerate));
         $record->set('timefrom', (int) $data->timefrom);
         $existing ? $record->update() : $record->create();
 
-        redirect($url, get_string('rates:saved', 'local_airouter'), null, \core\output\notification::NOTIFY_SUCCESS);
+        // A provider bills in one currency, so the currency entered here is the
+        // provider's, and its other rates follow. Said in the message when it
+        // changed any, because a rate somebody else entered has just been relabelled.
+        $relabelled = $book->set_provider_currency($data->provider, $currency);
+        $message = $relabelled > 0
+            ? get_string('rates:saved:currency', 'local_airouter', ['currency' => $currency, 'count' => $relabelled])
+            : get_string('rates:saved', 'local_airouter');
+
+        redirect($url, $message, null, \core\output\notification::NOTIFY_SUCCESS);
     }
     if ($existing) {
         $form->set_data((object) [
             'id' => $existing->get('id'),
             'provider' => $existing->get('provider'),
             'model' => $existing->get('model'),
+            'currency' => $existing->get('currency'),
             'promptrate' => $existing->get('promptrate'),
             'completionrate' => $existing->get('completionrate'),
             'imagerate' => $existing->get('imagerate'),
@@ -101,7 +112,6 @@ if ($action === 'edit') {
 $settings = new rate_settings_form($url);
 if ($data = $settings->get_data()) {
     require_sesskey();
-    set_config('currency', strtoupper(trim($data->currency)), 'local_airouter');
     set_config('tokenratiocjk', (float) $data->tokenratiocjk, 'local_airouter');
     set_config('tokenratioother', (float) $data->tokenratioother, 'local_airouter');
 
@@ -109,7 +119,6 @@ if ($data = $settings->get_data()) {
 }
 $estimator = new \local_airouter\token_estimator();
 $settings->set_data((object) [
-    'currency' => price_book::get_currency(),
     'tokenratiocjk' => $estimator->get_cjk_ratio(),
     'tokenratioother' => $estimator->get_other_ratio(),
 ]);
@@ -138,14 +147,14 @@ $prices = $book->get_all();
 if (!$prices) {
     echo $OUTPUT->notification(get_string('rates:noprices', 'local_airouter'), 'info');
 } else {
-    $currency = price_book::get_currency();
     $table = new html_table();
     $table->head = [
         get_string('price:provider', 'local_airouter'),
         get_string('price:model', 'local_airouter'),
-        get_string('price:promptrate', 'local_airouter', $currency),
-        get_string('price:completionrate', 'local_airouter', $currency),
-        get_string('price:imagerate', 'local_airouter', $currency),
+        get_string('price:currency', 'local_airouter'),
+        get_string('price:promptrate', 'local_airouter'),
+        get_string('price:completionrate', 'local_airouter'),
+        get_string('price:imagerate', 'local_airouter'),
         get_string('price:timefrom', 'local_airouter'),
         get_string('actions'),
     ];
@@ -163,6 +172,7 @@ if (!$prices) {
             s($record->get('provider')),
             $record->get('model') === '' ? get_string('price:model:any', 'local_airouter')
                 : s($record->get('model')),
+            s($record->get('currency')),
             $record->get('promptrate') === null ? $unset : format_float($record->get('promptrate'), 6, true, true),
             $record->get('completionrate') === null ? $unset
                 : format_float($record->get('completionrate'), 6, true, true),

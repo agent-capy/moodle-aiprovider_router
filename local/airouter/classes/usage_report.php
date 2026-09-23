@@ -261,7 +261,7 @@ class usage_report {
         return match (count($found)) {
             // Nothing in the period was priced, so the site's own currency is as good
             // an answer as any and the figures will all read "not known" anyway.
-            0 => price_book::get_currency(),
+            0 => price_book::legacy_currency(),
             1 => (string) reset($found),
             // More than one. There is no figure to give, and saying so is the answer.
             default => null,

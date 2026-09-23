@@ -129,7 +129,7 @@ if ($allowed && $action === 'test') {
     );
 }
 
-$currency = price_book::get_currency();
+$currency = price_book::legacy_currency();
 // Not cached: somebody looking at their own limit is asking what it is now, and the
 // figure is being shown rather than weighed on the path of a request.
 $ledger = new spend_ledger($DB, null, false);

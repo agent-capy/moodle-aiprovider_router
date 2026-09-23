@@ -486,7 +486,7 @@ class spend_ledger extends usage_report {
             costedcalls: (int) $total->costedcalls,
             from: $from,
             to: $to,
-            currency: count($currencies) === 1 ? (string) array_key_first($currencies) : price_book::get_currency(),
+            currency: count($currencies) === 1 ? (string) array_key_first($currencies) : price_book::legacy_currency(),
             mixedcurrency: count($currencies) > 1,
             calls: (int) $total->calls,
         );

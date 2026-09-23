@@ -373,6 +373,12 @@ final class adapter_provider_test extends \advanced_testcase {
             $this->ask()->get_response_data()['generatedcontent'],
         );
 
+        // Read the setting the way the rest of Moodle does, so that this process holds
+        // a copy of it. The difficulty below only exists once it does, and a request
+        // no longer reads any setting through get_config(), so nothing else here would
+        // have put one there.
+        $this->assertEquals(1, get_config('local_airouter', managed_policy::SWITCH));
+
         // An administrator switching the router off in another process, which leaves
         // the table changed and this process's caches untouched.
         $DB->set_field(

@@ -50,10 +50,12 @@ final class price_test extends \advanced_testcase {
         ?float $completion,
         int $timefrom = 0,
         ?float $image = null,
+        string $currency = 'USD',
     ): price {
         $record = new price();
         $record->set('provider', $provider);
         $record->set('model', $model);
+        $record->set('currency', $currency);
         $record->set('promptrate', $prompt);
         $record->set('completionrate', $completion);
         $record->set('imagerate', $image);
@@ -170,11 +172,77 @@ final class price_test extends \advanced_testcase {
         $this->assertArrayHasKey('promptrate', $errors);
     }
 
-    public function test_the_site_currency_defaults_and_can_be_set(): void {
-        $this->assertSame(price_book::DEFAULT_CURRENCY, price_book::get_currency());
+    public function test_a_rate_without_a_currency_is_refused(): void {
+        $record = new price();
+        $record->set('provider', 'aiprovider_openai');
+        $record->set('promptrate', 1.0);
 
-        set_config('currency', 'JPY', 'local_airouter');
+        $errors = $record->validate();
 
-        $this->assertSame('JPY', price_book::get_currency());
+        // A cost in no currency cannot be added to anything or weighed against anything.
+        $this->assertIsArray($errors);
+        $this->assertArrayHasKey('currency', $errors);
+    }
+
+    public function test_a_providers_currency_is_the_one_on_its_rates(): void {
+        global $DB;
+        $book = new price_book($DB);
+        $this->assertNull($book->currency_of('aiprovider_openai'), 'No rates, so no currency yet.');
+
+        $this->add('aiprovider_openai', '', 1.0, 2.0);
+        $this->add('aiprovider_openai', 'gpt-4o', 3.0, 4.0);
+        $this->add('aiprovider_sakuraaiengine', '', 100.0, 200.0, currency: 'JPY');
+
+        // One provider bills in dollars and another in yen, and neither is the site's.
+        $this->assertSame('USD', $book->currency_of('aiprovider_openai'));
+        $this->assertSame('JPY', $book->currency_of('aiprovider_sakuraaiengine'));
+        $this->assertSame(
+            ['aiprovider_openai' => 'USD', 'aiprovider_sakuraaiengine' => 'JPY'],
+            $book->get_provider_currencies(),
+        );
+        $this->assertSame(['JPY', 'USD'], $book->get_currencies());
+    }
+
+    public function test_the_rate_found_says_what_currency_it_is_in(): void {
+        global $DB;
+        $this->add('aiprovider_sakuraaiengine', '', 100.0, 200.0, currency: 'JPY');
+
+        $found = (new price_book($DB))->find('aiprovider_sakuraaiengine', 'some-model', time());
+
+        $this->assertNotNull($found);
+        $this->assertSame('JPY', $found->get('currency'));
+    }
+
+    public function test_changing_a_providers_currency_changes_all_of_its_rates_and_no_others(): void {
+        global $DB;
+        $book = new price_book($DB);
+        $this->add('aiprovider_openai', '', 1.0, 2.0);
+        $this->add('aiprovider_openai', 'gpt-4o', 3.0, 4.0);
+        $this->add('aiprovider_sakuraaiengine', '', 100.0, 200.0, currency: 'JPY');
+
+        // A provider bills in one currency, so the currency is changed for the provider.
+        $this->assertSame(2, $book->set_provider_currency('aiprovider_openai', 'EUR'));
+
+        $this->assertSame('EUR', $book->currency_of('aiprovider_openai'));
+        $this->assertSame(2, $DB->count_records(price::TABLE, ['provider' => 'aiprovider_openai', 'currency' => 'EUR']));
+        $this->assertSame('JPY', $book->currency_of('aiprovider_sakuraaiengine'), 'The other provider is untouched.');
+        $this->assertSame(0, $book->set_provider_currency('aiprovider_openai', 'EUR'), 'Nothing left to change.');
+    }
+
+    public function test_what_still_needs_one_currency_is_given_the_one_in_use_or_the_default(): void {
+        // The old ledger and the budget conditions still read their limits as figures
+        // in one currency. Until they read money by currency they are given the one
+        // every rate is in, and the default when there is no such currency.
+        $this->assertSame(price_book::DEFAULT_CURRENCY, price_book::legacy_currency(), 'No rates.');
+
+        $this->add('aiprovider_sakuraaiengine', '', 100.0, 200.0, currency: 'JPY');
+        $this->assertSame('JPY', price_book::legacy_currency(), 'Every rate is in yen.');
+
+        $this->add('aiprovider_openai', '', 1.0, 2.0);
+        $this->assertSame(price_book::DEFAULT_CURRENCY, price_book::legacy_currency(), 'Two currencies: no one currency.');
+    }
+
+    public function test_a_currency_is_stored_the_way_codes_are_written(): void {
+        $this->assertSame('JPY', price::normalise_currency(' jpy '));
     }
 }

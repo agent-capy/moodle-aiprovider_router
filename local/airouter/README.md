@@ -651,9 +651,19 @@ way — so usage of a local model is measured in full even though it costs nothi
 own Ollama provider reports token counts, and the router keeps whatever the provider
 sent back.
 
-One currency applies site-wide and nothing is converted: choosing an exchange rate source,
-a moment and a rounding rule would lay a second layer of error over a figure that is
-already an estimate. To work in yen, set the currency to JPY and enter the rates in yen.
+#### Currency
+
+Each rate is in the currency its provider bills in, and that currency is entered with
+the rate: a provider billed in dollars has its rates in USD, one billed in yen has them
+in JPY, and a site using both holds money in both. There is no site-wide currency. A
+provider bills in one currency, so saving a rate in a different currency changes the
+currency of every rate of that provider, and the page says so when it does. A cost is
+recorded in the currency of the rate that produced it and keeps it, so relabelling a
+provider's rates changes nothing already recorded.
+
+Nothing is converted between currencies: choosing an exchange rate source, a moment and
+a rounding rule would lay a second layer of error over a figure that is already an
+estimate. Figures in different currencies are kept apart rather than added.
 
 The token estimation ratios are on the same page, since they are also rates an
 administrator maintains. Neither they nor the prices can change where a request goes.
