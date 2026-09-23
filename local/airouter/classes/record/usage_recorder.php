@@ -189,6 +189,12 @@ class usage_recorder {
      * whatever the rates or the date have become since. A row that has gone is left
      * gone: an update recreates nothing.
      *
+     * The rate is looked up and the ending written under the record lock, which a
+     * correction of a provider's currency holds for the whole of its run. So an
+     * ending is either written before the correction, and worked out again by it, or
+     * after, at the corrected rate; it cannot be priced before and written after,
+     * which would put the old currency back on a row the correction never saw.
+     *
      * @param int|null $attemptid The attempt, or null when it could not be recorded.
      * @param string $state One of attempt_state::TERMINAL.
      * @param usage $usage What the target reported using.
@@ -210,7 +216,18 @@ class usage_recorder {
         if (!in_array($state, attempt_state::TERMINAL, true)) {
             throw new \coding_exception('Not a state an attempt can end in: ' . $state);
         }
+        $lock = null;
         try {
+            $lock = self::lock_factory()->get_lock(self::LOCK, self::LOCK_TIMEOUT) ?: null;
+            if ($lock === null) {
+                // Written all the same: an ending that is lost is worse than the rare
+                // case of a correction in progress. Counted as a gap, so that the
+                // status check says the record may need correcting again.
+                $this->note_failure(
+                    'take the record lock before closing an attempt',
+                    new \RuntimeException('the record lock was not obtained in ' . self::LOCK_TIMEOUT . ' seconds'),
+                );
+            }
             $now = $this->now();
             $price = $this->prices->find($component, $model, $now);
             $this->db->execute(
@@ -238,6 +255,8 @@ class usage_recorder {
             );
         } catch (\Throwable $e) {
             $this->note_failure('close an attempt', $e);
+        } finally {
+            $lock?->release();
         }
     }
 

@@ -29,6 +29,14 @@ namespace local_airouter\record;
  * A request or attempt that has not ended is not counted at all. What it will have
  * cost is not known yet, and a total that guessed would have to be corrected later.
  *
+ * The summary and the detail are two tables read in two statements, and the
+ * summariser can commit between them: a fact that was in neither the summary just
+ * read nor the detail read a moment later has been counted nowhere. So every read
+ * that pairs the two notes the summary's generation before and after, and reads
+ * again when it moved. A database snapshot would do the same on some databases and
+ * not on others -- PostgreSQL gives each statement its own view unless told
+ * otherwise -- and this works the same way everywhere.
+ *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -90,15 +98,75 @@ class reader {
         'requests', 'failures', 'calls', 'knowncalls', 'prompttokens', 'completiontokens', 'costedcalls',
     ];
 
+    /** @var int How many times a read is taken again when the summary keeps moving under it. */
+    public const MAX_READS = 5;
+
+    /** @var bool Whether the last paired read came back the same way twice, and so can be kept. */
+    protected bool $consistent = true;
+
     /**
      * Constructor.
      *
      * @param \moodle_database $db The database to read.
+     * @param \Closure|null $stop Called with the name of each point a read passes. Tests
+     *                            use it to commit something on another connection in
+     *                            between the summary and the detail; nothing else does.
      */
     public function __construct(
         /** @var \moodle_database The database. */
         protected readonly \moodle_database $db,
+        /** @var \Closure|null The stop hook. */
+        protected readonly ?\Closure $stop = null,
     ) {
+    }
+
+    /**
+     * Whether the last paired read is one to keep.
+     *
+     * False only when the summary changed under every one of MAX_READS reads, which
+     * a summariser running once a day does not do; then the figures are returned
+     * rather than nothing, but a cache should not hold them.
+     *
+     * @return bool True when the summary did not move during the read.
+     */
+    public function was_consistent(): bool {
+        return $this->consistent;
+    }
+
+    /**
+     * Read the summary and the detail as one.
+     *
+     * The generation is read from the database before and after, and the two reads
+     * are taken again when it moved. A read that straddles a summariser commit
+     * would otherwise miss every fact that commit applied: not yet in the summary
+     * when the summary was read, no longer unapplied when the detail was read.
+     *
+     * @param \Closure $read Runs the paired reads and returns what they found.
+     * @return mixed What the reads found, from a pass the summary did not move under.
+     */
+    protected function consistently(\Closure $read): mixed {
+        $this->consistent = true;
+        for ($pass = 1; $pass <= self::MAX_READS; $pass++) {
+            $before = summariser::get_generation($this->db);
+            $result = $read();
+            if (summariser::get_generation($this->db) === $before) {
+                return $result;
+            }
+        }
+        $this->consistent = false;
+
+        return $result;
+    }
+
+    /**
+     * Let a test hold a read at a point.
+     *
+     * @param string $point Which point was reached.
+     */
+    protected function at(string $point): void {
+        if ($this->stop !== null) {
+            ($this->stop)($point);
+        }
     }
 
     /**
@@ -131,7 +199,11 @@ class reader {
             $series[$day] = self::blank();
         }
 
-        foreach ($this->summarised(['daystart'], $from, $to, $courseid, $keysource) as $row) {
+        [$summary, $detail] = $this->consistently(fn() => [
+            $this->summarised(['daystart'], $from, $to, $courseid, $keysource),
+            $this->detailed(['day'], $from, $to, $courseid, $keysource),
+        ]);
+        foreach ($summary as $row) {
             // Which day a stored figure belongs to is worked out again rather than taken
             // as the key it was written under: a site that changes its timezone has rows
             // stamped to a midnight that no longer exists, and two old days can land in
@@ -141,7 +213,7 @@ class reader {
                 $series[$day] = self::total([$series[$day], $row]);
             }
         }
-        foreach ($this->detailed(['day'], $from, $to, $courseid, $keysource) as $row) {
+        foreach ($detail as $row) {
             if (isset($series[$row->day])) {
                 $series[$row->day] = self::total([$series[$row->day], $row]);
             }
@@ -171,9 +243,13 @@ class reader {
             throw new \coding_exception('Unknown breakdown: ' . $by);
         }
         $fields = self::GROUPS[$by];
+        [$summary, $detail] = $this->consistently(fn() => [
+            $this->summarised($fields, $from, $to, $courseid, $keysource),
+            $this->detailed($fields, $from, $to, $courseid, $keysource),
+        ]);
         $rows = [];
-        $this->collect($rows, $fields, $this->summarised($fields, $from, $to, $courseid, $keysource));
-        $this->collect($rows, $fields, $this->detailed($fields, $from, $to, $courseid, $keysource));
+        $this->collect($rows, $fields, $summary);
+        $this->collect($rows, $fields, $detail);
         // Busiest first, and among equals by their key: the database hands grouped
         // rows out in no particular order, and the same figures should read the same
         // way before and after they have been summarised.
@@ -193,10 +269,10 @@ class reader {
      * @return array[] Entries of provider, currency and amount, as a row's costs.
      */
     public function get_money(int $from, int $to, ?int $courseid = null, ?string $keysource = null): array {
-        $rows = array_merge(
+        $rows = $this->consistently(fn() => array_merge(
             $this->summarised(['targetprovider'], $from, $to, $courseid, $keysource),
             $this->detailed(['targetprovider'], $from, $to, $courseid, $keysource),
-        );
+        ));
 
         return self::total($rows)->costs;
     }
@@ -440,6 +516,7 @@ class reader {
             $rows[] = self::normalise($row);
         }
         $recordset->close();
+        $this->at('summarised');
 
         return $rows;
     }
@@ -563,6 +640,7 @@ class reader {
 
         $rows = [];
         $this->collect($rows, array_values(array_unique(array_merge($fields, ['targetprovider', 'currency']))), $facts);
+        $this->at('detailed');
 
         return array_values($rows);
     }

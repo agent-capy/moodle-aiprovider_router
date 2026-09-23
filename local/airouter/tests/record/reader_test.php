@@ -278,4 +278,52 @@ final class reader_test extends \advanced_testcase {
         sort($actual);
         $this->assertSame($expected, $actual);
     }
+
+    /**
+     * Run something on a second database connection, as another process would.
+     *
+     * @param \Closure $operation What to run; it is given the other connection.
+     * @return mixed What it returned.
+     */
+    private function separately(\Closure $operation): mixed {
+        global $DB, $CFG;
+        $original = $DB;
+        $other = \moodle_database::get_driver_instance($CFG->dbtype, $CFG->dblibrary);
+        $other->connect($CFG->dbhost, $CFG->dbuser, $CFG->dbpass, $CFG->dbname, $CFG->prefix, $CFG->dboptions);
+        try {
+            $DB = $other;
+
+            return $operation($other);
+        } finally {
+            $DB = $original;
+            $other->dispose();
+        }
+    }
+
+    public function test_a_summariser_committing_between_the_summary_and_the_detail_is_read_again(): void {
+        global $DB;
+        // Another connection commits a real run, so the test's own rows have to be
+        // committed too, which the ordinary rollback based reset does not do.
+        $this->preventResetByRollback();
+        $this->request($this->now - DAYSECS);
+        [$from, $to] = $this->week();
+        $passes = 0;
+        $reader = new reader($DB, function (string $point) use (&$passes): void {
+            // The first time the summary has been read, apply everything from another
+            // connection: the fact is then neither in the summary just read nor in
+            // the detail about to be read, unless the read notices and starts over.
+            if ($point === 'summarised' && $passes++ === 0) {
+                $this->separately(fn($db) => (new summariser($db))->run($this->now));
+            }
+        });
+
+        $money = $reader->get_money($from, $to);
+        $total = reader::total($reader->get_series($from, $to));
+
+        $this->assertEqualsWithDelta(0.004, $money['aiprovider_mock|USD']['amount'] ?? null, 0.000001);
+        $this->assertSame(1, $total->requests);
+        $this->assertSame(2, $total->calls);
+        $this->assertTrue($reader->was_consistent());
+        $this->assertSame(2, $DB->count_records(summariser::TABLE, ['currency' => 'USD']), 'It was applied: a row per call.');
+    }
 }

@@ -67,7 +67,6 @@ if ($action === 'edit') {
     }
     if ($data = $form->get_data()) {
         $currency = price::normalise_currency((string) $data->currency);
-        $before = $book->currency_of($data->provider);
         $record = $existing ?? new price();
         $record->set('provider', $data->provider);
         $record->set('model', trim((string) $data->model));
@@ -76,23 +75,35 @@ if ($action === 'edit') {
         $record->set('completionrate', price_form::read_rate($data->completionrate));
         $record->set('imagerate', price_form::read_rate($data->imagerate));
         $record->set('timefrom', (int) $data->timefrom);
-        $existing ? $record->update() : $record->create();
 
         // A provider bills in one currency, so the currency entered here is the
         // provider's. When it differs from what the provider's rates said until now,
         // a provisional entry is being corrected: its other rates follow, and every
         // cost recorded for the provider is worked out again at the rates now in
-        // force. Said in the message, because figures elsewhere have just changed.
-        $message = get_string('rates:saved', 'local_airouter');
-        if ($before !== null && $before !== $currency) {
-            $changed = $book->recost_provider($data->provider, $currency);
-            $message = get_string('rates:saved:currency', 'local_airouter', [
+        // force, in the one operation that saves this rate. Said in the message,
+        // because figures elsewhere have just changed. A record busy being written
+        // to is said too, and nothing is saved until the rate is sent again.
+        try {
+            $changed = $book->save_rate($record, $existing === null);
+        } catch (\moodle_exception $e) {
+            if ($e->errorcode !== 'rates:error:busy') {
+                throw $e;
+            }
+            redirect(
+                new moodle_url($url, ['action' => 'edit', 'priceid' => $priceid]),
+                get_string('rates:error:busy', 'local_airouter'),
+                null,
+                \core\output\notification::NOTIFY_ERROR,
+            );
+        }
+        $message = $changed['recosted']
+            ? get_string('rates:saved:currency', 'local_airouter', [
                 'currency' => $currency,
                 'rates' => $changed['rates'],
                 'calls' => $changed['attempts'] + $changed['logs'],
                 'days' => $changed['summaries'],
-            ]);
-        }
+            ])
+            : get_string('rates:saved', 'local_airouter');
 
         redirect($url, $message, null, \core\output\notification::NOTIFY_SUCCESS);
     }

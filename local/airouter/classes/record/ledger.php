@@ -92,6 +92,7 @@ class ledger extends reader {
      *                     and pay for the query.
      * @param price_book|null $prices Where each provider's currency is looked up, or
      *                                null for the site's rates.
+     * @param \Closure|null $stop The reader's stop hook, for tests.
      */
     public function __construct(
         \moodle_database $db,
@@ -99,8 +100,9 @@ class ledger extends reader {
         protected readonly bool $cached = true,
         /** @var price_book|null The rates. */
         protected ?price_book $prices = null,
+        ?\Closure $stop = null,
     ) {
-        parent::__construct($db);
+        parent::__construct($db, $stop);
         $this->prices ??= new price_book($db);
     }
 
@@ -278,9 +280,13 @@ class ledger extends reader {
             default => throw new \coding_exception('Cannot measure each of: ' . $scope),
         };
         $fields = [$field, 'targetprovider'];
+        [$summary, $detail] = $this->consistently(fn() => [
+            $this->summarised($fields, $from, $to, null, rule::KEYSOURCE_SITE),
+            $this->detailed($fields, $from, $to, null, rule::KEYSOURCE_SITE),
+        ]);
         $rows = [];
-        $this->collect($rows, $fields, $this->summarised($fields, $from, $to, null, rule::KEYSOURCE_SITE));
-        $this->collect($rows, $fields, $this->detailed($fields, $from, $to, null, rule::KEYSOURCE_SITE));
+        $this->collect($rows, $fields, $summary);
+        $this->collect($rows, $fields, $detail);
 
         $gathered = [];
         foreach ($rows as $row) {
@@ -297,6 +303,8 @@ class ledger extends reader {
         foreach ($gathered as $subject => $subjectrows) {
             $spending[$subject] = $this->build($subjectrows, $from, $to);
         }
+        // In subject order: the database hands grouped rows out in no particular order.
+        ksort($spending);
 
         return $spending;
     }
@@ -385,6 +393,11 @@ class ledger extends reader {
         }
 
         $spend = $this->read($filters, $from, $to);
+        if (!$this->was_consistent()) {
+            // Read while the summary kept moving. Good enough to answer with once,
+            // not good enough to hold for a minute.
+            return $spend;
+        }
         $providers = [];
         foreach ($spend->providers as $provider => $entry) {
             $providers[$provider] = (array) $entry;
@@ -408,9 +421,13 @@ class ledger extends reader {
         $targetid = $filters['targetid'] ?? null;
         $keysource = (string) $filters['keysource'];
         $fields = ['targetprovider'];
+        [$summary, $detail] = $this->consistently(fn() => [
+            $this->summarised($fields, $from, $to, $courseid, $keysource, $userid, $targetid),
+            $this->detailed($fields, $from, $to, $courseid, $keysource, $userid, $targetid),
+        ]);
         $rows = [];
-        $this->collect($rows, $fields, $this->summarised($fields, $from, $to, $courseid, $keysource, $userid, $targetid));
-        $this->collect($rows, $fields, $this->detailed($fields, $from, $to, $courseid, $keysource, $userid, $targetid));
+        $this->collect($rows, $fields, $summary);
+        $this->collect($rows, $fields, $detail);
 
         return $this->build(array_values($rows), $from, $to);
     }

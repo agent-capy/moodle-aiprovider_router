@@ -17,6 +17,7 @@
 namespace local_airouter;
 
 use local_airouter\record\attempt_state;
+use local_airouter\record\ledger;
 use local_airouter\record\summariser;
 use local_airouter\record\usage_recorder;
 
@@ -186,6 +187,70 @@ class price_book {
     }
 
     /**
+     * Save a rate, and correct the provider when the rate changes its currency.
+     *
+     * The rate, the relabelling of the provider's other rates and the recalculation
+     * of its recorded costs are one operation: either all of it happens or none of
+     * it does. Saving the rate first and correcting afterwards left a rate in the new
+     * currency beside records in the old one whenever the correction could not run,
+     * and a second attempt then saw nothing to correct. The record is also corrected
+     * when it disagrees with the rates already, however that came about, so that
+     * saving the rate again is the way to put it right.
+     *
+     * @param price $rate The rate, with what it is to become already set on it.
+     * @param bool $isnew Whether it is being created rather than updated.
+     * @return array recosted, and when true the counts recost_provider() gives.
+     * @throws \moodle_exception When the record is busy.
+     */
+    public function save_rate(price $rate, bool $isnew): array {
+        $provider = (string) $rate->get('provider');
+        $currency = (string) $rate->get('currency');
+        $before = $this->currency_of($provider);
+        $save = function () use ($rate, $isnew): void {
+            $isnew ? $rate->create() : $rate->update();
+        };
+        if (($before === null || $before === $currency) && !$this->has_costs_in_another_currency($provider, $currency)) {
+            $save();
+
+            return ['recosted' => false];
+        }
+
+        return ['recosted' => true] + $this->recost_provider($provider, $currency, $save);
+    }
+
+    /**
+     * Whether anything of a provider's is in a currency other than the one given.
+     *
+     * Its other rates, its recorded calls, or its summarised days. Any of them means
+     * the provider's money is not one figure, and a correction is due.
+     *
+     * @param string $provider The provider component.
+     * @param string $currency The currency everything should be in.
+     * @return bool True when something is in another currency.
+     */
+    public function has_costs_in_another_currency(string $provider, string $currency): bool {
+        $params = ['provider' => $provider, 'currency' => $currency];
+        if ($this->db->record_exists_select(price::TABLE, 'provider = :provider AND currency <> :currency', $params)) {
+            return true;
+        }
+        if (
+            $this->db->record_exists_select(
+                usage_recorder::ATTEMPT_TABLE,
+                'targetprovider = :provider AND currency IS NOT NULL AND currency <> :currency',
+                $params,
+            )
+        ) {
+            return true;
+        }
+
+        return $this->db->record_exists_select(
+            summariser::TABLE,
+            'targetprovider = :provider AND currency <> :dash AND currency <> :currency',
+            $params + ['dash' => '-'],
+        );
+    }
+
+    /**
      * Put every rate of a provider in one currency, and work its recorded costs out again.
      *
      * A provider bills in one currency, so the currency is changed for the provider
@@ -202,10 +267,13 @@ class price_book {
      *
      * @param string $provider The provider component.
      * @param string $currency The currency, already normalised.
+     * @param \Closure|null $first Something to do first, inside the same transaction and
+     *                             under the same locks, such as saving the rate that
+     *                             brought the change; it is undone with the rest.
      * @return int[] How many rates, attempts, log rows and summary rows were touched.
      * @throws \moodle_exception When the record is busy.
      */
-    public function recost_provider(string $provider, string $currency): array {
+    public function recost_provider(string $provider, string $currency, ?\Closure $first = null): array {
         $factory = \core\lock\lock_config::get_lock_factory('local_airouter');
         $recordlock = $factory->get_lock(usage_recorder::LOCK, usage_recorder::LOCK_TIMEOUT);
         if (!$recordlock) {
@@ -219,6 +287,9 @@ class price_book {
         try {
             $transaction = $this->db->start_delegated_transaction();
             try {
+                if ($first !== null) {
+                    $first();
+                }
                 $this->db->set_field(price::TABLE, 'currency', $currency, ['provider' => $provider]);
                 $counts = [
                     'rates' => $this->db->count_records(price::TABLE, ['provider' => $provider]),
@@ -234,6 +305,8 @@ class price_book {
             $summarylock->release();
             $recordlock->release();
         }
+        // Figures held for the routing path were worked out in the old currency.
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
 
         return $counts;
     }
@@ -324,11 +397,19 @@ class price_book {
                 continue;
             }
             $price = $this->find($provider, $row->model === '-' ? null : $row->model, (int) $row->daystart);
-            $priced = $price !== null && ((int) $row->knowncalls > 0 || (int) $row->images > 0);
-            $row->cost = $priced
-                ? (float) ($price->cost((int) $row->prompttokens, (int) $row->completiontokens, (int) $row->images) ?? 0.0)
-                : 0.0;
-            $row->costedcalls = $priced ? max((int) $row->knowncalls, (int) $row->images > 0 ? (int) $row->calls : 0) : 0;
+            // A rate that exists is not a rate that can price this: a rate for images
+            // alone says nothing about a day of text. What cannot be priced is not
+            // free, so it stays unpriced, exactly as it would in the detail.
+            $cost = $price === null || ((int) $row->knowncalls === 0 && (int) $row->images === 0)
+                ? null
+                : $price->cost((int) $row->prompttokens, (int) $row->completiontokens, (int) $row->images);
+            $priced = $cost !== null;
+            $row->cost = $priced ? (float) $cost : 0.0;
+            // Which calls the figure covers: the ones with known usage when tokens are
+            // priced, every call when only images are, since a day priced by its
+            // images alone was a day of image calls.
+            $tokenspriced = $price !== null && ($price->get('promptrate') !== null || $price->get('completionrate') !== null);
+            $row->costedcalls = $priced ? ($tokenspriced ? (int) $row->knowncalls : (int) $row->calls) : 0;
             $row->currency = $priced ? $price->get('currency') : '-';
 
             $key = [];

@@ -623,4 +623,20 @@ final class check_test extends \advanced_testcase {
 
         $this->assertSame(result::INFO, $result->get_status());
     }
+
+
+    public function test_calls_recorded_in_another_currency_than_the_rates_are_reported(): void {
+        global $DB;
+        $this->rate();
+        $this->budget_rule();
+        $this->request(1.0);
+        // One call recorded in yen against dollar rates: a correction that did not
+        // reach it, or one that it slipped past.
+        $DB->set_field(usage_recorder::ATTEMPT_TABLE, 'currency', 'JPY', ['model' => 'gpt-4o']);
+
+        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::WARNING, $result->get_status());
+        $this->assertStringContainsString('OpenAI', $result->get_summary());
+    }
 }

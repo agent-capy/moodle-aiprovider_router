@@ -201,4 +201,44 @@ final class person_reader_test extends \advanced_testcase {
         $this->assertObjectNotHasProperty('hint', $holders[0]);
         $this->assertSame(5, (int) $holders[0]->scopeid);
     }
+
+
+    public function test_a_request_nobody_answered_shows_the_last_target_it_was_tried_at(): void {
+        $request = $this->generator->create_request([
+            'userid' => 5, 'state' => request_state::FAILED, 'answeredby' => null,
+            'timestarted' => $this->now - 10, 'timeended' => $this->now,
+        ]);
+        $this->generator->create_attempt([
+            'requestid' => $request->id, 'targetid' => 101, 'targetname' => 'First', 'model' => 'a',
+            'state' => attempt_state::FAILED, 'timeended' => $this->now - 5,
+        ]);
+        $this->generator->create_attempt([
+            'requestid' => $request->id, 'targetid' => 102, 'targetname' => 'Last', 'model' => 'b',
+            'state' => attempt_state::FAILED, 'timeended' => $this->now,
+        ]);
+        [$from, $to] = $this->week();
+
+        $row = $this->reader->get_requests(5, $from, $to)[0];
+
+        // Nothing answered, so the last one asked, as the request page says.
+        $this->assertSame(102, $row->targetid);
+        $this->assertSame('Last', $row->targetname);
+        $this->assertSame('b', $row->model);
+    }
+
+    public function test_a_request_shows_the_target_that_answered_over_a_later_failure(): void {
+        $request = $this->generator->create_request([
+            'userid' => 5, 'answeredby' => 101, 'timestarted' => $this->now - 10, 'timeended' => $this->now,
+        ]);
+        $this->generator->create_attempt([
+            'requestid' => $request->id, 'targetid' => 101, 'targetname' => 'Answered', 'timeended' => $this->now - 5,
+        ]);
+        $this->generator->create_attempt([
+            'requestid' => $request->id, 'targetid' => 102, 'targetname' => 'Later', 'state' => attempt_state::FAILED,
+            'timeended' => $this->now,
+        ]);
+        [$from, $to] = $this->week();
+
+        $this->assertSame(101, $this->reader->get_requests(5, $from, $to)[0]->targetid);
+    }
 }

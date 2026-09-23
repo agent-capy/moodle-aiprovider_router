@@ -85,9 +85,13 @@ class person_reader extends reader {
      */
     public function get_days(int $userid, int $from, int $to): array {
         $fields = ['daystart', 'actionname', 'targetname', 'model', 'keysource'];
+        [$summary, $detail] = $this->consistently(fn() => [
+            $this->summarised($fields, $from, $to, null, null, $userid),
+            $this->detailed($fields, $from, $to, null, null, $userid),
+        ]);
         $rows = [];
-        $this->collect($rows, $fields, $this->summarised($fields, $from, $to, null, null, $userid));
-        $this->collect($rows, $fields, $this->detailed($fields, $from, $to, null, null, $userid));
+        $this->collect($rows, $fields, $summary);
+        $this->collect($rows, $fields, $detail);
         usort($rows, fn($a, $b) => [$b->daystart, $a->actionname] <=> [$a->daystart, $b->actionname]);
 
         return $rows;
@@ -150,13 +154,18 @@ class person_reader extends reader {
                 'costs' => [],
             ];
         }
+        $answered = [];
         foreach ($attempts as $attempt) {
             $row = $rows[(int) $attempt->requestid];
-            // The last one asked, until one answers.
-            if ($row->targetid === null || $attempt->state === attempt_state::SUCCEEDED) {
+            // The one that answered; until one does, the last one asked. Attempts come
+            // in order, so each failed one replaces the one before it.
+            if (!isset($answered[$row->id])) {
                 $row->targetid = (int) $attempt->targetid;
                 $row->targetname = $attempt->targetname;
                 $row->model = $attempt->model;
+                if ($attempt->state === attempt_state::SUCCEEDED) {
+                    $answered[$row->id] = true;
+                }
             }
             if ((int) $attempt->usageknown === 1) {
                 $row->prompttokens = (int) $row->prompttokens + (int) $attempt->prompttokens;

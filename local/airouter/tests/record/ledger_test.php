@@ -376,4 +376,64 @@ final class ledger_test extends \advanced_testcase {
         $this->assertSame(45, ledger::longest_reach_days($DB));
         $this->assertSame(31, ledger::reach_of(ledger::PERIOD_MONTH, 0), 'A month is counted as the most it can be.');
     }
+
+    /**
+     * Run something on a second database connection, as another process would.
+     *
+     * @param \Closure $operation What to run; it is given the other connection.
+     * @return mixed What it returned.
+     */
+    private function separately(\Closure $operation): mixed {
+        global $DB, $CFG;
+        $original = $DB;
+        $other = \moodle_database::get_driver_instance($CFG->dbtype, $CFG->dblibrary);
+        $other->connect($CFG->dbhost, $CFG->dbuser, $CFG->dbpass, $CFG->dbname, $CFG->prefix, $CFG->dboptions);
+        try {
+            $DB = $other;
+
+            return $operation($other);
+        } finally {
+            $DB = $original;
+            $other->dispose();
+        }
+    }
+
+    public function test_a_budget_keeps_its_spending_when_the_summariser_commits_between_the_reads(): void {
+        global $DB;
+        $this->preventResetByRollback();
+        $this->spend(9.0, ['ended' => $this->now - DAYSECS]);
+        $passes = 0;
+        $ledger = new ledger($DB, true, null, function (string $point) use (&$passes): void {
+            if ($point === 'summarised' && $passes++ === 0) {
+                $this->separately(fn($db) => (new summariser($db))->run($this->now));
+            }
+        });
+
+        $measured = $ledger->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now);
+        $held = $ledger->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now + 1);
+
+        // Nine dollars spent is nine dollars spent, whichever table it sat in while
+        // it was being read, and what the cache holds is the same figure.
+        $this->assertEqualsWithDelta(9.0, $measured->get_amount('aiprovider_mock'), 0.000001);
+        $this->assertTrue($measured->has_reached(8.0, ledger::METRIC_COST, 'aiprovider_mock'));
+        $this->assertSame(1, $measured->requests);
+        $this->assertEqualsWithDelta(9.0, $held->get_amount('aiprovider_mock'), 0.000001);
+    }
+
+    public function test_what_each_course_spent_survives_the_summariser_committing_between_the_reads(): void {
+        global $DB;
+        $this->preventResetByRollback();
+        $this->spend(3.0, ['courseid' => 7, 'ended' => $this->now - DAYSECS]);
+        [$from, $to] = $this->week();
+        $passes = 0;
+        $ledger = new ledger($DB, false, null, function (string $point) use (&$passes): void {
+            if ($point === 'summarised' && $passes++ === 0) {
+                $this->separately(fn($db) => (new summariser($db))->run($this->now));
+            }
+        });
+
+        $each = $ledger->measure_each(ledger::SCOPE_COURSE, $from, $to);
+
+        $this->assertEqualsWithDelta(3.0, $each[7]->get_amount('aiprovider_mock'), 0.000001);
+    }
 }

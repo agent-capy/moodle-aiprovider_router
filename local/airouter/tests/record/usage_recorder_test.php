@@ -245,4 +245,76 @@ final class usage_recorder_test extends \advanced_testcase {
         $this->assertFalse((new usage(5, null))->is_known());
         $this->assertTrue((new usage(0, 0))->is_known(), 'Zero is a count.');
     }
+
+    /**
+     * Run something on a second database connection, as another process would.
+     *
+     * @param \Closure $operation What to run; it is given the other connection.
+     * @return mixed What it returned.
+     */
+    private function separately(\Closure $operation): mixed {
+        global $DB, $CFG;
+        $original = $DB;
+        $other = \moodle_database::get_driver_instance($CFG->dbtype, $CFG->dblibrary);
+        $other->connect($CFG->dbhost, $CFG->dbuser, $CFG->dbpass, $CFG->dbname, $CFG->prefix, $CFG->dboptions);
+        try {
+            $DB = $other;
+
+            return $operation($other);
+        } finally {
+            $DB = $original;
+            $other->dispose();
+        }
+    }
+
+    public function test_an_ending_priced_before_a_correction_cannot_be_written_after_it(): void {
+        global $DB;
+        $this->preventResetByRollback();
+        $this->rate(1.0);
+        // A book that, once it has looked the rate up for the ending, lets another
+        // connection correct the provider to yen. The correction holds the record
+        // lock for its run, and so does the ending: one of them waits.
+        $book = new class ($DB) extends \local_airouter\price_book {
+            /** @var \Closure|null What to do once the rate has been looked up. */
+            public ?\Closure $pause = null;
+
+            /** @var bool Whether the correction found the record busy. */
+            public bool $busy = false;
+
+            #[\Override]
+            public function find(string $provider, ?string $model, int $when): ?\local_airouter\price {
+                $rate = parent::find($provider, $model, $when);
+                if ($this->pause !== null) {
+                    $pause = $this->pause;
+                    $this->pause = null;
+                    try {
+                        $pause();
+                    } catch (\moodle_exception $e) {
+                        if ($e->errorcode !== 'rates:error:busy') {
+                            throw $e;
+                        }
+                        $this->busy = true;
+                    }
+                }
+
+                return $rate;
+            }
+        };
+        $book->pause = fn() => $this->separately(
+            fn($db) => (new \local_airouter\price_book($db))->recost_provider('aiprovider_openai', 'JPY'),
+        );
+        $recorder = new usage_recorder($DB, $book, fn() => $this->clock);
+        $request = $recorder->begin_request($this->context());
+        $id = $recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_SITE, null);
+
+        $recorder->end_attempt($id, attempt_state::SUCCEEDED, new usage(1000000, 0), 'm', null, 'aiprovider_openai');
+
+        // The correction could not get in while the ending held the lock, so it is
+        // run afterwards, as the administrator's next attempt would be.
+        $this->assertTrue($book->busy, 'The correction waited on the ending and was refused.');
+        $this->separately(fn($db) => (new \local_airouter\price_book($db))->recost_provider('aiprovider_openai', 'JPY'));
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $id], '*', MUST_EXIST);
+        $this->assertSame('JPY', $row->currency, 'The ending was seen by the correction that came after it.');
+        $this->assertSame('JPY', (new \local_airouter\price_book($DB))->currency_of('aiprovider_openai'));
+    }
 }

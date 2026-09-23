@@ -333,4 +333,121 @@ final class price_test extends \advanced_testcase {
         $this->assertNull($attempt->cost);
         $this->assertNull($attempt->currency);
     }
+
+
+    public function test_a_correction_that_fails_leaves_the_rate_and_the_record_as_they_were(): void {
+        global $DB;
+        // A real rollback is what is being tested, and inside the transaction PHPUnit
+        // wraps a test in on PostgreSQL a nested rollback undoes nothing until the end.
+        $this->preventResetByRollback();
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $now = time();
+        $rate = $this->add('aiprovider_sakuraaiengine', '', 1.0, 2.0);
+        $request = $generator->create_request(['timestarted' => $now - 100, 'timeended' => $now - 90]);
+        $generator->create_attempt([
+            'requestid' => $request->id, 'targetprovider' => 'aiprovider_sakuraaiengine', 'model' => 'm',
+            'prompttokens' => 1000000, 'completiontokens' => 0, 'cost' => 1.0, 'currency' => 'USD',
+            'timestarted' => $now - 99, 'timeended' => $now - 90,
+        ]);
+        // A book whose recalculation breaks half way, once.
+        $book = new class ($DB) extends price_book {
+            /** @var bool Whether to break the next recalculation. */
+            public bool $break = true;
+
+            #[\Override]
+            protected function recost_summaries(string $provider): int {
+                if ($this->break) {
+                    $this->break = false;
+                    throw new \RuntimeException('the summary could not be read');
+                }
+
+                return parent::recost_summaries($provider);
+            }
+        };
+
+        // The rate is being corrected to yen, in one operation with the recalculation.
+        $rate->set('currency', 'JPY');
+        $rate->set('promptrate', 100.0);
+        try {
+            $book->save_rate($rate, false);
+            $this->fail('The failure should have surfaced.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('the summary could not be read', $e->getMessage());
+        }
+
+        // Nothing of it was saved: not the rate, not the relabelling, not the costs.
+        $stored = price::get_record(['id' => $rate->get('id')]);
+        $this->assertSame('USD', $stored->get('currency'));
+        $this->assertEquals(1.0, $stored->get('promptrate'));
+        $attempt = $DB->get_record(\local_airouter\record\usage_recorder::ATTEMPT_TABLE, ['model' => 'm']);
+        $this->assertSame('USD', $attempt->currency);
+        $this->assertEqualsWithDelta(1.0, (float) $attempt->cost, 0.000001);
+
+        // Sent again once the trouble has passed, the same operation corrects everything.
+        $changed = $book->save_rate($rate, false);
+        $this->assertTrue($changed['recosted']);
+        $this->assertSame('JPY', price::get_record(['id' => $rate->get('id')])->get('currency'));
+        $attempt = $DB->get_record(\local_airouter\record\usage_recorder::ATTEMPT_TABLE, ['model' => 'm']);
+        $this->assertSame('JPY', $attempt->currency);
+        $this->assertEqualsWithDelta(100.0, (float) $attempt->cost, 0.000001);
+    }
+
+    public function test_saving_a_rate_corrects_a_record_that_disagrees_with_the_rates(): void {
+        global $DB;
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $now = time();
+        // The rates say yen; a call was somehow recorded in dollars, as one that ended
+        // during a correction can be. Saving the rate again, unchanged, puts it right.
+        $rate = $this->add('aiprovider_sakuraaiengine', '', 100.0, 200.0, currency: 'JPY');
+        $request = $generator->create_request(['timestarted' => $now - 100, 'timeended' => $now - 90]);
+        $generator->create_attempt([
+            'requestid' => $request->id, 'targetprovider' => 'aiprovider_sakuraaiengine', 'model' => 'm',
+            'prompttokens' => 1000000, 'completiontokens' => 0, 'cost' => 1.0, 'currency' => 'USD',
+            'timestarted' => $now - 99, 'timeended' => $now - 90,
+        ]);
+        $book = new price_book($DB);
+        $this->assertTrue($book->has_costs_in_another_currency('aiprovider_sakuraaiengine', 'JPY'));
+
+        $changed = $book->save_rate($rate, false);
+
+        $this->assertTrue($changed['recosted']);
+        $attempt = $DB->get_record(\local_airouter\record\usage_recorder::ATTEMPT_TABLE, ['model' => 'm']);
+        $this->assertSame('JPY', $attempt->currency);
+        $this->assertEqualsWithDelta(100.0, (float) $attempt->cost, 0.000001);
+        $this->assertFalse($book->has_costs_in_another_currency('aiprovider_sakuraaiengine', 'JPY'));
+        // And a rate saved into a record that agrees with it recalculates nothing.
+        $this->assertFalse($book->save_rate($rate, false)['recosted']);
+    }
+
+    public function test_a_correction_does_not_make_an_unpriced_call_free(): void {
+        global $DB;
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $now = time();
+        // A rate for images alone, and a call that used tokens and produced no image:
+        // the rate exists and cannot price the call, in the detail and in the summary.
+        $this->add('aiprovider_sakuraaiengine', '', null, null, 0, 2.0);
+        foreach ([$now - 3 * DAYSECS, $now - 100] as $when) {
+            $request = $generator->create_request(['timestarted' => $when - 10, 'timeended' => $when]);
+            $generator->create_attempt([
+                'requestid' => $request->id, 'targetprovider' => 'aiprovider_sakuraaiengine', 'model' => 'm',
+                'prompttokens' => 1000, 'completiontokens' => 0, 'images' => 0, 'cost' => null, 'currency' => null,
+                'timestarted' => $when - 8, 'timeended' => $when,
+            ]);
+        }
+        (new \local_airouter\record\summariser($DB))->run($now);
+        $table = \local_airouter\record\summariser::TABLE;
+        $this->assertGreaterThan(0, $DB->count_records($table, ['targetprovider' => 'aiprovider_sakuraaiengine']));
+
+        (new price_book($DB))->recost_provider('aiprovider_sakuraaiengine', 'JPY');
+
+        $spend = (new \local_airouter\record\ledger($DB, false))
+            ->measure(\local_airouter\record\ledger::SCOPE_SITE, 0, $now - 7 * DAYSECS, $now);
+        $this->assertSame(2, $spend->get_calls_to('aiprovider_sakuraaiengine'));
+        $this->assertSame(0, $spend->get_costed_calls('aiprovider_sakuraaiengine'), 'What cannot be priced is not free.');
+        $this->assertFalse($spend->is_known(\local_airouter\record\ledger::METRIC_COST, 'aiprovider_sakuraaiengine'));
+        foreach ($DB->get_records($table, ['targetprovider' => 'aiprovider_sakuraaiengine']) as $summary) {
+            $this->assertSame('-', $summary->currency);
+            $this->assertSame(0, (int) $summary->costedcalls);
+        }
+    }
 }

@@ -57,6 +57,15 @@ class summariser {
     /** @var string Config holding the first moment this site can still account for. Shared with the older record. */
     public const HISTORY_SETTING = 'historyfrom';
 
+    /**
+     * @var string Config counting how many times the summary has changed.
+     *
+     * Bumped inside the transaction that applies facts, and after a purge, so that a
+     * reader which read the summary and then the detail can tell whether anything
+     * moved between the two, and read again if it did.
+     */
+    public const GENERATION_SETTING = 'summarygeneration';
+
     /** @var int How many ids one marking statement carries. */
     protected const CHUNK = 500;
 
@@ -218,6 +227,9 @@ class summariser {
             $this->mark(usage_recorder::REQUEST_TABLE, array_keys($requests));
             $this->mark(usage_recorder::ATTEMPT_TABLE, array_keys($attempts));
             $this->at('marked');
+            if ($requests || $attempts) {
+                self::bump_generation();
+            }
             $transaction->allow_commit();
         } catch (\Throwable $e) {
             $this->pending = [];
@@ -263,6 +275,9 @@ class summariser {
         if ($requests > 0) {
             $this->db->delete_records_select(usage_recorder::REQUEST_TABLE, $select, $params);
         }
+        // Only applied rows go, and a reader never takes an applied row from the
+        // detail, so a purge moves nothing a reader could see. Said here so that the
+        // generation is understood to count changes to what can be read, not writes.
 
         return $attempts + $requests;
     }
@@ -283,9 +298,37 @@ class summariser {
         if ($count > 0) {
             $this->db->delete_records_select(self::TABLE, 'daystart < :cutoff', $params);
             self::record_history_from($params['cutoff']);
+            self::bump_generation();
         }
 
         return $count;
+    }
+
+    /**
+     * The number of times the summary has changed, read from the database itself.
+     *
+     * Not through get_config(), which a process keeps a copy of: what is wanted here
+     * is whether another process has changed the summary since a moment ago.
+     *
+     * @param \moodle_database $db The database to read.
+     * @return int The generation.
+     */
+    public static function get_generation(\moodle_database $db): int {
+        $value = $db->get_field('config_plugins', 'value', ['plugin' => 'local_airouter', 'name' => self::GENERATION_SETTING]);
+
+        return $value === false || $value === null ? 0 : (int) $value;
+    }
+
+    /**
+     * Note that the summary has changed.
+     *
+     * Written with set_config() so that the row exists and the config caches are
+     * told, and read back directly, so that no cache stands between two processes.
+     */
+    protected static function bump_generation(): void {
+        global $DB;
+
+        set_config(self::GENERATION_SETTING, self::get_generation($DB) + 1, 'local_airouter');
     }
 
     /**

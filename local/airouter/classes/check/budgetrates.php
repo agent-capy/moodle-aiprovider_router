@@ -99,6 +99,20 @@ class budgetrates extends base {
             );
         }
 
+        $disagreeing = $this->count_calls_in_another_currency($book);
+        if ($disagreeing['calls'] > 0) {
+            // Recorded in a currency the provider's rates are not in now, so a budget
+            // cannot weigh them. Saving the provider's rate again works them out again.
+            return new result(
+                result::WARNING,
+                get_string('check:budgetrates:othercurrency', 'local_airouter', [
+                    'calls' => $disagreeing['calls'],
+                    'providers' => implode(', ', $disagreeing['providers']),
+                ]),
+                get_string('check:budgetrates:othercurrency_details', 'local_airouter'),
+            );
+        }
+
         $counts = $DB->get_record_sql(
             'SELECT COUNT(*) AS total,
                     SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costed
@@ -132,6 +146,32 @@ class budgetrates extends base {
         }
 
         return new result(result::OK, get_string('check:budgetrates:ok', 'local_airouter', $a));
+    }
+
+    /**
+     * Calls recorded in a currency other than the one their provider's rates are in.
+     *
+     * @param price_book $book The rates.
+     * @return array calls, and the names of the providers concerned.
+     */
+    protected function count_calls_in_another_currency(price_book $book): array {
+        global $DB;
+
+        $calls = 0;
+        $providers = [];
+        foreach ($book->get_provider_currencies() as $provider => $currency) {
+            $count = $DB->count_records_select(
+                usage_recorder::ATTEMPT_TABLE,
+                'targetprovider = :provider AND currency IS NOT NULL AND currency <> :currency',
+                ['provider' => $provider, 'currency' => $currency],
+            );
+            if ($count > 0) {
+                $calls += $count;
+                $providers[] = usage_formatter::provider_name($provider);
+            }
+        }
+
+        return ['calls' => $calls, 'providers' => $providers];
     }
 
     /**
