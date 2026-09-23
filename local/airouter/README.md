@@ -486,6 +486,19 @@ opened the moment the request arrives, before the rate limit and before the rule
 and closed when the outcome is known. Each attempt row is written before the provider
 is called and finished when it comes back -- or does not.
 
+When the last provider has come back, its attempt and the request are closed together,
+in one short database transaction, so that the database makes one write durable rather
+than two. If that transaction cannot be committed, each is written again on its own, so
+that what the provider reported using is not lost because the request could not be
+closed. An attempt the router moves on from is closed on its own before the next
+provider is asked.
+
+These rows are only as durable as the transaction they are written in. If the code that
+asks for AI already has a database transaction open, everything the router records --
+including the rows written before a provider is called -- becomes visible to anyone
+else only when that code commits, and disappears if it rolls back. The router does not
+commit a transaction it did not open.
+
 That last part is the point. A provider that takes the tokens and then answers a
 failure has still charged for them, and a bill is made of calls, not of answers. So
 every call leaves a row: the ones that answered, the ones that answered with nothing,

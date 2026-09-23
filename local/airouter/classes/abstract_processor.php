@@ -17,7 +17,9 @@
 namespace local_airouter;
 
 use local_airouter\exception\declined_request;
+use local_airouter\record\attempt_ending;
 use local_airouter\record\attempt_state;
+use local_airouter\record\request_ending;
 use local_airouter\record\request_state;
 use local_airouter\record\usage;
 use local_airouter\record\usage_recorder;
@@ -276,13 +278,9 @@ abstract class abstract_processor extends \core_ai\process_base {
                 $threw = true;
                 $this->report_target_failure($target, $e);
                 // What it used, if anything, is unknown: not nothing.
-                $this->get_recorder()->end_attempt(
+                $this->end_attempt(
                     $attemptid,
-                    attempt_state::THREW,
-                    usage::unknown(),
-                    null,
-                    null,
-                    self::component_of($target),
+                    new attempt_ending(attempt_state::THREW, usage::unknown(), null, null, self::component_of($target)),
                 );
                 continue;
             }
@@ -290,8 +288,7 @@ abstract class abstract_processor extends \core_ai\process_base {
             if (!$response->get_success()) {
                 // A failure can still have been charged for, and some targets say so.
                 $failed = $response->get_response_data();
-                $this->get_recorder()->end_attempt(
-                    $attemptid,
+                $ending = new attempt_ending(
                     attempt_state::FAILED,
                     $this->usage_of($failed, false),
                     self::modelled($failed['model'] ?? null),
@@ -308,10 +305,11 @@ abstract class abstract_processor extends \core_ai\process_base {
                         'byokkeyrejected:' . $candidate->keysource,
                         self::REASON_KEY_REJECTED,
                     );
-                    $this->end_request(request_state::FAILED);
+                    $this->end_last_attempt($attemptid, $ending, request_state::FAILED);
 
                     return $this->finalise($outcome);
                 }
+                $this->end_attempt($attemptid, $ending);
                 $last = $response;
                 continue;
             }
@@ -320,15 +318,18 @@ abstract class abstract_processor extends \core_ai\process_base {
 
             $data = $response->get_response_data();
             if ($this->has_content($data)) {
-                $this->get_recorder()->end_attempt(
+                $this->end_last_attempt(
                     $attemptid,
-                    attempt_state::SUCCEEDED,
-                    $this->usage_of($data, true),
-                    self::modelled($data['model'] ?? null),
-                    null,
-                    self::component_of($target),
+                    new attempt_ending(
+                        attempt_state::SUCCEEDED,
+                        $this->usage_of($data, true),
+                        self::modelled($data['model'] ?? null),
+                        null,
+                        self::component_of($target),
+                    ),
+                    request_state::SUCCEEDED,
+                    (int) $target->id,
                 );
-                $this->end_request(request_state::SUCCEEDED, (int) $target->id);
 
                 return ['success' => true] + $data;
             }
@@ -336,8 +337,7 @@ abstract class abstract_processor extends \core_ai\process_base {
             // Nothing to show. Whether the token budget ran out or the model said
             // nothing, this call was made and charged for, and that is what the attempt
             // records; which of the two it was is the request's reason.
-            $this->get_recorder()->end_attempt(
-                $attemptid,
+            $ending = new attempt_ending(
                 attempt_state::EMPTY,
                 $this->usage_of($data, false),
                 self::modelled($data['model'] ?? null),
@@ -353,6 +353,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                 // to this target and to whatever key paid for it -- not to whichever
                 // one happens to answer next. So it gets a row of its own, marked as
                 // not being a request: the person asked once.
+                $this->end_attempt($attemptid, $ending);
                 $last = $response;
 
                 continue;
@@ -364,7 +365,7 @@ abstract class abstract_processor extends \core_ai\process_base {
             $outcome = $this->fail(502, 'emptyresponse', self::REASON_EMPTY);
             // The target still charged for the thinking it did, so the tokens are
             // recorded even though the user got nothing readable.
-            $this->end_request(request_state::FAILED);
+            $this->end_last_attempt($attemptid, $ending, request_state::FAILED);
 
             return $this->finalise($outcome);
         }
@@ -396,10 +397,78 @@ abstract class abstract_processor extends \core_ai\process_base {
         if ($this->requestid === null) {
             return;
         }
-        $resolver = $this->resolver ??= $this->get_resolver();
-        $succeeded = $state === request_state::SUCCEEDED;
+        $ending = $this->request_ending($state, $answeredby);
         $this->get_recorder()->end_request(
             $this->requestid,
+            $ending->state,
+            $ending->reason,
+            $ending->errorcode,
+            $ending->answeredby,
+            $ending->rule,
+            $ending->keysource,
+            $ending->attempts,
+        );
+        $this->requestid = null;
+    }
+
+    /**
+     * Close an attempt the request is moving on from.
+     *
+     * Written on its own, before the next target is asked, so that what this one used
+     * is on record whatever happens to the next call.
+     *
+     * @param int|null $attemptid The attempt, or null when it could not be recorded.
+     * @param attempt_ending $ending How it ended.
+     */
+    protected function end_attempt(?int $attemptid, attempt_ending $ending): void {
+        $this->get_recorder()->end_attempt(
+            $attemptid,
+            $ending->state,
+            $ending->usage,
+            $ending->model,
+            $ending->errorcode,
+            $ending->component,
+        );
+    }
+
+    /**
+     * Close the last attempt and the request with it, once.
+     *
+     * After the target has answered nothing more is going to be asked, so the two
+     * endings are made durable together (usage_recorder::end_last_attempt()).
+     *
+     * @param int|null $attemptid The last attempt, or null when it could not be recorded.
+     * @param attempt_ending $ending How it ended.
+     * @param string $state How the request ended, one of request_state::TERMINAL.
+     * @param int|null $answeredby The target whose answer was used, for a success.
+     */
+    protected function end_last_attempt(?int $attemptid, attempt_ending $ending, string $state, ?int $answeredby = null): void {
+        if ($this->requestid === null) {
+            $this->end_attempt($attemptid, $ending);
+
+            return;
+        }
+        $this->get_recorder()->end_last_attempt(
+            $attemptid,
+            $ending,
+            $this->requestid,
+            $this->request_ending($state, $answeredby),
+        );
+        $this->requestid = null;
+    }
+
+    /**
+     * How the request ended, as the record keeps it.
+     *
+     * @param string $state One of request_state::TERMINAL.
+     * @param int|null $answeredby The target whose answer was used, for a success.
+     * @return request_ending The ending.
+     */
+    protected function request_ending(string $state, ?int $answeredby): request_ending {
+        $resolver = $this->resolver ??= $this->get_resolver();
+        $succeeded = $state === request_state::SUCCEEDED;
+
+        return new request_ending(
             $state,
             $succeeded ? null : $this->reason,
             $succeeded ? null : $this->failurecode,
@@ -408,7 +477,6 @@ abstract class abstract_processor extends \core_ai\process_base {
             $resolver->get_keysource(),
             $this->attemptcount,
         );
-        $this->requestid = null;
     }
 
     /**

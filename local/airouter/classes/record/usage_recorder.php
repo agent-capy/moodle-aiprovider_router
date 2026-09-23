@@ -219,50 +219,11 @@ class usage_recorder {
         if ($attemptid === null) {
             return;
         }
-        if (!in_array($state, attempt_state::TERMINAL, true)) {
-            throw new \coding_exception('Not a state an attempt can end in: ' . $state);
-        }
+        $ending = new attempt_ending($state, $usage, $model, $errorcode, $component);
         $lock = null;
         try {
-            $lock = self::lock_factory()->get_lock(self::LOCK, self::LOCK_TIMEOUT) ?: null;
-            if ($lock === null) {
-                // Written all the same, since an ending that is lost is worse than a
-                // wait: but written without a price. The lock is held by something
-                // that may be pricing this provider's record again, and a price
-                // worked out beside it could be in a currency the rates no longer
-                // say. The usage is kept and the pricing left to whoever holds the
-                // lock next. Counted as a gap, so that the status check says so.
-                $this->note_failure(
-                    'take the record lock before closing an attempt',
-                    new \RuntimeException('the record lock was not obtained in ' . self::LOCK_TIMEOUT . ' seconds'),
-                );
-            }
-            $now = $this->now();
-            $price = $lock === null ? null : $this->prices->find($component, $model, $now);
-            $this->db->execute(
-                'UPDATE {' . self::ATTEMPT_TABLE . '}
-                    SET state = :state, errorcode = :errorcode, model = :model,
-                        prompttokens = :prompttokens, completiontokens = :completiontokens,
-                        images = :images, usageknown = :usageknown,
-                        cost = :cost, currency = :currency, unpriced = :unpriced, timeended = :timeended
-                  WHERE id = :id AND state = :started',
-                [
-                    'state' => $state,
-                    'errorcode' => $errorcode,
-                    'model' => $model,
-                    'prompttokens' => $usage->prompttokens,
-                    'completiontokens' => $usage->completiontokens,
-                    'images' => $usage->images,
-                    'usageknown' => (int) $usage->is_known(),
-                    'cost' => $price?->cost($usage->prompttokens, $usage->completiontokens, $usage->images),
-                    // The currency of the rate, which is the one the provider bills in.
-                    'currency' => $price?->get('currency'),
-                    'unpriced' => $lock === null ? 1 : 0,
-                    'timeended' => $now,
-                    'id' => $attemptid,
-                    'started' => attempt_state::STARTED,
-                ],
-            );
+            $lock = $this->take_lock('take the record lock before closing an attempt');
+            $this->write_attempt_ending($attemptid, $ending, $lock !== null);
             if ($lock === null) {
                 self::note_deferred();
             } else {
@@ -274,6 +235,247 @@ class usage_recorder {
         } finally {
             $lock?->release();
         }
+    }
+
+    /**
+     * Close the last attempt of a request and the request itself, in one commit.
+     *
+     * The same two writes end_attempt() and end_request() make, made in one short
+     * transaction after the target has answered, so that the database makes one write
+     * durable instead of two. Nothing else about them changes: the rate is looked up
+     * and both rows written under the record lock, and the lock is let go only once the
+     * commit has happened, because the lock is what keeps a currency correction and a
+     * privacy deletion apart from an ending, and a transaction keeps nobody out. Rows
+     * that have already ended, or have gone, are left as they are.
+     *
+     * Only the last attempt is closed this way. An attempt the request moves on from is
+     * closed on its own before the next target is asked, so that what it used is on
+     * record whatever happens to the next call.
+     *
+     * Two cases are written the way they always have been, one write after the other.
+     * One is a caller that has a transaction of its own open: only the caller can make
+     * anything durable then, and a rollback in here would take the caller's work with
+     * it. The other is when only one of the two rows exists to be written.
+     *
+     * When the two writes cannot be committed together, what was written is rolled back
+     * and each is made again on its own, still under the lock, exactly as the separate
+     * methods make them. An attempt's ending must not be lost because its request's
+     * could not be written, and the endings are conditional, so writing one again after
+     * a commit whose answer was lost changes nothing that did happen. Pricing endings
+     * left without a price by others is done afterwards and apart, so that its failure
+     * cannot take this ending with it.
+     *
+     * @param int|null $attemptid The last attempt, or null when it could not be recorded.
+     * @param attempt_ending $attempt How the attempt ended.
+     * @param int|null $requestid The request, or null when it could not be recorded.
+     * @param request_ending $request How the request ended.
+     */
+    public function end_last_attempt(?int $attemptid, attempt_ending $attempt, ?int $requestid, request_ending $request): void {
+        if ($attemptid === null || $requestid === null || $this->db->is_transaction_started()) {
+            $this->end_attempt(
+                $attemptid,
+                $attempt->state,
+                $attempt->usage,
+                $attempt->model,
+                $attempt->errorcode,
+                $attempt->component,
+            );
+            $this->end_request(
+                $requestid,
+                $request->state,
+                $request->reason,
+                $request->errorcode,
+                $request->answeredby,
+                $request->rule,
+                $request->keysource,
+                $request->attempts,
+            );
+
+            return;
+        }
+
+        $lock = null;
+        try {
+            $lock = $this->take_lock('take the record lock before closing the last attempt');
+            if (!$this->write_both($attemptid, $attempt, $requestid, $request, $lock !== null)) {
+                $this->write_again($attemptid, $attempt, $requestid, $request, $lock !== null);
+            } else if ($lock === null) {
+                self::note_deferred();
+            }
+            if ($lock !== null) {
+                try {
+                    $this->price_deferred();
+                } catch (\Throwable $e) {
+                    $this->note_failure('price the endings left without a price', $e);
+                }
+            }
+        } finally {
+            $lock?->release();
+        }
+    }
+
+    /**
+     * Write both endings in one transaction of this recorder's own, and commit it.
+     *
+     * @param int $attemptid The attempt.
+     * @param attempt_ending $attempt How it ended.
+     * @param int $requestid The request.
+     * @param request_ending $request How it ended.
+     * @param bool $locked Whether the record lock is held, which is what allows a price.
+     * @return bool True when both were committed; false when the transaction was undone.
+     */
+    protected function write_both(
+        int $attemptid,
+        attempt_ending $attempt,
+        int $requestid,
+        request_ending $request,
+        bool $locked,
+    ): bool {
+        $transaction = $this->db->start_delegated_transaction();
+        try {
+            $this->write_attempt_ending($attemptid, $attempt, $locked);
+            $this->write_request_ending($requestid, $request);
+            $this->commit($transaction);
+
+            return true;
+        } catch (\Throwable $e) {
+            $this->undo($transaction, $e);
+            $this->note_failure('close the last attempt and its request together', $e);
+
+            return false;
+        }
+    }
+
+    /**
+     * Make the transaction's work durable.
+     *
+     * @param \moodle_transaction $transaction The transaction this recorder opened.
+     */
+    protected function commit(\moodle_transaction $transaction): void {
+        $transaction->allow_commit();
+    }
+
+    /**
+     * Undo a transaction this recorder opened, and leave no transaction behind.
+     *
+     * Core's rollback throws the exception it is given once it has rolled back, which
+     * is caught here: the caller already has it. A commit or a rollback that itself
+     * failed leaves the transaction on core's stack, where everything written later in
+     * the request -- core's own record of the action included -- would join it and be
+     * thrown away at the end. The transaction on the stack is the one opened here and no
+     * other, because this is never done inside a caller's transaction, so clearing the
+     * stack clears nothing of anybody else's.
+     *
+     * @param \moodle_transaction $transaction The transaction.
+     * @param \Throwable $e What went wrong.
+     */
+    protected function undo(\moodle_transaction $transaction, \Throwable $e): void {
+        try {
+            if (!$transaction->is_disposed()) {
+                $transaction->rollback($e);
+            }
+        } catch (\Throwable $thrown) {
+            unset($thrown);
+        }
+        if ($this->db->is_transaction_started()) {
+            $this->db->force_transaction_rollback();
+        }
+    }
+
+    /**
+     * Write the two endings again, one at a time, after they could not be committed together.
+     *
+     * @param int $attemptid The attempt.
+     * @param attempt_ending $attempt How it ended.
+     * @param int $requestid The request.
+     * @param request_ending $request How it ended.
+     * @param bool $locked Whether the record lock is still held.
+     */
+    protected function write_again(
+        int $attemptid,
+        attempt_ending $attempt,
+        int $requestid,
+        request_ending $request,
+        bool $locked,
+    ): void {
+        try {
+            $this->write_attempt_ending($attemptid, $attempt, $locked);
+            if (!$locked) {
+                self::note_deferred();
+            }
+        } catch (\Throwable $e) {
+            $this->note_failure('close an attempt', $e);
+        }
+        try {
+            $this->write_request_ending($requestid, $request);
+        } catch (\Throwable $e) {
+            $this->note_failure('close a request', $e);
+        }
+    }
+
+    /**
+     * Take the record lock, or say that it could not be taken.
+     *
+     * An ending that cannot take it is written all the same, since an ending that is
+     * lost is worse than a wait: but written without a price. The lock is held by
+     * something that may be pricing this provider's record again, and a price worked
+     * out beside it could be in a currency the rates no longer say. The usage is kept
+     * and the pricing left to whoever holds the lock next. Counted as a gap, so that
+     * the status check says so.
+     *
+     * @param string $what What the lock was wanted for, for the failure count.
+     * @return \core\lock\lock|null The lock, or null when it was not obtained in time.
+     */
+    protected function take_lock(string $what): ?\core\lock\lock {
+        $lock = self::lock_factory()->get_lock(self::LOCK, self::LOCK_TIMEOUT) ?: null;
+        if ($lock === null) {
+            $this->note_failure(
+                $what,
+                new \RuntimeException('the record lock was not obtained in ' . self::LOCK_TIMEOUT . ' seconds'),
+            );
+        }
+
+        return $lock;
+    }
+
+    /**
+     * Write how an attempt ended, if it has not ended already.
+     *
+     * Priced only when the record lock is held; otherwise written without a price, for
+     * whoever holds the lock next.
+     *
+     * @param int $attemptid The attempt.
+     * @param attempt_ending $ending How it ended.
+     * @param bool $locked Whether the record lock is held.
+     */
+    protected function write_attempt_ending(int $attemptid, attempt_ending $ending, bool $locked): void {
+        $now = $this->now();
+        $usage = $ending->usage;
+        $price = $locked ? $this->prices->find($ending->component, $ending->model, $now) : null;
+        $this->db->execute(
+            'UPDATE {' . self::ATTEMPT_TABLE . '}
+                SET state = :state, errorcode = :errorcode, model = :model,
+                    prompttokens = :prompttokens, completiontokens = :completiontokens,
+                    images = :images, usageknown = :usageknown,
+                    cost = :cost, currency = :currency, unpriced = :unpriced, timeended = :timeended
+              WHERE id = :id AND state = :started',
+            [
+                'state' => $ending->state,
+                'errorcode' => $ending->errorcode,
+                'model' => $ending->model,
+                'prompttokens' => $usage->prompttokens,
+                'completiontokens' => $usage->completiontokens,
+                'images' => $usage->images,
+                'usageknown' => (int) $usage->is_known(),
+                'cost' => $price?->cost($usage->prompttokens, $usage->completiontokens, $usage->images),
+                // The currency of the rate, which is the one the provider bills in.
+                'currency' => $price?->get('currency'),
+                'unpriced' => $locked ? 0 : 1,
+                'timeended' => $now,
+                'id' => $attemptid,
+                'started' => attempt_state::STARTED,
+            ],
+        );
     }
 
     /**
@@ -384,36 +586,45 @@ class usage_recorder {
         if ($requestid === null) {
             return;
         }
-        if (!in_array($state, request_state::TERMINAL, true)) {
-            throw new \coding_exception('Not a state a request can end in: ' . $state);
-        }
+        $ending = new request_ending($state, $reason, $errorcode, $answeredby, $rule, $keysource, $attempts);
         try {
-            // Closed once, for the same reason an attempt ends once: the day a request
-            // is counted in is the day it was closed, and a retried closing must not
-            // move it to another.
-            $this->db->execute(
-                'UPDATE {' . self::REQUEST_TABLE . '}
-                    SET state = :state, reason = :reason, errorcode = :errorcode,
-                        answeredby = :answeredby, ruleid = :ruleid, rulename = :rulename,
-                        keysource = :keysource, attempts = :attempts, timeended = :timeended
-                  WHERE id = :id AND state = :open',
-                [
-                    'state' => $state,
-                    'reason' => $reason,
-                    'errorcode' => $errorcode,
-                    'answeredby' => $answeredby,
-                    'ruleid' => $rule === null ? null : (int) $rule->get('id'),
-                    'rulename' => $rule === null ? null : $rule->get('name'),
-                    'keysource' => $keysource,
-                    'attempts' => $attempts,
-                    'timeended' => $this->now(),
-                    'id' => $requestid,
-                    'open' => request_state::OPEN,
-                ],
-            );
+            $this->write_request_ending($requestid, $ending);
         } catch (\Throwable $e) {
             $this->note_failure('close a request', $e);
         }
+    }
+
+    /**
+     * Write how a request ended, if it has not ended already.
+     *
+     * Closed once, for the same reason an attempt ends once: the day a request is
+     * counted in is the day it was closed, and a retried closing must not move it to
+     * another.
+     *
+     * @param int $requestid The request.
+     * @param request_ending $ending How it ended.
+     */
+    protected function write_request_ending(int $requestid, request_ending $ending): void {
+        $this->db->execute(
+            'UPDATE {' . self::REQUEST_TABLE . '}
+                SET state = :state, reason = :reason, errorcode = :errorcode,
+                    answeredby = :answeredby, ruleid = :ruleid, rulename = :rulename,
+                    keysource = :keysource, attempts = :attempts, timeended = :timeended
+              WHERE id = :id AND state = :open',
+            [
+                'state' => $ending->state,
+                'reason' => $ending->reason,
+                'errorcode' => $ending->errorcode,
+                'answeredby' => $ending->answeredby,
+                'ruleid' => $ending->rule === null ? null : (int) $ending->rule->get('id'),
+                'rulename' => $ending->rule === null ? null : $ending->rule->get('name'),
+                'keysource' => $ending->keysource,
+                'attempts' => $ending->attempts,
+                'timeended' => $this->now(),
+                'id' => $requestid,
+                'open' => request_state::OPEN,
+            ],
+        );
     }
 
     /**
