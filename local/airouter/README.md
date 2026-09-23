@@ -928,6 +928,13 @@ after the key itself has gone, and which cannot be turned back into the key. A k
 wallets recognise goes back to its wallet whichever way it is entered and whatever is
 answered.
 
+Wallets belong to one owner — a person, or a course — at one provider. The same key
+registered by two people, or as both a course key and somebody's own key, has a wallet
+for each, and each counts only its owner's use: a limit on your own key is about your own
+spending, and a figure that included other people's use would show you what they spent.
+Where several people are meant to use one key and have it counted together, register it
+as the course key. What the provider account spent in total is on the provider's bill.
+
 The answers are about the key that was on the screen. A course key can be looked after by
 more than one teacher, and when somebody else replaces or removes the key while the page
 is open, the answers no longer describe the key that is there, so **the new key is not
