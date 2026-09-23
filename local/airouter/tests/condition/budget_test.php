@@ -18,10 +18,10 @@ namespace local_airouter\condition;
 
 use local_airouter\evaluation_context;
 use local_airouter\rule;
-use local_airouter\spend_ledger;
+use local_airouter\price;
+use local_airouter\record\ledger;
 use local_airouter\token_estimator;
 use local_airouter\usage_aggregator;
-use local_airouter\usage_logger;
 use core_ai\aiactions\generate_text;
 
 /**
@@ -43,36 +43,48 @@ final class budget_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
+        // Money is counted at a provider in the currency of its rates, so the provider
+        // the requests below went to has a rate, in dollars.
+        $rate = new price();
+        $rate->set('provider', 'aiprovider_openai');
+        $rate->set('currency', 'USD');
+        $rate->set('promptrate', 1.0);
+        $rate->create();
     }
 
     /**
-     * Write one detail row.
+     * Record one request, as the request and attempt records hold it.
      *
-     * @param array $fields What to record, over the defaults.
+     * @param array $fields What to record, over the defaults: cost, userid, courseid, keysource.
      * @param int|null $time When the request happened. An hour ago by default.
      */
     protected function log(array $fields = [], ?int $time = null): void {
-        global $DB;
-
-        $DB->insert_record(usage_logger::TABLE, (object) ($fields + [
-            'timecreated' => $time ?? time() - HOURSECS,
-            'userid' => 5,
-            'contextid' => 0,
-            'courseid' => null,
-            'actionname' => 'generate_text',
-            'placement' => 'aiplacement_editor',
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $time ??= time() - HOURSECS;
+        $cost = array_key_exists('cost', $fields) ? $fields['cost'] : 1.0;
+        $keysource = $fields['keysource'] ?? 'site';
+        $request = $generator->create_request([
+            'userid' => $fields['userid'] ?? 5,
+            'courseid' => $fields['courseid'] ?? null,
+            'keysource' => $keysource,
+            'answeredby' => 1,
+            'timestarted' => $time,
+            'timeended' => $time,
+        ]);
+        $generator->create_attempt([
+            'requestid' => $request->id,
             'targetid' => 1,
             'targetname' => 'Target one',
             'targetprovider' => 'aiprovider_openai',
             'model' => 'gpt-4o',
-            'currency' => 'USD',
-            'success' => 1,
-            'attempts' => 1,
+            'keysource' => $keysource,
             'prompttokens' => 100,
             'completiontokens' => 50,
-            'cost' => 1.0,
-            'keysource' => usage_logger::KEY_SITE,
-        ]));
+            'cost' => $cost,
+            'currency' => $cost === null ? null : 'USD',
+            'timestarted' => $time,
+            'timeended' => $time,
+        ]);
         $this->forget();
     }
 
@@ -83,7 +95,7 @@ final class budget_test extends \advanced_testcase {
      * otherwise be weighed against a total measured before they existed.
      */
     protected function forget(): void {
-        \core_cache\helper::purge_by_definition('local_airouter', spend_ledger::CACHE_AREA);
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
     }
 
     /**
@@ -109,10 +121,11 @@ final class budget_test extends \advanced_testcase {
      */
     protected function sitebudget(string $direction, float $amount): budget {
         return new budget([
-            'scope' => spend_ledger::SCOPE_SITE,
+            'scope' => ledger::SCOPE_SITE,
+            'provider' => 'aiprovider_openai',
             'direction' => $direction,
             'amount' => $amount,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]);
     }
@@ -152,17 +165,19 @@ final class budget_test extends \advanced_testcase {
 
     public function test_a_course_budget_is_not_met_outside_a_course(): void {
         $condition = new budget([
-            'scope' => spend_ledger::SCOPE_COURSE,
+            'scope' => ledger::SCOPE_COURSE,
+            'provider' => 'aiprovider_openai',
             'direction' => budget::DIRECTION_UNDER,
             'amount' => 10.0,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]);
         $over = new budget([
-            'scope' => spend_ledger::SCOPE_COURSE,
+            'scope' => ledger::SCOPE_COURSE,
+            'provider' => 'aiprovider_openai',
             'direction' => budget::DIRECTION_OVER,
             'amount' => 10.0,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]);
         $context = $this->context(\context_system::instance());
@@ -178,10 +193,11 @@ final class budget_test extends \advanced_testcase {
         $this->log(['courseid' => (int) $course->id, 'cost' => 20.0]);
 
         $condition = new budget([
-            'scope' => spend_ledger::SCOPE_COURSE,
+            'scope' => ledger::SCOPE_COURSE,
+            'provider' => 'aiprovider_openai',
             'direction' => budget::DIRECTION_OVER,
             'amount' => 10.0,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]);
 
@@ -192,10 +208,11 @@ final class budget_test extends \advanced_testcase {
     public function test_a_person_budget_counts_that_person(): void {
         $this->log(['userid' => 5, 'cost' => 20.0]);
         $condition = new budget([
-            'scope' => spend_ledger::SCOPE_USER,
+            'scope' => ledger::SCOPE_USER,
+            'provider' => 'aiprovider_openai',
             'direction' => budget::DIRECTION_OVER,
             'amount' => 10.0,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]);
 
@@ -204,19 +221,18 @@ final class budget_test extends \advanced_testcase {
     }
 
     public function test_a_calendar_month_starts_again_at_the_first(): void {
-        global $DB;
-        $ledger = new spend_ledger($DB, null, false);
-        [$from] = $ledger->get_window(spend_ledger::PERIOD_MONTH, 0, time());
+        [$from] = ledger::get_window(ledger::PERIOD_MONTH, 0, time());
 
         // One request inside this month and one the day before it began.
         $this->log(['cost' => 1.0], max($from, time() - HOURSECS));
         $this->log(['cost' => 500.0], $from - DAYSECS);
 
         $condition = new budget([
-            'scope' => spend_ledger::SCOPE_SITE,
+            'scope' => ledger::SCOPE_SITE,
+            'provider' => 'aiprovider_openai',
             'direction' => budget::DIRECTION_UNDER,
             'amount' => 10.0,
-            'period' => spend_ledger::PERIOD_MONTH,
+            'period' => ledger::PERIOD_MONTH,
             'days' => 30,
         ]);
 
@@ -246,26 +262,38 @@ final class budget_test extends \advanced_testcase {
             'budgetamount' => '100',
         ]));
         $this->assertArrayHasKey('budgetgroup', budget::validate_form([
-            'budgetscope' => spend_ledger::SCOPE_SITE,
+            'budgetscope' => ledger::SCOPE_SITE,
             'budgetamount' => 'ten pounds',
         ]));
         $this->assertArrayHasKey('budgetgroup', budget::validate_form([
-            'budgetscope' => spend_ledger::SCOPE_SITE,
+            'budgetscope' => ledger::SCOPE_SITE,
             'budgetamount' => '0',
         ]));
         $this->assertSame([], budget::validate_form([
-            'budgetscope' => spend_ledger::SCOPE_SITE,
+            'budgetscope' => ledger::SCOPE_SITE,
+            'budgetprovider' => 'aiprovider_openai',
             'budgetamount' => '100.5',
         ]));
+        // Money is one figure per provider, so a budget in money has to say which.
+        $this->assertArrayHasKey('budgetgroup', budget::validate_form([
+            'budgetscope' => ledger::SCOPE_SITE,
+            'budgetamount' => '100',
+        ]));
+        $this->assertSame([], budget::validate_form([
+            'budgetscope' => ledger::SCOPE_SITE,
+            'budgetmetric' => ledger::METRIC_REQUESTS,
+            'budgetamount' => '100',
+        ]), 'A count of requests is about every provider, so it names none.');
     }
 
     public function test_a_budget_may_not_look_further_back_than_the_site_keeps(): void {
         // Keeping every summary is the default, and a budget of any length is
         // measurable on such a site.
         $long = [
-            'budgetscope' => spend_ledger::SCOPE_SITE,
+            'budgetscope' => ledger::SCOPE_SITE,
+            'budgetprovider' => 'aiprovider_openai',
             'budgetamount' => '100',
-            'budgetperiod' => spend_ledger::PERIOD_ROLLING,
+            'budgetperiod' => ledger::PERIOD_ROLLING,
             'budgetdays' => 30,
         ];
         $this->assertSame([], budget::validate_form($long));
@@ -284,26 +312,28 @@ final class budget_test extends \advanced_testcase {
         // So is one counted in requests over a period that fits. What is counted does
         // not change how far back the counting reaches.
         $this->assertArrayHasKey('budgetgroup', budget::validate_form(
-            ['budgetmetric' => spend_ledger::METRIC_REQUESTS, 'budgetamount' => '500'] + $long,
+            ['budgetmetric' => ledger::METRIC_REQUESTS, 'budgetamount' => '500'] + $long,
         ));
     }
 
     public function test_a_budget_survives_the_trip_through_the_form(): void {
         $config = budget::read_from_form((object) [
-            'budgetscope' => spend_ledger::SCOPE_USER,
+            'budgetscope' => ledger::SCOPE_USER,
             'budgetdirection' => budget::DIRECTION_OVER,
+            'budgetprovider' => 'aiprovider_openai',
             'budgetamount' => '250',
-            'budgetperiod' => spend_ledger::PERIOD_MONTH,
+            'budgetperiod' => ledger::PERIOD_MONTH,
             'budgetdays' => 30,
         ]);
 
-        $this->assertSame(spend_ledger::SCOPE_USER, $config['scope']);
+        $this->assertSame(ledger::SCOPE_USER, $config['scope']);
+        $this->assertSame('aiprovider_openai', $config['provider']);
         $this->assertSame(budget::DIRECTION_OVER, $config['direction']);
         $this->assertSame(250.0, $config['amount']);
-        $this->assertSame(spend_ledger::PERIOD_MONTH, $config['period']);
+        $this->assertSame(ledger::PERIOD_MONTH, $config['period']);
 
         $form = budget::to_form_data($config);
-        $this->assertSame(spend_ledger::SCOPE_USER, $form['budgetscope']);
+        $this->assertSame(ledger::SCOPE_USER, $form['budgetscope']);
         $this->assertSame(budget::DIRECTION_OVER, $form['budgetdirection']);
 
         // Nothing chosen is not a budget of nothing.
@@ -327,11 +357,12 @@ final class budget_test extends \advanced_testcase {
      */
     protected function siterequests(string $direction, float $amount): budget {
         return new budget([
-            'scope' => spend_ledger::SCOPE_SITE,
+            'scope' => ledger::SCOPE_SITE,
+            'provider' => 'aiprovider_openai',
             'direction' => $direction,
-            'metric' => spend_ledger::METRIC_REQUESTS,
+            'metric' => ledger::METRIC_REQUESTS,
             'amount' => $amount,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]);
     }
@@ -373,8 +404,8 @@ final class budget_test extends \advanced_testcase {
 
     public function test_a_budget_counted_in_requests_has_to_be_whole(): void {
         $whole = [
-            'budgetscope' => spend_ledger::SCOPE_SITE,
-            'budgetmetric' => spend_ledger::METRIC_REQUESTS,
+            'budgetscope' => ledger::SCOPE_SITE,
+            'budgetmetric' => ledger::METRIC_REQUESTS,
             'budgetamount' => '3000',
         ];
         $this->assertSame([], budget::validate_form($whole));
@@ -384,39 +415,41 @@ final class budget_test extends \advanced_testcase {
             ['budgetamount' => '100.5'] + $whole,
         ));
         $this->assertSame([], budget::validate_form([
-            'budgetscope' => spend_ledger::SCOPE_SITE,
-            'budgetmetric' => spend_ledger::METRIC_COST,
+            'budgetscope' => ledger::SCOPE_SITE,
+            'budgetmetric' => ledger::METRIC_COST,
+            'budgetprovider' => 'aiprovider_openai',
             'budgetamount' => '100.5',
         ]));
     }
 
     public function test_a_request_budget_survives_the_trip_through_the_form(): void {
         $config = budget::read_from_form((object) [
-            'budgetscope' => spend_ledger::SCOPE_COURSE,
+            'budgetscope' => ledger::SCOPE_COURSE,
             'budgetdirection' => budget::DIRECTION_OVER,
-            'budgetmetric' => spend_ledger::METRIC_REQUESTS,
+            'budgetmetric' => ledger::METRIC_REQUESTS,
             'budgetamount' => '3000',
-            'budgetperiod' => spend_ledger::PERIOD_MONTH,
+            'budgetperiod' => ledger::PERIOD_MONTH,
             'budgetdays' => 30,
         ]);
 
-        $this->assertSame(spend_ledger::METRIC_REQUESTS, $config['metric']);
+        $this->assertSame(ledger::METRIC_REQUESTS, $config['metric']);
         $this->assertSame(3000.0, $config['amount']);
-        $this->assertSame(spend_ledger::METRIC_REQUESTS, budget::to_form_data($config)['budgetmetric']);
+        $this->assertSame(ledger::METRIC_REQUESTS, budget::to_form_data($config)['budgetmetric']);
     }
 
     public function test_a_budget_written_before_this_setting_existed_is_about_money(): void {
         // Stored configuration from an earlier version carries no metric at all, and
         // every one of those was an amount of money.
-        $this->assertSame(spend_ledger::METRIC_COST, (new budget([
-            'scope' => spend_ledger::SCOPE_SITE,
+        $this->assertSame(ledger::METRIC_COST, (new budget([
+            'scope' => ledger::SCOPE_SITE,
+            'provider' => 'aiprovider_openai',
             'direction' => budget::DIRECTION_UNDER,
             'amount' => 10.0,
         ]))->get_metric());
-        $this->assertSame(spend_ledger::METRIC_COST, (new budget([
+        $this->assertSame(ledger::METRIC_COST, (new budget([
             'metric' => 'something else',
         ]))->get_metric());
-        $this->assertSame(spend_ledger::METRIC_COST, budget::to_form_data([])['budgetmetric']);
+        $this->assertSame(ledger::METRIC_COST, budget::to_form_data([])['budgetmetric']);
     }
 
     public function test_a_request_budget_reads_as_a_sentence_of_its_own(): void {
@@ -433,7 +466,7 @@ final class budget_test extends \advanced_testcase {
         // runs only in CI. Getting it wrong here is six jobs and several minutes away
         // from being found out; getting it wrong in a way this test can see is not.
         $this->assertSame('The site has made fewer than 3,000 requests in the last 30 days', $requests);
-        $this->assertSame('The site has spent under 3000.00 USD in the last 30 days', $money);
+        $this->assertSame('The site has spent under 3000.00 USD at OpenAI API provider in the last 30 days', $money);
     }
 
     public function test_the_registry_knows_the_type(): void {

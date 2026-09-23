@@ -18,7 +18,7 @@ namespace local_airouter\form;
 
 use local_airouter\budget_notifier;
 use local_airouter\rule_repository;
-use local_airouter\spend_ledger;
+use local_airouter\record\ledger;
 use local_airouter\usage_aggregator;
 
 defined('MOODLE_INTERNAL') || die();
@@ -130,6 +130,6 @@ class usage_settings_form extends \moodleform {
     protected function longest_budget_days(): int {
         global $DB;
 
-        return spend_ledger::longest_reach_days($DB);
+        return ledger::longest_reach_days($DB);
     }
 }

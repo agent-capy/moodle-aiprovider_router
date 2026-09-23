@@ -345,20 +345,29 @@ Delete the second rule, on a site that declines requests matching nothing, and t
 pair blocks instead of switching. A request stopped that way is stopped for good, and
 not handed to the next provider in the site order — see *What a refusal is worth*.
 
+**A budget in money is a budget at one provider.** Money is counted per provider, in
+the currency that provider bills in, and is never added across providers, so a money
+budget names the provider it counts and its amount is in that provider's currency. A
+site whose budget is one figure for all its AI sets a budget at each provider it uses,
+and adds them up itself; the dashboard's table by provider is what it adds up. The
+currency comes from the provider's rates, so a budget naming a provider with no rates
+has no currency to be in and cannot be measured, and the **Rates for budget conditions**
+status check says so by name.
+
 **Counting requests is the measure for everything that has no bill.** A model you run
 yourself costs nothing to price and something to queue; a provider's free allowance is
 often written as so many requests a month, not as an amount of money. A budget counted
 in requests needs no rates at all, because requests are counted rather than worked out,
-so it also works on a site that has entered none. Everything else about the condition is
-the same either way, including which requests are counted.
+so it also works on a site that has entered none, and it counts every request whatever
+provider answered it. Everything else about the condition is the same either way.
 
 What is measured is **what the site paid for**. Requests covered by a key somebody
 brought cost the site nothing and are left out of every budget, however large they are;
 a limit on a brought key belongs to whoever brought it, and is always an amount of
 money. The period is either the last *N*
 days, counted from midnight today, or the current calendar month, and the figures come
-from the daily summaries as far as they reach and from the detail rows beyond them, so a
-budget still works over periods the detail rows no longer cover.
+from the summaries for what has been counted and from the detail records for what has
+not, so a budget still works over periods the detail records no longer cover.
 
 Two things are worth knowing before relying on one.
 
@@ -888,6 +897,10 @@ When the limit is reached the key simply stops being used, and requests follow t
 rules to wherever they go next. Nothing is refused and nothing is reported as broken,
 which is why the key page says so plainly — the other way to read a key that quietly
 stopped working is that the key is broken.
+
+The limit is an amount in the currency the key's provider bills in, which is the
+currency of that provider's rates. Until a rate is entered for the provider, the limit
+has no currency and nothing can be measured against it, and the key goes on being used.
 
 Two things behave the way they do on purpose.
 

@@ -16,6 +16,8 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
+
 /**
  * Shows somebody which keys are held for them, without showing any of them.
  *
@@ -34,8 +36,9 @@ class key_formatter {
      * @param key[] $keys The keys, keyed by target id.
      * @param string[] $targets Target names keyed by id.
      * @param \moodle_url $url The page the actions return to.
-     * @param spend_ledger|null $ledger The ledger, for what each key has spent.
-     * @param string $currency The site currency.
+     * @param ledger|null $ledger The ledger, for what each key has spent.
+     * @param array $currencies The currency each target's provider bills in, keyed by
+     *                          target id; null where the provider has no rates yet.
      * @param bool $mayuse Whether the owner may still use these keys, as opposed to
      *                     only remove them.
      * @return \html_table The table.
@@ -44,8 +47,8 @@ class key_formatter {
         array $keys,
         array $targets,
         \moodle_url $url,
-        ?spend_ledger $ledger = null,
-        string $currency = '',
+        ?ledger $ledger = null,
+        array $currencies = [],
         bool $mayuse = true,
     ): \html_table {
         $table = new \html_table();
@@ -63,7 +66,7 @@ class key_formatter {
                 $targets[$targetid] ?? get_string('keys:target:gone', 'local_airouter', $targetid),
                 self::hint($key),
                 self::tested($key),
-                self::cap($key, $ledger, $currency),
+                self::cap($key, $ledger, $currencies[$targetid] ?? null),
                 self::actions($url, $key, $mayuse),
             ];
         }
@@ -79,18 +82,19 @@ class key_formatter {
      * other reading of a key that stopped working is that the key is broken.
      *
      * @param key $key The key.
-     * @param spend_ledger|null $ledger The ledger, for what the key has spent.
-     * @param string $currency The currency the limit itself is written in, which is
-     *                         whatever the site currency is now.
+     * @param ledger|null $ledger The ledger, for what the key has spent.
+     * @param string|null $currency The currency the limit is in, which is what the
+     *                              key's provider bills in; null where the provider
+     *                              has no rates yet and so no currency.
      * @return string HTML.
      */
-    public static function cap(key $key, ?spend_ledger $ledger, string $currency): string {
+    public static function cap(key $key, ?ledger $ledger, ?string $currency): string {
         if (!$key->has_cap()) {
             return \html_writer::span(get_string('keys:cap:none', 'local_airouter'), 'text-muted');
         }
 
-        $limit = format_float($key->get_cap_amount(), 2, true) . ' ' . $currency;
-        $period = $key->get_cap_period() === spend_ledger::PERIOD_MONTH
+        $limit = format_float($key->get_cap_amount(), 2, true) . ($currency === null ? '' : ' ' . $currency);
+        $period = $key->get_cap_period() === ledger::PERIOD_MONTH
             ? get_string('keys:cap:month', 'local_airouter')
             : get_string('keys:cap:rolling:days', 'local_airouter', $key->get_cap_days());
         $output = \html_writer::div(get_string(
@@ -103,42 +107,43 @@ class key_formatter {
             return $output;
         }
         $spend = $key->get_cap_spend($ledger, time());
-        if (!$spend->is_comparable()) {
-            // Spent in a currency the limit is not written in, because the site
-            // changed its own currency partway through the period. The figure is
-            // real and is shown in the currency it was recorded in, but it cannot be
-            // put next to the limit: nothing here converts between currencies, and a
-            // share worked out from two of them would be a number about nothing.
+        $provider = $spend->sole_provider();
+        $entry = $spend->get_provider($provider);
+        if ($entry !== null && $entry->amount !== null && !$entry->comparable) {
+            // Recorded in a currency the limit is not written in: the provider's
+            // rates say another currency now, or say nothing. The figure is real and
+            // is shown as recorded, but it cannot be put next to the limit: nothing
+            // here converts between currencies, and a share worked out from two of
+            // them would be a number about nothing.
             return $output . \html_writer::div(
                 get_string('keys:cap:othercurrency', 'local_airouter', [
-                    'amount' => $spend->mixedcurrency
-                        ? get_string('usage:cost:mixed', 'local_airouter')
-                        : format_float($spend->get_amount(), 2, true) . ' ' . $spend->currency,
+                    'amount' => format_float($entry->amount, 2, true) . ' ' . $entry->currency,
                 ]),
                 'text-muted small',
             );
         }
-        if (!$spend->is_known()) {
-            // This site prices nothing, so nothing can be measured against the limit.
-            // The key keeps working, which is the direction that does not punish
-            // somebody for setting themselves one.
+        if (!$spend->is_known(ledger::METRIC_COST, $provider)) {
+            // Nothing prices what this key was used for, so nothing can be measured
+            // against the limit. The key keeps working, which is the direction that
+            // does not punish somebody for setting themselves one.
             return $output . \html_writer::div(
                 get_string('keys:cap:unmeasured', 'local_airouter'),
                 'text-muted small',
             );
         }
 
-        // The owner's own money, so the bar carries the figures with it. In the
-        // currency the costs were recorded in, which is the site's own here: a
-        // period holding any other is not comparable and was answered above.
+        // The owner's own money, so the bar carries the figures with it, in the
+        // currency the costs were recorded in, which is the provider's.
+        $spent = $spend->get_amount($provider);
+        $spentin = $spend->get_currency($provider) ?? $currency;
         $output .= usage_formatter::progress(
-            $spend->get_amount() / $key->get_cap_amount(),
+            $spent / $key->get_cap_amount(),
             get_string('keys:cap', 'local_airouter'),
             get_string('keys:cap:spent', 'local_airouter', [
-                'amount' => format_float($spend->get_amount(), 2, true) . ' ' . $spend->currency,
+                'amount' => format_float($spent, 2, true) . ($spentin === null ? '' : ' ' . $spentin),
             ]),
         );
-        if ($spend->has_reached($key->get_cap_amount())) {
+        if ($spend->has_reached($key->get_cap_amount(), ledger::METRIC_COST, $provider)) {
             $output .= \html_writer::div(
                 get_string('keys:cap:reached', 'local_airouter'),
                 'text-warning',

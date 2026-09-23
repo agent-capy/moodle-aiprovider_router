@@ -208,5 +208,33 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092303, 'local', 'airouter');
     }
 
+    if ($oldversion < 2026092304) {
+        // A limit in money is about one provider, so what has been said about it says
+        // which provider, and two limits on one subject at two providers are two notes.
+        $table = new xmldb_table('local_airouter_notice');
+        $field = new xmldb_field('provider', XMLDB_TYPE_CHAR, '60', null, XMLDB_NOTNULL, null, '-', 'metric');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+        $index = new xmldb_index(
+            'kind-subjectid-metric-limitamount-threshold-periodstart-perioddays',
+            XMLDB_INDEX_UNIQUE,
+            ['kind', 'subjectid', 'metric', 'limitamount', 'threshold', 'periodstart', 'perioddays']
+        );
+        if ($dbman->index_exists($table, $index)) {
+            $dbman->drop_index($table, $index);
+        }
+        $index = new xmldb_index(
+            'kind-subjectid-metric-provider-limitamount-threshold-periodstart-perioddays',
+            XMLDB_INDEX_UNIQUE,
+            ['kind', 'subjectid', 'metric', 'provider', 'limitamount', 'threshold', 'periodstart', 'perioddays']
+        );
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        upgrade_plugin_savepoint(true, 2026092304, 'local', 'airouter');
+    }
+
     return true;
 }

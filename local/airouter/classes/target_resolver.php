@@ -16,6 +16,7 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
 use core_ai\aiactions\base as action_base;
 use core_ai\provider as ai_provider;
 
@@ -494,6 +495,31 @@ class target_resolver {
     }
 
     /**
+     * The provider plugins behind the targets this site can delegate to, by name.
+     *
+     * Rates and budgets in money belong to a provider plugin rather than to an
+     * instance, since two instances of one provider are billed alike, so this is the
+     * list those screens choose from.
+     *
+     * @return string[] Plugin names keyed by component.
+     */
+    public static function get_provider_options(): array {
+        $options = [];
+        foreach (\core\di::get(\core_ai\manager::class)->get_provider_instances() as $instance) {
+            if ($instance instanceof provider) {
+                continue;
+            }
+            $component = $instance->get_name();
+            $options[$component] = get_string_manager()->string_exists('pluginname', $component)
+                ? get_string('pluginname', $component)
+                : $component;
+        }
+        ksort($options);
+
+        return $options;
+    }
+
+    /**
      * Why a target a rule names cannot carry this request.
      *
      * The rule tester needs this in words. Working it out there would mean a second
@@ -590,7 +616,7 @@ class target_resolver {
             return false;
         }
 
-        return $brought->is_spent(new spend_ledger($DB), time());
+        return $brought->is_spent(new ledger($DB), time());
     }
 
     /**

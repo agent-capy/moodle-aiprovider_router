@@ -18,6 +18,7 @@ namespace local_airouter;
 
 use core_ai\aiactions\generate_text;
 use core_ai\provider as ai_provider;
+use local_airouter\record\ledger;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -511,7 +512,7 @@ final class target_resolver_test extends \advanced_testcase {
     }
 
     /**
-     * Write one recorded request paid for with somebody's own key.
+     * Record something spent against a brought key, as the request and attempt records hold it.
      *
      * @param int $userid Whose key paid.
      * @param int $targetid Where it went.
@@ -520,23 +521,36 @@ final class target_resolver_test extends \advanced_testcase {
     protected function spent(int $userid, int $targetid, ?float $cost): void {
         global $DB;
 
-        $DB->insert_record(usage_logger::TABLE, (object) [
-            'timecreated' => time() - HOURSECS,
+        if (!$DB->record_exists(price::TABLE, ['provider' => 'aiprovider_openai'])) {
+            // The provider bills in dollars, so a limit on a key for it is in dollars.
+            $rate = new price();
+            $rate->set('provider', 'aiprovider_openai');
+            $rate->set('currency', 'USD');
+            $rate->set('promptrate', 1.0);
+            $rate->create();
+        }
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $when = time() - HOURSECS;
+        $request = $generator->create_request([
             'userid' => $userid,
-            'contextid' => 0,
-            'courseid' => null,
-            'actionname' => 'generate_text',
+            'keysource' => rule::KEYSOURCE_USER,
+            'answeredby' => $targetid,
+            'timestarted' => $when,
+            'timeended' => $when,
+        ]);
+        $generator->create_attempt([
+            'requestid' => $request->id,
             'targetid' => $targetid,
             'targetname' => 'Provider ' . $targetid,
             'targetprovider' => 'aiprovider_openai',
             'model' => 'gpt-4o',
-            'currency' => 'USD',
-            'success' => 1,
-            'attempts' => 1,
-            'cost' => $cost,
             'keysource' => rule::KEYSOURCE_USER,
+            'cost' => $cost,
+            'currency' => $cost === null ? null : 'USD',
+            'timestarted' => $when,
+            'timeended' => $when,
         ]);
-        \core_cache\helper::purge_by_definition('local_airouter', spend_ledger::CACHE_AREA);
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
     }
 
     public function test_a_key_that_has_spent_its_owners_limit_hands_on_to_the_next_rule(): void {
@@ -546,7 +560,7 @@ final class target_resolver_test extends \advanced_testcase {
         $repository->set_cap(
             $repository->find(key::SCOPE_USER, (int) $user->id, 8),
             10.0,
-            spend_ledger::PERIOD_MONTH,
+            ledger::PERIOD_MONTH,
             30,
         );
         $this->spent((int) $user->id, 8, 10.0);
@@ -567,7 +581,7 @@ final class target_resolver_test extends \advanced_testcase {
         $repository->set_cap(
             $repository->find(key::SCOPE_USER, (int) $user->id, 8),
             10.0,
-            spend_ledger::PERIOD_MONTH,
+            ledger::PERIOD_MONTH,
             30,
         );
         $this->spent((int) $user->id, 8, 4.0);
@@ -586,7 +600,7 @@ final class target_resolver_test extends \advanced_testcase {
         $repository->set_cap(
             $repository->find(key::SCOPE_USER, (int) $user->id, 8),
             10.0,
-            spend_ledger::PERIOD_MONTH,
+            ledger::PERIOD_MONTH,
             30,
         );
         // A site with no rates entered. The opposite direction to a budget condition,
@@ -610,7 +624,7 @@ final class target_resolver_test extends \advanced_testcase {
         $repository->set_cap(
             $repository->find(key::SCOPE_USER, (int) $user->id, 9),
             10.0,
-            spend_ledger::PERIOD_MONTH,
+            ledger::PERIOD_MONTH,
             30,
         );
         $this->spent((int) $user->id, 9, 20.0);

@@ -16,6 +16,9 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
+use local_airouter\record\spend;
+
 /**
  * One key somebody has brought for one delegation target.
  *
@@ -95,7 +98,7 @@ class key extends \core\persistent {
             ],
             'capperiod' => [
                 'type' => PARAM_ALPHA,
-                'default' => spend_ledger::PERIOD_MONTH,
+                'default' => ledger::PERIOD_MONTH,
             ],
             'capdays' => [
                 'type' => PARAM_INT,
@@ -128,9 +131,9 @@ class key extends \core\persistent {
      * @return string One of the ledger's periods.
      */
     public function get_cap_period(): string {
-        return (string) $this->get('capperiod') === spend_ledger::PERIOD_ROLLING
-            ? spend_ledger::PERIOD_ROLLING
-            : spend_ledger::PERIOD_MONTH;
+        return (string) $this->get('capperiod') === ledger::PERIOD_ROLLING
+            ? ledger::PERIOD_ROLLING
+            : ledger::PERIOD_MONTH;
     }
 
     /**
@@ -149,11 +152,11 @@ class key extends \core\persistent {
      * not what the owner's provider actually billed them. Anywhere it is shown has to
      * say so.
      *
-     * @param spend_ledger $ledger The ledger to measure with.
+     * @param ledger $ledger The ledger to measure with.
      * @param int $now The moment the period ends at.
      * @return spend The spending over the period the limit is counted in.
      */
-    public function get_cap_spend(spend_ledger $ledger, int $now): spend {
+    public function get_cap_spend(ledger $ledger, int $now): spend {
         return $ledger->get_key_spend($this, $this->get_cap_period(), $this->get_cap_days(), $now);
     }
 
@@ -166,16 +169,19 @@ class key extends \core\persistent {
      * period recorded in a currency the limit is not written in is unknown in the same
      * way, because nothing here converts between currencies.
      *
-     * @param spend_ledger $ledger The ledger to measure with.
+     * @param ledger $ledger The ledger to measure with.
      * @param int $now The moment the period ends at.
      * @return bool True when the key should be left out of routing.
      */
-    public function is_spent(spend_ledger $ledger, int $now): bool {
+    public function is_spent(ledger $ledger, int $now): bool {
         if (!$this->has_cap()) {
             return false;
         }
+        // The key is registered for one target, so its calls went to one provider,
+        // and the limit is a figure in that provider's currency.
+        $spend = $this->get_cap_spend($ledger, $now);
 
-        return $this->get_cap_spend($ledger, $now)->has_reached($this->get_cap_amount()) === true;
+        return $spend->has_reached($this->get_cap_amount(), ledger::METRIC_COST, $spend->sole_provider()) === true;
     }
 
     /**

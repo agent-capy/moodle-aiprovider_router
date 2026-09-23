@@ -31,7 +31,7 @@ require(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/lib.php');
 
 use local_airouter\rule_repository;
-use local_airouter\spend_ledger;
+use local_airouter\record\ledger;
 use local_airouter\usage_aggregator;
 use local_airouter\usage_formatter;
 use local_airouter\record\reader;
@@ -87,10 +87,10 @@ echo html_writer::end_div();
 // How close this course is to a budget the site has set on it. A share and not a
 // figure: what the site spends is not a teacher's business, but how near the course is
 // to the point where its AI starts behaving differently certainly is.
-$ledger = new spend_ledger($DB, $aggregator, false);
+$ledger = new ledger($DB, false);
 $bars = [];
 foreach ((new rule_repository($DB))->get_budgets($now) as $budget) {
-    if ($budget->scope !== spend_ledger::SCOPE_COURSE) {
+    if ($budget->scope !== ledger::SCOPE_COURSE) {
         continue;
     }
     if ($budget->courseids !== null && !in_array((int) $course->id, $budget->courseids, true)) {
@@ -100,15 +100,16 @@ foreach ((new rule_repository($DB))->get_budgets($now) as $budget) {
         continue;
     }
     [$budgetfrom, $budgetto] = $ledger->get_window($budget->period, $budget->days, $now);
-    $spend = $ledger->measure(spend_ledger::SCOPE_COURSE, (int) $course->id, $budgetfrom, $budgetto);
-    if (!$spend->is_known($budget->metric)) {
+    $spend = $ledger->measure(ledger::SCOPE_COURSE, (int) $course->id, $budgetfrom, $budgetto);
+    $provider = (string) ($budget->provider ?? '');
+    if (!$spend->is_known($budget->metric, $provider)) {
         // Nothing this site can price, so there is no share to show. Saying nothing is
         // better than a bar at zero, which would read as plenty of room.
         continue;
     }
-    $requests = $budget->metric === spend_ledger::METRIC_REQUESTS;
+    $requests = $budget->metric === ledger::METRIC_REQUESTS;
     $note = get_string(
-        'courseusage:budget:' . ($budget->period === spend_ledger::PERIOD_MONTH ? 'month' : 'rolling'),
+        'courseusage:budget:' . ($budget->period === ledger::PERIOD_MONTH ? 'month' : 'rolling'),
         'local_airouter',
         $budget->days,
     );
@@ -122,7 +123,7 @@ foreach ((new rule_repository($DB))->get_budgets($now) as $budget) {
         ]) . ' ' . $note;
     }
     $bars[] = usage_formatter::progress(
-        $spend->get_measure($budget->metric) / $budget->amount,
+        $spend->get_measure($budget->metric, $provider) / $budget->amount,
         get_string($requests ? 'usage:budget:label:requests' : 'usage:budget:label', 'local_airouter'),
         $note,
     );

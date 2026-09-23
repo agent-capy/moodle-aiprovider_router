@@ -16,6 +16,8 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
+
 /**
  * Tests for what somebody is offered against a key of theirs.
  *
@@ -67,10 +69,11 @@ final class key_formatter_test extends \advanced_testcase {
     public function test_a_limit_is_shown_beside_what_was_spent_against_it(): void {
         global $DB;
 
-        (new key_repository($DB))->set_cap($this->key, 2000.0, spend_ledger::PERIOD_MONTH, 30);
+        (new key_repository($DB))->set_cap($this->key, 2000.0, ledger::PERIOD_MONTH, 30);
         $this->spend(1000.0, 'USD');
+        $this->rate_in('USD');
 
-        $html = key_formatter::cap($this->key, new spend_ledger($DB, null, false), 'USD');
+        $html = key_formatter::cap($this->key, new ledger($DB, false), 'USD');
 
         $this->assertStringContainsString(format_float(1000.0, 2, true) . ' USD', $html);
         $this->assertStringContainsString('progress-bar', $html);
@@ -82,11 +85,11 @@ final class key_formatter_test extends \advanced_testcase {
         // The rates, and so the limit, are in dollars, and this was recorded in yen.
         // Handing the limit's currency to the figure would print 1000.00 USD for
         // 1000 yen, next to the limit, as though the two could be compared.
-        (new key_repository($DB))->set_cap($this->key, 2000.0, spend_ledger::PERIOD_MONTH, 30);
+        (new key_repository($DB))->set_cap($this->key, 2000.0, ledger::PERIOD_MONTH, 30);
         $this->spend(1000.0, 'JPY');
         $this->rate_in('USD');
 
-        $html = key_formatter::cap($this->key, new spend_ledger($DB, null, false), 'USD');
+        $html = key_formatter::cap($this->key, new ledger($DB, false), 'USD');
 
         $this->assertStringContainsString(format_float(1000.0, 2, true) . ' JPY', $html);
         $this->assertStringNotContainsString(format_float(1000.0, 2, true) . ' USD', $html);
@@ -97,13 +100,13 @@ final class key_formatter_test extends \advanced_testcase {
     public function test_a_key_is_not_stopped_by_money_counted_in_another_currency(): void {
         global $DB;
 
-        (new key_repository($DB))->set_cap($this->key, 500.0, spend_ledger::PERIOD_MONTH, 30);
+        (new key_repository($DB))->set_cap($this->key, 500.0, ledger::PERIOD_MONTH, 30);
         $this->spend(1000.0, 'JPY');
         $this->rate_in('USD');
 
         // 1000 yen is not 1000 dollars, and it is not over a limit of 500 dollars
         // either. The direction for somebody's own key is to keep using it.
-        $this->assertFalse($this->key->is_spent(new spend_ledger($DB, null, false), time()));
+        $this->assertFalse($this->key->is_spent(new ledger($DB, false), time()));
     }
 
     /**
@@ -120,34 +123,37 @@ final class key_formatter_test extends \advanced_testcase {
     }
 
     /**
-     * Record something spent against the key under test.
+     * Record something spent against the key under test, as the request and attempt records hold it.
      *
      * @param float $cost What it cost.
      * @param string $currency What that is in.
      */
     protected function spend(float $cost, string $currency): void {
-        global $DB;
-
-        $DB->insert_record(usage_logger::TABLE, (object) [
-            // A minute ago. The period a limit is measured over ends at the moment it
-            // is asked about, and that moment is not counted.
-            'timecreated' => time() - MINSECS,
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        // A minute ago. The period a limit is measured over ends at the moment it
+        // is asked about, and that moment is not counted.
+        $when = time() - MINSECS;
+        $request = $generator->create_request([
             'userid' => 7,
-            'contextid' => 0,
-            'courseid' => null,
-            'actionname' => 'generate_text',
+            'keysource' => 'user',
+            'answeredby' => 3,
+            'timestarted' => $when,
+            'timeended' => $when,
+        ]);
+        $generator->create_attempt([
+            'requestid' => $request->id,
             'targetid' => 3,
             'targetname' => 'Target one',
             'targetprovider' => 'aiprovider_openai',
             'model' => 'gpt-4o',
-            'currency' => $currency,
-            'success' => 1,
-            'attempts' => 1,
+            'keysource' => 'user',
+            'keyid' => (int) $this->key->get('id'),
             'prompttokens' => 100,
             'completiontokens' => 50,
             'cost' => $cost,
-            'keysource' => 'user',
-            'keyid' => (int) $this->key->get('id'),
+            'currency' => $currency,
+            'timestarted' => $when,
+            'timeended' => $when,
         ]);
     }
 
@@ -157,7 +163,7 @@ final class key_formatter_test extends \advanced_testcase {
             [3 => 'Target one'],
             new \moodle_url('/local/airouter/keys.php'),
             null,
-            'JPY',
+            [3 => 'JPY'],
             false,
         );
 

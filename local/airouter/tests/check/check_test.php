@@ -21,9 +21,10 @@ use local_airouter\eligibility_policy;
 use local_airouter\key;
 use local_airouter\rule;
 use local_airouter\rule_repository;
-use local_airouter\spend_ledger;
-use local_airouter\usage_aggregator;
-use local_airouter\usage_logger;
+use local_airouter\price;
+use local_airouter\record\ledger;
+use local_airouter\record\summariser;
+use local_airouter\record\usage_recorder;
 use local_airouter\key_repository;
 use local_airouter\order_inspector;
 use local_airouter\provider;
@@ -327,18 +328,18 @@ final class check_test extends \advanced_testcase {
         // the only way to lose the history is to lose it first. The budget then reads
         // a real figure that is smaller than the spending was, and nothing else on
         // the site says so.
-        $this->request(1.0);
-        $DB->set_field(usage_logger::TABLE, 'timecreated', time() - 10 * DAYSECS);
-        set_config(usage_aggregator::RETENTION_SETTING, 1, 'local_airouter');
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'local_airouter');
-        (new usage_aggregator($DB))->run(time());
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 60, 'local_airouter');
+        $this->rate();
+        $this->request(1.0, time() - 10 * DAYSECS);
+        set_config('logretentiondays', 1, 'local_airouter');
+        set_config('summaryretentiondays', 2, 'local_airouter');
+        (new summariser($DB))->run(time());
+        set_config('summaryretentiondays', 60, 'local_airouter');
         $this->budget_rule();
 
         // Both tables are empty now, which is the shape of a site that has never used
         // its AI at all. It is not one.
-        $this->assertSame(0, $DB->count_records(usage_logger::TABLE));
-        $this->assertSame(0, $DB->count_records(usage_aggregator::TABLE));
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
+        $this->assertSame(0, $DB->count_records(summariser::TABLE));
 
         $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
 
@@ -361,12 +362,12 @@ final class check_test extends \advanced_testcase {
         global $DB;
 
         // Something was discarded, but long enough ago that no budget reaches it.
+        $this->rate();
         $this->budget_rule();
-        $this->request(1.0);
-        $DB->set_field(usage_logger::TABLE, 'timecreated', time() - 200 * DAYSECS);
-        set_config(usage_aggregator::RETENTION_SETTING, 1, 'local_airouter');
-        set_config(usage_aggregator::SUMMARY_RETENTION_SETTING, 2, 'local_airouter');
-        (new usage_aggregator($DB))->run(time() - 150 * DAYSECS);
+        $this->request(1.0, time() - 200 * DAYSECS);
+        set_config('logretentiondays', 1, 'local_airouter');
+        set_config('summaryretentiondays', 2, 'local_airouter');
+        (new summariser($DB))->run(time() - 150 * DAYSECS);
 
         $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
 
@@ -386,44 +387,59 @@ final class check_test extends \advanced_testcase {
      *
      * @param string $metric What the budget counts.
      */
-    protected function budget_rule(string $metric = spend_ledger::METRIC_COST): void {
+    protected function budget_rule(string $metric = ledger::METRIC_COST): void {
         global $DB;
         $rule = new rule();
         $rule->set('name', 'While there is money left');
         $rule->set('targetid', 3);
         (new rule_repository($DB))->save($rule, ['budget' => [
-            'scope' => spend_ledger::SCOPE_SITE,
+            'scope' => ledger::SCOPE_SITE,
             'direction' => 'under',
             'metric' => $metric,
+            'provider' => $metric === ledger::METRIC_COST ? 'aiprovider_openai' : '',
             'amount' => 100.0,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ]]);
     }
 
     /**
-     * Write one recorded request.
+     * Write one recorded request, as the request and attempt records hold it.
      *
      * @param float|null $cost What it cost, or null when no rate covered it.
+     * @param int|null $when When it ended, or null for an hour ago.
      */
-    protected function request(?float $cost): void {
-        global $DB;
-        $DB->insert_record(usage_logger::TABLE, (object) [
-            'timecreated' => time() - HOURSECS,
+    protected function request(?float $cost, ?int $when = null): void {
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $when ??= time() - HOURSECS;
+        $request = $generator->create_request([
             'userid' => 5,
-            'contextid' => 0,
-            'courseid' => null,
-            'actionname' => 'generate_text',
+            'answeredby' => 1,
+            'timestarted' => $when,
+            'timeended' => $when,
+        ]);
+        $generator->create_attempt([
+            'requestid' => $request->id,
             'targetid' => 1,
             'targetname' => 'Target one',
             'targetprovider' => 'aiprovider_openai',
             'model' => 'gpt-4o',
-            'currency' => 'USD',
-            'success' => 1,
-            'attempts' => 1,
             'cost' => $cost,
-            'keysource' => usage_logger::KEY_SITE,
+            'currency' => $cost === null ? null : 'USD',
+            'timestarted' => $when,
+            'timeended' => $when,
         ]);
+    }
+
+    /**
+     * Enter a rate for the provider the requests above went to, in dollars.
+     */
+    protected function rate(): void {
+        $rate = new price();
+        $rate->set('provider', 'aiprovider_openai');
+        $rate->set('currency', 'USD');
+        $rate->set('promptrate', 1.0);
+        $rate->create();
     }
 
     public function test_an_instance_made_before_an_action_existed_is_reported(): void {
@@ -473,13 +489,13 @@ final class check_test extends \advanced_testcase {
         $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
 
         // The rule is enabled, looks right, and can never match. Nothing else on the
-        // site would say so.
+        // site would say so, and it says which provider has no rates.
         $this->assertSame(result::ERROR, $result->get_status());
-        $this->assertStringContainsString('2', $result->get_summary());
+        $this->assertStringContainsString('OpenAI', $result->get_summary());
     }
 
     public function test_a_site_routing_by_request_counts_needs_no_rates(): void {
-        $this->budget_rule(spend_ledger::METRIC_REQUESTS);
+        $this->budget_rule(ledger::METRIC_REQUESTS);
         $this->request(null);
         $this->request(null);
 
@@ -491,6 +507,7 @@ final class check_test extends \advanced_testcase {
     }
 
     public function test_a_mostly_unpriced_site_is_told_its_budgets_understate(): void {
+        $this->rate();
         $this->budget_rule();
         $this->request(1.0);
         $this->request(null);
@@ -503,6 +520,7 @@ final class check_test extends \advanced_testcase {
     }
 
     public function test_a_priced_site_with_budget_rules_is_fine(): void {
+        $this->rate();
         $this->budget_rule();
         $this->request(1.0);
         $this->request(2.0);
@@ -513,11 +531,24 @@ final class check_test extends \advanced_testcase {
     }
 
     public function test_a_site_that_has_recorded_nothing_is_not_told_off(): void {
+        $this->rate();
         $this->budget_rule();
 
         $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
 
         $this->assertSame(result::NA, $result->get_status());
+    }
+
+    public function test_a_budget_at_a_provider_with_no_rates_is_an_error_before_any_traffic(): void {
+        // The budget names a provider, and its currency is the currency of that
+        // provider's rates. With none, the budget has no currency to be in and can
+        // never be measured, whatever the rest of the site has priced.
+        $this->budget_rule();
+
+        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::ERROR, $result->get_status());
+        $this->assertStringContainsString('OpenAI', $result->get_summary());
     }
 
     public function test_every_check_offers_somewhere_to_go_and_has_a_name(): void {

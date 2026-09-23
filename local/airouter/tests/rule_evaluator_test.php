@@ -16,6 +16,7 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
 use core_ai\aiactions\generate_text;
 use core_ai\aiactions\summarise_text;
 
@@ -210,34 +211,39 @@ final class rule_evaluator_test extends \advanced_testcase {
      */
     protected function onerequest(string $direction = condition\budget::DIRECTION_UNDER): array {
         return [
-            'scope' => spend_ledger::SCOPE_SITE,
+            'scope' => ledger::SCOPE_SITE,
             'direction' => $direction,
             'amount' => 1,
-            'metric' => spend_ledger::METRIC_REQUESTS,
-            'period' => spend_ledger::PERIOD_ROLLING,
+            'metric' => ledger::METRIC_REQUESTS,
+            'period' => ledger::PERIOD_ROLLING,
             'days' => 30,
         ];
     }
 
     /**
-     * Record one request already made.
+     * Record one request already made, as the records hold it.
      */
     protected function spend_one(): void {
-        global $DB;
-
-        $DB->insert_record(usage_logger::TABLE, (object) [
-            'timecreated' => time() - HOURSECS,
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $when = time() - HOURSECS;
+        $request = $generator->create_request([
             'userid' => 5,
             'contextid' => \context_system::instance()->id,
-            'actionname' => 'generate_text',
+            'keysource' => 'site',
+            'answeredby' => 1,
+            'timestarted' => $when,
+            'timeended' => $when,
+        ]);
+        $generator->create_attempt([
+            'requestid' => $request->id,
             'targetid' => 1,
             'targetname' => 'Target',
             'targetprovider' => 'aiprovider_openai',
-            'success' => 1,
-            'attempts' => 1,
-            'keysource' => usage_logger::KEY_SITE,
+            'keysource' => 'site',
+            'timestarted' => $when,
+            'timeended' => $when,
         ]);
-        \core_cache\helper::purge_by_definition('local_airouter', spend_ledger::CACHE_AREA);
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
     }
 
     public function test_a_rule_stopped_only_by_its_budget_is_remembered_as_such(): void {
@@ -295,7 +301,7 @@ final class rule_evaluator_test extends \advanced_testcase {
         // There is no course here, so there is no budget here to be inside or past.
         // The rule does not apply; nobody has run out of anything.
         $this->add('course metered', 7, [
-            'budget' => ['scope' => spend_ledger::SCOPE_COURSE] + $this->onerequest(),
+            'budget' => ['scope' => ledger::SCOPE_COURSE] + $this->onerequest(),
         ]);
         $this->spend_one();
 

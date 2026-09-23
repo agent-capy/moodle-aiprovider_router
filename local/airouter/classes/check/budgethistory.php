@@ -16,10 +16,10 @@
 
 namespace local_airouter\check;
 
+use local_airouter\record\ledger;
+use local_airouter\record\summariser;
+use local_airouter\record\usage_recorder;
 use local_airouter\rule_repository;
-use local_airouter\spend_ledger;
-use local_airouter\usage_aggregator;
-use local_airouter\usage_logger;
 use core\check\result;
 
 /**
@@ -75,8 +75,7 @@ class budgethistory extends base {
             return new result(result::NA, get_string('check:budgethistory:nobudget', 'local_airouter'));
         }
 
-        $aggregator = new usage_aggregator($DB);
-        $from = $aggregator->get_history_from();
+        $from = summariser::get_history_from();
         if ($from === 0) {
             // This site can account for the whole of its own history: it has never
             // discarded anything, and it has been keeping the mark since it was
@@ -90,11 +89,10 @@ class budgethistory extends base {
                 : get_string('check:budgethistory:complete', 'local_airouter', userdate($earliest)));
         }
 
-        $ledger = new spend_ledger($DB, $aggregator, false);
         $now = time();
         $shortest = null;
         foreach ($budgets as $budget) {
-            [$start] = $ledger->get_window((string) $budget->period, (int) $budget->days, $now);
+            [$start] = ledger::get_window((string) $budget->period, (int) $budget->days, $now);
             if ($start >= $from) {
                 continue;
             }
@@ -127,11 +125,11 @@ class budgethistory extends base {
      */
     public static function earliest_record(\moodle_database $db): ?int {
         $found = [];
-        $detail = $db->get_field_sql('SELECT MIN(timecreated) FROM {' . usage_logger::TABLE . '}');
+        $detail = $db->get_field_sql('SELECT MIN(timestarted) FROM {' . usage_recorder::REQUEST_TABLE . '}');
         if (!empty($detail)) {
             $found[] = (int) $detail;
         }
-        $summary = $db->get_field_sql('SELECT MIN(daystart) FROM {' . usage_aggregator::TABLE . '}');
+        $summary = $db->get_field_sql('SELECT MIN(daystart) FROM {' . summariser::TABLE . '}');
         if (!empty($summary)) {
             $found[] = (int) $summary;
         }

@@ -17,10 +17,14 @@
 namespace local_airouter\check;
 
 use local_airouter\condition\budget;
+use local_airouter\price_book;
+use local_airouter\record\attempt_state;
+use local_airouter\record\ledger;
+use local_airouter\record\summariser;
+use local_airouter\record\usage_recorder;
 use local_airouter\rule;
 use local_airouter\rule_repository;
-use local_airouter\spend_ledger;
-use local_airouter\usage_logger;
+use local_airouter\usage_formatter;
 use core\check\result;
 
 /**
@@ -38,6 +42,11 @@ use core\check\result;
  * rates at all - requests are counted rather than priced - so a site routing entirely
  * by request counts is in good order however empty its rate table is, and telling it
  * otherwise would send somebody looking for a problem it does not have.
+ *
+ * A budget in money names a provider and is in that provider's currency, which is the
+ * currency of its rates. A budget naming a provider with no rates has no currency to
+ * be in and nothing to measure, whatever the rest of the site has priced, so that is
+ * said first and by name.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -62,19 +71,40 @@ class budgetrates extends base {
     protected function check_router(): result {
         global $DB;
 
-        $rules = $this->count_costed_rules();
+        $providers = $this->providers_of_costed_rules();
+        $rules = count(array_unique(array_merge(...array_values($providers ?: [[]]))));
         if ($rules === 0) {
             // Rates are worth entering anyway, for the monitor. They are only load
             // bearing once a rule routes on them, and that is what this check is about.
             return new result(result::NA, get_string('check:budgetrates:nobudget', 'local_airouter'));
         }
 
+        $book = new price_book($DB);
+        $unrated = [];
+        $unratedrules = [];
+        foreach ($providers as $provider => $ruleids) {
+            if ($provider === '' || $book->currency_of($provider) === null) {
+                $unrated[] = usage_formatter::provider_name($provider);
+                $unratedrules = array_merge($unratedrules, $ruleids);
+            }
+        }
+        if ($unrated) {
+            return new result(
+                result::ERROR,
+                get_string('check:budgetrates:noprovider', 'local_airouter', [
+                    'providers' => implode(', ', $unrated),
+                    'rules' => count(array_unique($unratedrules)),
+                ]),
+                get_string('check:budgetrates:noprovider_details', 'local_airouter'),
+            );
+        }
+
         $counts = $DB->get_record_sql(
             'SELECT COUNT(*) AS total,
                     SUM(CASE WHEN cost IS NULL THEN 0 ELSE 1 END) AS costed
-               FROM {' . usage_logger::TABLE . '}
-              WHERE timecreated >= :from',
-            ['from' => time() - self::WINDOW_DAYS * DAYSECS],
+               FROM {' . usage_recorder::ATTEMPT_TABLE . '}
+              WHERE state <> :started AND timeended IS NOT NULL AND timeended >= :from',
+            ['started' => attempt_state::STARTED, 'from' => summariser::days_before(time(), self::WINDOW_DAYS)],
         );
         $total = (int) ($counts->total ?? 0);
         $costed = (int) ($counts->costed ?? 0);
@@ -105,15 +135,16 @@ class budgetrates extends base {
     }
 
     /**
-     * How many enabled rules hold a budget that has to be priced to work.
+     * The providers named by enabled rules holding a budget in money, with their rules.
      *
      * The metric is inside the condition's configuration rather than in a column, so
      * the rows are read and decoded here. There are as many of them as there are
      * budget conditions on the site, which is a handful.
      *
-     * @return int The number of rules.
+     * @return int[][] Rule ids keyed by provider component; an empty component for a
+     *                 budget that names none.
      */
-    protected function count_costed_rules(): int {
+    protected function providers_of_costed_rules(): array {
         global $DB;
 
         $records = $DB->get_records_sql(
@@ -123,17 +154,18 @@ class budgetrates extends base {
               WHERE c.type = :type AND r.enabled = 1',
             ['type' => budget::get_type()],
         );
-        $ruleids = [];
+        $providers = [];
         foreach ($records as $record) {
             $config = json_decode((string) $record->configdata, true);
             if (!is_array($config)) {
                 continue;
             }
-            if ((new budget($config))->get_metric() === spend_ledger::METRIC_COST) {
-                $ruleids[(int) $record->ruleid] = true;
+            $condition = new budget($config);
+            if ($condition->get_metric() === ledger::METRIC_COST) {
+                $providers[$condition->get_provider()][] = (int) $record->ruleid;
             }
         }
 
-        return count($ruleids);
+        return $providers;
     }
 }

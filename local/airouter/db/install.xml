@@ -179,6 +179,7 @@
         <FIELD NAME="kind" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="What the limit is about: the site, a course, a person, or one brought key."/>
         <FIELD NAME="subjectid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The course, person or key. Zero for the site, which has only one."/>
         <FIELD NAME="metric" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="cost" SEQUENCE="false" COMMENT="What the limit counted: money, or requests. Part of the key, because the same subject can be held to a limit of each kind and they are reached at different moments."/>
+        <FIELD NAME="provider" TYPE="char" LENGTH="60" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="The provider a limit in money was about, since money is counted per provider. A dash for a limit in requests. Part of the key, because one subject can be held to a limit at each of two providers."/>
         <FIELD NAME="limitamount" TYPE="number" LENGTH="12" NOTNULL="true" SEQUENCE="false" DECIMALS="6" COMMENT="The limit this was about. Part of the key, because one subject can have several budgets set on it by different rules."/>
         <FIELD NAME="threshold" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="100" SEQUENCE="false" COMMENT="Which share of the limit was crossed, as a percentage. An early warning and the limit itself are told apart by this."/>
         <FIELD NAME="periodstart" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The start of the stretch of time the limit was about, for a limit measured over a calendar month. Zero for a rolling period, whose start moves every day and would otherwise make this say something new each morning. Part of the key, so that February gets its own answer rather than inheriting January's."/>
@@ -189,7 +190,7 @@
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
       </KEYS>
       <INDEXES>
-        <INDEX NAME="kind-subjectid-metric-limitamount-threshold-periodstart-perioddays" UNIQUE="true" FIELDS="kind, subjectid, metric, limitamount, threshold, periodstart, perioddays"/>
+        <INDEX NAME="kind-subjectid-metric-provider-limitamount-threshold-periodstart-perioddays" UNIQUE="true" FIELDS="kind, subjectid, metric, provider, limitamount, threshold, periodstart, perioddays"/>
       </INDEXES>
     </TABLE>
     <TABLE NAME="local_airouter_request" COMMENT="One row per AI request the router handled, from the moment it arrived. Says who asked, where, for what, and how it ended; what was tried on its behalf is in local_airouter_attempt. The two are kept apart so that a request is always one row however many providers it took, which is what a budget counted in requests needs, and so that every provider call leaves a row of its own, which is what a bill needs.">

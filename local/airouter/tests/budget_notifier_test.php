@@ -17,6 +17,8 @@
 namespace local_airouter;
 
 use local_airouter\condition\budget;
+use local_airouter\record\ledger;
+use local_airouter\record\usage_recorder;
 
 /**
  * Tests for saying, once, that a budget has been reached.
@@ -47,8 +49,15 @@ final class budget_notifier_test extends \advanced_testcase {
         $this->resetAfterTest();
         self::setTimezone('UTC', 'UTC');
         $this->preventResetByRollback();
-        $this->notifier = new budget_notifier($DB, new spend_ledger($DB, null, false));
+        $this->notifier = new budget_notifier($DB, new ledger($DB, false));
         $this->now = time();
+        // Money is counted at a provider in the currency of its rates, so the provider
+        // the requests below went to has a rate, in dollars.
+        $rate = new price();
+        $rate->set('provider', 'aiprovider_openai');
+        $rate->set('currency', 'USD');
+        $rate->set('promptrate', 1.0);
+        $rate->create();
     }
 
     /**
@@ -66,8 +75,8 @@ final class budget_notifier_test extends \advanced_testcase {
     protected function budget_rule(
         string $scope,
         float $amount,
-        string $period = spend_ledger::PERIOD_MONTH,
-        string $metric = spend_ledger::METRIC_COST,
+        string $period = ledger::PERIOD_MONTH,
+        string $metric = ledger::METRIC_COST,
         array $conditions = [],
         array $window = [],
         int $days = 30,
@@ -85,6 +94,7 @@ final class budget_notifier_test extends \advanced_testcase {
             'scope' => $scope,
             'direction' => budget::DIRECTION_UNDER,
             'metric' => $metric,
+            'provider' => $metric === ledger::METRIC_COST ? 'aiprovider_openai' : '',
             'amount' => $amount,
             'period' => $period,
             'days' => $days,
@@ -92,34 +102,42 @@ final class budget_notifier_test extends \advanced_testcase {
     }
 
     /**
-     * Write one recorded request the site paid for.
+     * Record one request the site paid for, as the request and attempt records hold it.
      *
-     * @param float|null $cost What it cost.
-     * @param array $fields Anything else to record.
+     * @param float|null $cost What it cost, or null when no rate covered it.
+     * @param array $fields Anything else to record: userid, courseid, keysource, targetid.
      */
     protected function spent(?float $cost, array $fields = []): void {
-        global $DB;
-
-        $DB->insert_record(usage_logger::TABLE, (object) ($fields + [
-            'timecreated' => time() - MINSECS,
-            'userid' => 0,
-            'contextid' => 0,
-            'courseid' => null,
-            'actionname' => 'generate_text',
-            'targetid' => 1,
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $keysource = $fields['keysource'] ?? rule::KEYSOURCE_SITE;
+        $when = (int) ($fields['timecreated'] ?? time() - MINSECS);
+        $request = $generator->create_request([
+            'userid' => $fields['userid'] ?? 0,
+            'courseid' => $fields['courseid'] ?? null,
+            'keysource' => $keysource,
+            'answeredby' => $fields['targetid'] ?? 1,
+            'timestarted' => $when,
+            'timeended' => $when,
+        ]);
+        $generator->create_attempt([
+            'requestid' => $request->id,
+            'targetid' => $fields['targetid'] ?? 1,
             'targetname' => 'Target one',
             'targetprovider' => 'aiprovider_openai',
             'model' => 'gpt-4o',
-            'currency' => 'USD',
-            'success' => 1,
-            'attempts' => 1,
+            'keysource' => $keysource,
+            'keyid' => $fields['keyid'] ?? null,
+            'prompttokens' => 100,
+            'completiontokens' => 50,
             'cost' => $cost,
-            'keysource' => usage_logger::KEY_SITE,
-        ]));
+            'currency' => $cost === null ? null : 'USD',
+            'timestarted' => $when,
+            'timeended' => $when,
+        ]);
     }
 
     public function test_a_budget_that_has_been_reached_is_announced_once(): void {
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         $this->spent(10.0);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
@@ -134,7 +152,7 @@ final class budget_notifier_test extends \advanced_testcase {
     }
 
     public function test_an_early_warning_and_the_budget_itself_are_told_apart(): void {
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         $this->spent(8.0);
         set_config(budget_notifier::SHARE_SETTING, 80, 'local_airouter');
 
@@ -150,14 +168,15 @@ final class budget_notifier_test extends \advanced_testcase {
 
     public function test_spending_that_eases_off_can_be_announced_again(): void {
         global $DB;
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0, spend_ledger::PERIOD_ROLLING);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0, ledger::PERIOD_ROLLING);
         $this->spent(10.0);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
         $sink = $this->redirectMessages();
         $this->notifier->run($this->now);
         // The next calendar month, or a rolling window that has moved past the spike.
-        $DB->delete_records(usage_logger::TABLE);
+        $DB->delete_records(usage_recorder::ATTEMPT_TABLE);
+        $DB->delete_records(usage_recorder::REQUEST_TABLE);
         $eased = $this->notifier->run($this->now);
         $this->spent(10.0);
         $again = $this->notifier->run($this->now);
@@ -170,7 +189,7 @@ final class budget_notifier_test extends \advanced_testcase {
     }
 
     public function test_spending_nobody_can_price_is_not_announced(): void {
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         // A site with no rates entered. The status report is where that gets said; by
         // mail, every morning, would be a worse way to make the same point.
         $this->spent(null);
@@ -184,7 +203,7 @@ final class budget_notifier_test extends \advanced_testcase {
     }
 
     public function test_a_site_can_switch_the_notices_off(): void {
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         $this->spent(10.0);
         set_config(budget_notifier::ENABLED_SETTING, 0, 'local_airouter');
 
@@ -199,7 +218,7 @@ final class budget_notifier_test extends \advanced_testcase {
         $course = $this->getDataGenerator()->create_course();
         $teacher = $this->getDataGenerator()->create_user();
         $this->getDataGenerator()->enrol_user($teacher->id, $course->id, 'editingteacher');
-        $this->budget_rule(spend_ledger::SCOPE_COURSE, 10.0);
+        $this->budget_rule(ledger::SCOPE_COURSE, 10.0);
         $this->spent(10.0, ['courseid' => (int) $course->id]);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
@@ -219,7 +238,7 @@ final class budget_notifier_test extends \advanced_testcase {
     }
 
     public function test_the_people_who_watch_the_spending_are_told_the_figures(): void {
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         $this->spent(10.0);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
@@ -242,13 +261,13 @@ final class budget_notifier_test extends \advanced_testcase {
     public static function watchers(): array {
         return [
             // A manager may see the named report, so a budget about one person is theirs.
-            'a manager, about one person' => ['manager', spend_ledger::SCOPE_USER, true],
+            'a manager, about one person' => ['manager', ledger::SCOPE_USER, true],
             // The same manager cannot open the site's own spending screen, so the
             // site's figures are not theirs to be sent either.
-            'a manager, about the site' => ['manager', spend_ledger::SCOPE_SITE, false],
+            'a manager, about the site' => ['manager', ledger::SCOPE_SITE, false],
             // The course monitor shows a course's figures and names nobody. It is not
             // a way to be told what one person spent.
-            'a course monitor, about one person' => ['teacher', spend_ledger::SCOPE_USER, false],
+            'a course monitor, about one person' => ['teacher', ledger::SCOPE_USER, false],
         ];
     }
 
@@ -274,7 +293,7 @@ final class budget_notifier_test extends \advanced_testcase {
 
         $spender = $this->getDataGenerator()->create_user();
         $this->budget_rule($scope, 10.0);
-        $this->spent(10.0, $scope === spend_ledger::SCOPE_USER ? ['userid' => (int) $spender->id] : []);
+        $this->spent(10.0, $scope === ledger::SCOPE_USER ? ['userid' => (int) $spender->id] : []);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
         $sink = $this->redirectMessages();
@@ -298,7 +317,7 @@ final class budget_notifier_test extends \advanced_testcase {
         $user = $this->getDataGenerator()->create_user();
         $repository = new key_repository($DB);
         $saved = $repository->save(key::SCOPE_USER, (int) $user->id, 4, 'sk-their-own-key');
-        $repository->set_cap($saved, 5.0, spend_ledger::PERIOD_MONTH, 30);
+        $repository->set_cap($saved, 5.0, ledger::PERIOD_MONTH, 30);
         $this->spent(5.0, [
             'userid' => (int) $user->id,
             'targetid' => 4,
@@ -320,8 +339,8 @@ final class budget_notifier_test extends \advanced_testcase {
 
     public function test_two_rules_asking_for_the_same_budget_are_one_budget(): void {
         global $DB;
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         $this->spent(10.0);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
@@ -342,7 +361,7 @@ final class budget_notifier_test extends \advanced_testcase {
         // is the shape of one that has told nobody about its spending. The point is
         // that nothing is written down as said when it was not.
         set_config('siteadmins', '');
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         $this->spent(10.0);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
@@ -357,7 +376,7 @@ final class budget_notifier_test extends \advanced_testcase {
     public function test_the_administrators_hear_about_it_without_holding_a_role(): void {
         // The core function get_users_by_capability() does not return administrators,
         // so a list built from it alone would leave most sites hearing nothing at all.
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         $this->spent(10.0);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
@@ -372,7 +391,7 @@ final class budget_notifier_test extends \advanced_testcase {
 
     public function test_a_disabled_rule_sets_no_budget(): void {
         global $DB;
-        $record = $this->budget_rule(spend_ledger::SCOPE_SITE, 10.0);
+        $record = $this->budget_rule(ledger::SCOPE_SITE, 10.0);
         $record->set('enabled', 0);
         $record->update();
         $this->spent(10.0);
@@ -385,7 +404,7 @@ final class budget_notifier_test extends \advanced_testcase {
     }
 
     public function test_a_budget_in_requests_is_announced_on_a_site_with_no_rates(): void {
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 3.0, spend_ledger::PERIOD_MONTH, spend_ledger::METRIC_REQUESTS);
+        $this->budget_rule(ledger::SCOPE_SITE, 3.0, ledger::PERIOD_MONTH, ledger::METRIC_REQUESTS);
         $this->spent(null);
         $this->spent(null);
         $this->spent(null);
@@ -414,7 +433,7 @@ final class budget_notifier_test extends \advanced_testcase {
         // and when they reach the limit again in February the note says it has
         // already been announced.
         $spender = $this->getDataGenerator()->create_user();
-        $this->budget_rule(spend_ledger::SCOPE_USER, 10.0);
+        $this->budget_rule(ledger::SCOPE_USER, 10.0);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
         $january = make_timestamp(2026, 1, 20, 12, 0, 0);
         $february = make_timestamp(2026, 2, 20, 12, 0, 0);
@@ -445,12 +464,12 @@ final class budget_notifier_test extends \advanced_testcase {
         // The same subject, the same amount, the same metric, counted once over this
         // month and once over the last day. They are reached at different moments and
         // what has been said about one is not an answer about the other.
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 3.0, spend_ledger::PERIOD_MONTH, spend_ledger::METRIC_REQUESTS);
+        $this->budget_rule(ledger::SCOPE_SITE, 3.0, ledger::PERIOD_MONTH, ledger::METRIC_REQUESTS);
         $this->budget_rule(
-            spend_ledger::SCOPE_SITE,
+            ledger::SCOPE_SITE,
             3.0,
-            spend_ledger::PERIOD_ROLLING,
-            spend_ledger::METRIC_REQUESTS,
+            ledger::PERIOD_ROLLING,
+            ledger::METRIC_REQUESTS,
             days: 1,
         );
         $this->spent(1.0);
@@ -467,7 +486,7 @@ final class budget_notifier_test extends \advanced_testcase {
 
     public function test_a_rule_whose_dates_have_passed_sets_no_budget(): void {
         $this->budget_rule(
-            spend_ledger::SCOPE_SITE,
+            ledger::SCOPE_SITE,
             10.0,
             window: ['timeend' => $this->now - DAYSECS],
         );
@@ -489,7 +508,7 @@ final class budget_notifier_test extends \advanced_testcase {
         unset($teacher);
 
         $this->budget_rule(
-            spend_ledger::SCOPE_COURSE,
+            ledger::SCOPE_COURSE,
             10.0,
             conditions: ['course' => ['courseids' => [(int) $watched->id]]],
         );
@@ -515,7 +534,7 @@ final class budget_notifier_test extends \advanced_testcase {
         $owner = $this->getDataGenerator()->create_user();
         $this->setUser($owner);
         $key = (new key_repository($DB))->save(key::SCOPE_USER, (int) $owner->id, 3, 'their-own-key-ab');
-        (new key_repository($DB))->set_cap($key, 10.0, spend_ledger::PERIOD_MONTH, 30);
+        (new key_repository($DB))->set_cap($key, 10.0, ledger::PERIOD_MONTH, 30);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
         $this->spent(10.0, [
@@ -555,7 +574,7 @@ final class budget_notifier_test extends \advanced_testcase {
 
         foreach ([3, 4] as $targetid) {
             $key = $repository->save(key::SCOPE_USER, (int) $owner->id, $targetid, "their-key-at-{$targetid}");
-            $repository->set_cap($key, 10.0, spend_ledger::PERIOD_MONTH, 30);
+            $repository->set_cap($key, 10.0, ledger::PERIOD_MONTH, 30);
             $this->spent(10.0, [
                 'userid' => (int) $owner->id,
                 'keysource' => rule::KEYSOURCE_USER,
@@ -584,7 +603,7 @@ final class budget_notifier_test extends \advanced_testcase {
         // A category condition restricts a rule to the courses under it just as
         // surely as naming them one by one does.
         $this->budget_rule(
-            spend_ledger::SCOPE_COURSE,
+            ledger::SCOPE_COURSE,
             10.0,
             conditions: ['category' => ['categoryids' => [(int) $watched->id]]],
         );
@@ -609,7 +628,7 @@ final class budget_notifier_test extends \advanced_testcase {
         // empty turned the first into the second, and a budget meant for one empty
         // category announced itself to every course on the site.
         $this->budget_rule(
-            spend_ledger::SCOPE_COURSE,
+            ledger::SCOPE_COURSE,
             10.0,
             conditions: ['category' => ['categoryids' => [(int) $empty->id]]],
         );
@@ -634,7 +653,7 @@ final class budget_notifier_test extends \advanced_testcase {
 
         // A course further down the tree is inside the category as well.
         $this->budget_rule(
-            spend_ledger::SCOPE_COURSE,
+            ledger::SCOPE_COURSE,
             10.0,
             conditions: ['category' => ['categoryids' => [(int) $watched->id]]],
         );
@@ -650,8 +669,8 @@ final class budget_notifier_test extends \advanced_testcase {
         // Three requests, and three of whatever the site's money is called. The two
         // limits are the same number and are reached at different moments, so what has
         // been said about one must not count as having been said about the other.
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 3.0, spend_ledger::PERIOD_MONTH, spend_ledger::METRIC_REQUESTS);
-        $this->budget_rule(spend_ledger::SCOPE_SITE, 3.0, spend_ledger::PERIOD_MONTH, spend_ledger::METRIC_COST);
+        $this->budget_rule(ledger::SCOPE_SITE, 3.0, ledger::PERIOD_MONTH, ledger::METRIC_REQUESTS);
+        $this->budget_rule(ledger::SCOPE_SITE, 3.0, ledger::PERIOD_MONTH, ledger::METRIC_COST);
         $this->spent(1.0);
         $this->spent(1.0);
         $this->spent(1.0);

@@ -17,6 +17,8 @@
 namespace local_airouter;
 
 use local_airouter\condition\budget;
+use local_airouter\record\ledger;
+use local_airouter\record\spend;
 
 /**
  * Says once, afterwards, that a budget or a key's limit has been reached.
@@ -85,16 +87,16 @@ class budget_notifier {
      * Constructor.
      *
      * @param \moodle_database $db The database to work on.
-     * @param spend_ledger|null $ledger The ledger. Uncached by default: a figure acted
+     * @param ledger|null $ledger The ledger. Uncached by default: a figure acted
      *                                  on once a day is worth a query.
      */
     public function __construct(
         /** @var \moodle_database The database. */
         protected readonly \moodle_database $db,
-        /** @var spend_ledger|null The ledger. */
-        protected ?spend_ledger $ledger = null,
+        /** @var ledger|null The ledger. */
+        protected ?ledger $ledger = null,
     ) {
-        $this->ledger ??= new spend_ledger($db, null, false);
+        $this->ledger ??= new ledger($db, false);
     }
 
     /**
@@ -116,12 +118,12 @@ class budget_notifier {
             // rolling period begins a day later every morning, so naming it that way
             // would make every morning a new period and say the same thing again.
             $stamp = (object) [
-                'periodstart' => $budget->period === spend_ledger::PERIOD_MONTH ? $from : 0,
-                'perioddays' => $budget->period === spend_ledger::PERIOD_MONTH ? 0 : max(1, (int) $budget->days),
+                'periodstart' => $budget->period === ledger::PERIOD_MONTH ? $from : 0,
+                'perioddays' => $budget->period === ledger::PERIOD_MONTH ? 0 : max(1, (int) $budget->days),
             ];
 
-            if ($budget->scope === spend_ledger::SCOPE_SITE) {
-                $spending = [0 => $this->ledger->measure(spend_ledger::SCOPE_SITE, 0, $from, $to)];
+            if ($budget->scope === ledger::SCOPE_SITE) {
+                $spending = [0 => $this->ledger->measure(ledger::SCOPE_SITE, 0, $from, $to)];
             } else {
                 $spending = $this->ledger->measure_each($budget->scope, $from, $to);
                 $spending = $this->within_scope($budget, $spending);
@@ -136,6 +138,7 @@ class budget_notifier {
                     $spend,
                     $budget->amount,
                     $budget->metric,
+                    (string) ($budget->provider ?? ''),
                     $now,
                     $stamp,
                     $reached,
@@ -153,8 +156,8 @@ class budget_notifier {
             // about January was still on record and February went unannounced.
             [$capfrom] = $this->ledger->get_window($key->get_cap_period(), $key->get_cap_days(), $now);
             $capstamp = (object) [
-                'periodstart' => $key->get_cap_period() === spend_ledger::PERIOD_MONTH ? $capfrom : 0,
-                'perioddays' => $key->get_cap_period() === spend_ledger::PERIOD_MONTH
+                'periodstart' => $key->get_cap_period() === ledger::PERIOD_MONTH ? $capfrom : 0,
+                'perioddays' => $key->get_cap_period() === ledger::PERIOD_MONTH
                     ? 0
                     : max(1, (int) $key->get_cap_days()),
             ];
@@ -171,7 +174,8 @@ class budget_notifier {
                 (int) $key->get('id'),
                 $spend,
                 $key->get_cap_amount(),
-                spend_ledger::METRIC_COST,
+                ledger::METRIC_COST,
+                $spend->sole_provider(),
                 $now,
                 $capstamp,
             );
@@ -225,6 +229,7 @@ class budget_notifier {
      * @param spend $spend What has been spent.
      * @param float $limit The limit.
      * @param string $metric What the limit counts.
+     * @param string $provider The provider a limit in money is about, or an empty string.
      * @param int $now The current time.
      * @param \stdClass|null $stamp Which stretch of time this is, as periodstart and
      *                              perioddays. Null for a limit somebody put on their
@@ -239,12 +244,13 @@ class budget_notifier {
         spend $spend,
         float $limit,
         string $metric,
+        string $provider,
         int $now,
         ?\stdClass $stamp = null,
         array &$reached = [],
     ): void {
         $stamp ??= (object) ['periodstart' => 0, 'perioddays' => 0];
-        if ($limit <= 0 || !$spend->is_known($metric)) {
+        if ($limit <= 0 || !$spend->is_known($metric, $provider)) {
             // Nothing can be said about spending nobody can work out. The status report
             // is where a site is told that its rates are missing; saying it again here,
             // by mail, every day, would be a worse way to make the same point.
@@ -253,7 +259,7 @@ class budget_notifier {
 
         foreach (self::get_thresholds() as $threshold) {
             $result['checked']++;
-            $over = $spend->get_measure($metric) >= $limit * $threshold / 100;
+            $over = $spend->get_measure($metric, $provider) >= $limit * $threshold / 100;
             // The metric and the stretch of time are both part of what is being
             // remembered. A course held to 3000 JPY and to 3000 requests has two
             // limits, reached at different moments, and a course held to 3000 this
@@ -263,6 +269,7 @@ class budget_notifier {
                 'kind' => $kind,
                 'subjectid' => $subjectid,
                 'metric' => $metric,
+                'provider' => $provider === '' ? '-' : $provider,
                 'limitamount' => $limit,
                 'threshold' => $threshold,
                 'periodstart' => (int) $stamp->periodstart,
@@ -275,7 +282,7 @@ class budget_notifier {
             }
 
             if ($over && $remembered === false) {
-                if (!$this->announce($kind, $subjectid, $spend, $limit, $metric, $threshold)) {
+                if (!$this->announce($kind, $subjectid, $spend, $limit, $metric, $provider, $threshold)) {
                     // Nobody to tell. Not remembered as said, because it was not:
                     // recording it would mean that giving somebody the role tomorrow
                     // would still leave them hearing nothing.
@@ -337,11 +344,12 @@ class budget_notifier {
         array $reached,
     ): void {
         foreach (self::get_thresholds() as $threshold) {
-            $where = 'kind = :kind AND metric = :metric AND limitamount = :limitamount
+            $where = 'kind = :kind AND metric = :metric AND provider = :provider AND limitamount = :limitamount
                       AND threshold = :threshold AND perioddays = :perioddays';
             $params = [
                 'kind' => $budget->scope,
                 'metric' => $budget->metric,
+                'provider' => (string) ($budget->provider ?? '') === '' ? '-' : (string) $budget->provider,
                 'limitamount' => $budget->amount,
                 'threshold' => $threshold,
                 'perioddays' => (int) $stamp->perioddays,
@@ -378,7 +386,7 @@ class budget_notifier {
      */
     protected function within_scope(\stdClass $budget, array $spending): array {
         $courseids = $budget->courseids ?? null;
-        if ($courseids === null || $budget->scope !== spend_ledger::SCOPE_COURSE) {
+        if ($courseids === null || $budget->scope !== ledger::SCOPE_COURSE) {
             return $spending;
         }
 
@@ -399,6 +407,7 @@ class budget_notifier {
      * @param spend $spend What has been spent.
      * @param float $limit The limit.
      * @param string $metric What the limit counts.
+     * @param string $provider The provider a limit in money is about, or an empty string.
      * @param int $threshold The share of it that has been crossed.
      * @return bool True when somebody was told.
      */
@@ -408,16 +417,17 @@ class budget_notifier {
         spend $spend,
         float $limit,
         string $metric,
+        string $provider,
         int $threshold,
     ): bool {
-        // Both figures carry the unit that says what they count, so the sentences
-        // around them do not have to be written twice.
+        // Both figures carry the unit that says what they count, and the provider
+        // they are about, so the sentences around them do not have to be written twice.
         $figures = (object) [
-            'amount' => budget::label_amount($spend->get_measure($metric), $metric),
-            'limit' => budget::label_amount($limit, $metric),
+            'amount' => budget::label_amount($spend->get_measure($metric, $provider), $metric, $provider),
+            'limit' => budget::label_amount($limit, $metric, $provider),
             'subject' => $this->describe($kind, $subjectid),
         ];
-        $figures->share = min(999, (int) round($spend->get_measure($metric) / $limit * 100));
+        $figures->share = min(999, (int) round($spend->get_measure($metric, $provider) / $limit * 100));
         $suffix = $threshold >= 100 ? 'reached' : 'nearly';
 
         if ($kind === self::KIND_KEY) {
@@ -491,7 +501,7 @@ class budget_notifier {
                 : format_string($name);
         }
         if ($kind === self::KIND_USER) {
-            $names = user_report::get_names([$subjectid]);
+            $names = record\person_reader::get_names([$subjectid]);
 
             return $names[$subjectid] ?? get_string('report:goneuser', 'local_airouter', $subjectid);
         }

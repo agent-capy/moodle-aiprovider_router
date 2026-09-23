@@ -174,7 +174,11 @@ class reader {
         $rows = [];
         $this->collect($rows, $fields, $this->summarised($fields, $from, $to, $courseid, $keysource));
         $this->collect($rows, $fields, $this->detailed($fields, $from, $to, $courseid, $keysource));
-        uasort($rows, fn($a, $b) => $b->requests <=> $a->requests);
+        // Busiest first, and among equals by their key: the database hands grouped
+        // rows out in no particular order, and the same figures should read the same
+        // way before and after they have been summarised.
+        $requests = array_map(fn($row) => (int) $row->requests, $rows);
+        uksort($rows, fn($a, $b) => ($requests[$b] <=> $requests[$a]) ?: strcmp((string) $a, (string) $b));
 
         return array_values($rows);
     }
@@ -377,6 +381,7 @@ class reader {
      * @param int|null $courseid Limit to one course, or null for the whole site.
      * @param string|null $keysource Limit to one payer, or null for all.
      * @param int|null $userid Limit to one person, or null for everybody.
+     * @param int|null $targetid Limit to one delegation target, or null for all.
      * @return \stdClass[] Normalised rows carrying the group fields and the metrics.
      */
     protected function summarised(
@@ -386,6 +391,7 @@ class reader {
         ?int $courseid,
         ?string $keysource,
         ?int $userid = null,
+        ?int $targetid = null,
     ): array {
         $where = 'daystart >= :from AND daystart < :to';
         $params = ['from' => $from, 'to' => $to];
@@ -400,6 +406,10 @@ class reader {
         if ($userid !== null) {
             $where .= ' AND userid = :userid';
             $params['userid'] = $userid;
+        }
+        if ($targetid !== null) {
+            $where .= ' AND targetid = :targetid';
+            $params['targetid'] = $targetid;
         }
         // The provider and its currency have to be part of every grouping: money is
         // one figure per provider, and a row that mixed two could not be read.
@@ -447,6 +457,8 @@ class reader {
      * @param int|null $courseid Limit to one course, or null for the whole site.
      * @param string|null $keysource Limit to one payer, or null for all.
      * @param int|null $userid Limit to one person, or null for everybody.
+     * @param int|null $targetid Limit to one delegation target, or null for all. A
+     *                           request counts as that target's when it answered.
      * @return \stdClass[] Normalised rows carrying the group fields and the metrics.
      */
     protected function detailed(
@@ -456,10 +468,16 @@ class reader {
         ?int $courseid,
         ?string $keysource,
         ?int $userid = null,
+        ?int $targetid = null,
     ): array {
         $params = ['from' => $from, 'to' => $to];
         $rwhere = 'r.applied = 0 AND r.state <> :open AND r.timeended >= :from AND r.timeended < :to';
         $awhere = 'a.applied = 0 AND a.state <> :started AND a.timeended >= :from AND a.timeended < :to';
+        if ($targetid !== null) {
+            $rwhere .= ' AND r.answeredby = :targetid';
+            $awhere .= ' AND a.targetid = :targetid';
+            $params['targetid'] = $targetid;
+        }
         if ($courseid !== null) {
             $rwhere .= ' AND r.courseid = :courseid';
             $awhere .= ' AND r.courseid = :courseid';

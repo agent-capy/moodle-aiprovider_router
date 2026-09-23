@@ -54,6 +54,9 @@ class summariser {
     /** @var string The reason written on a request given up on. */
     public const REASON_LOST = 'lost';
 
+    /** @var string Config holding the first moment this site can still account for. Shared with the older record. */
+    public const HISTORY_SETTING = 'historyfrom';
+
     /** @var int How many ids one marking statement carries. */
     protected const CHUNK = 500;
 
@@ -279,9 +282,57 @@ class summariser {
         $count = $this->db->count_records_select(self::TABLE, 'daystart < :cutoff', $params);
         if ($count > 0) {
             $this->db->delete_records_select(self::TABLE, 'daystart < :cutoff', $params);
+            self::record_history_from($params['cutoff']);
         }
 
         return $count;
+    }
+
+    /**
+     * The first moment this site can still account for, or zero when it has discarded nothing.
+     *
+     * Set by the purge when it discards a summarised day, and only ever moved forward:
+     * a budget looking back past it counts a period the site cannot account for in
+     * full, which is worth saying rather than guessing from whatever rows are left.
+     *
+     * @return int The moment, or zero.
+     */
+    public static function get_history_from(): int {
+        return max(0, (int) get_config('local_airouter', self::HISTORY_SETTING));
+    }
+
+    /**
+     * Note that everything before a moment has been discarded.
+     *
+     * Only ever moves forward. Two purges under different retention settings must not
+     * let the later, shorter one say the site remembers more than it does.
+     *
+     * @param int $from The first moment still covered.
+     */
+    protected static function record_history_from(int $from): void {
+        if ($from > self::get_history_from()) {
+            set_config(self::HISTORY_SETTING, $from, 'local_airouter');
+        }
+    }
+
+    /**
+     * Midnight of the first day of the month a moment falls in, in the server timezone.
+     *
+     * Worked out through the calendar rather than by counting days: months are not
+     * all the same length, and a limit counted by the calendar month has to start
+     * where the calendar says it does.
+     *
+     * @param int $time The moment.
+     * @return int Midnight of the first of that month.
+     */
+    public static function month_of(int $time): int {
+        $zone = new \DateTimeZone(\core_date::get_server_timezone());
+
+        return (new \DateTimeImmutable('@' . $time))
+            ->setTimezone($zone)
+            ->modify('first day of this month')
+            ->setTime(0, 0)
+            ->getTimestamp();
     }
 
     /**

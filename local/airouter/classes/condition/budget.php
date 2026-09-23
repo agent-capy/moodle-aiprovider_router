@@ -18,8 +18,10 @@ namespace local_airouter\condition;
 
 use local_airouter\evaluation_context;
 use local_airouter\price_book;
-use local_airouter\spend_ledger;
-use local_airouter\usage_aggregator;
+use local_airouter\record\ledger;
+use local_airouter\record\summariser;
+use local_airouter\target_resolver;
+use local_airouter\usage_formatter;
 
 /**
  * Restricts a rule by how much has been spent already.
@@ -48,10 +50,14 @@ use local_airouter\usage_aggregator;
  * make every limit here meaningless. The status report says so where a rule routes by
  * budget and the rates are missing.
  *
- * A budget can be counted in requests instead of money, and then none of that applies:
- * requests are counted rather than priced, so the figure is always there. That is the
- * measure for a site running its own models, which cost nothing to price and everything
- * to queue, and for a provider whose free allowance is written in requests per month
+ * A budget in money names a provider and counts that provider's money alone, in the
+ * currency the provider bills in: money is never added across providers, so a site
+ * whose budget is one figure for all its AI sets a budget per provider and adds them
+ * up itself. A budget can be counted in requests instead of money, and then none of
+ * that applies: requests are counted rather than priced, so the figure is always
+ * there, and every request counts whatever provider answered it. That is the measure
+ * for a site running its own models, which cost nothing to price and everything to
+ * queue, and for a provider whose free allowance is written in requests per month
  * rather than in money.
  *
  * @package    local_airouter
@@ -81,13 +87,14 @@ class budget extends base {
         $scope = $this->get_scope();
         $direction = $this->get_direction();
         $metric = $this->get_metric();
-        if ($amount <= 0 || $scope === '' || $direction === '') {
+        $provider = $this->get_provider();
+        if ($amount <= 0 || $scope === '' || $direction === '' || ($metric === ledger::METRIC_COST && $provider === '')) {
             // An unfinished condition narrows the rule rather than widening it.
             return false;
         }
 
         $scopeid = $this->get_scopeid($scope, $context);
-        if ($scope !== spend_ledger::SCOPE_SITE && $scopeid <= 0) {
+        if ($scope !== ledger::SCOPE_SITE && $scopeid <= 0) {
             // A budget for a course, asked about a request that belongs to no course.
             // Not met either way round: there is no budget here to be inside or past.
             return false;
@@ -100,7 +107,7 @@ class budget extends base {
             $this->get_days(),
             time(),
         );
-        $reached = $spend->has_reached($amount, $metric);
+        $reached = $spend->has_reached($amount, $metric, $provider);
         if ($reached === null) {
             // Nobody can say what has been spent, so nobody can say there is room.
             // Only money reaches here: a count of requests is always known.
@@ -149,7 +156,7 @@ class budget extends base {
     public function get_scope(): string {
         $scope = (string) ($this->config['scope'] ?? '');
 
-        return in_array($scope, spend_ledger::get_scopes(), true) ? $scope : '';
+        return in_array($scope, ledger::get_scopes(), true) ? $scope : '';
     }
 
     /**
@@ -174,15 +181,25 @@ class budget extends base {
     public function get_metric(): string {
         $metric = (string) ($this->config['metric'] ?? '');
 
-        return $metric === spend_ledger::METRIC_REQUESTS
-            ? spend_ledger::METRIC_REQUESTS
-            : spend_ledger::METRIC_COST;
+        return $metric === ledger::METRIC_REQUESTS
+            ? ledger::METRIC_REQUESTS
+            : ledger::METRIC_COST;
+    }
+
+    /**
+     * Whose money a budget in money counts.
+     *
+     * @return string The provider component, or an empty string where none is set,
+     *                which for a budget in money is an unfinished condition.
+     */
+    public function get_provider(): string {
+        return trim((string) ($this->config['provider'] ?? ''));
     }
 
     /**
      * The limit being compared against.
      *
-     * @return float The amount, in the site currency, or a number of requests.
+     * @return float The amount, in the provider's currency, or a number of requests.
      */
     public function get_amount(): float {
         return (float) ($this->config['amount'] ?? 0);
@@ -194,7 +211,7 @@ class budget extends base {
      * @return string The figure and its unit.
      */
     public function get_amount_label(): string {
-        return self::label_amount($this->get_amount(), $this->get_metric());
+        return self::label_amount($this->get_amount(), $this->get_metric(), $this->get_provider());
     }
 
     /**
@@ -205,20 +222,32 @@ class budget extends base {
      * somebody typed, and handing it back with more precision than they gave it reads
      * as a different number.
      *
+     * An amount of money names the provider it is about and is in that provider's
+     * currency, which is the currency of its rates; a provider with no rates yet has
+     * no currency, and the figure is shown without one.
+     *
      * @param float $amount The figure.
      * @param string $metric What it counts.
+     * @param string $provider The provider a money figure is about.
      * @return string The figure and its unit.
      */
-    public static function label_amount(float $amount, string $metric): string {
-        if ($metric === spend_ledger::METRIC_REQUESTS) {
+    public static function label_amount(float $amount, string $metric, string $provider = ''): string {
+        global $DB;
+
+        if ($metric === ledger::METRIC_REQUESTS) {
             return get_string(
                 'condition:budget:requests',
                 'local_airouter',
                 number_format((float) round($amount)),
             );
         }
+        $currency = $provider === '' ? null : (new price_book($DB))->currency_of($provider);
+        $figure = format_float($amount, 2, true) . ($currency === null ? '' : ' ' . $currency);
 
-        return format_float($amount, 2, true) . ' ' . price_book::legacy_currency();
+        return get_string('condition:budget:cost', 'local_airouter', (object) [
+            'amount' => $figure,
+            'provider' => usage_formatter::provider_name($provider),
+        ]);
     }
 
     /**
@@ -229,9 +258,9 @@ class budget extends base {
     public function get_period(): string {
         $period = (string) ($this->config['period'] ?? '');
 
-        return $period === spend_ledger::PERIOD_MONTH
-            ? spend_ledger::PERIOD_MONTH
-            : spend_ledger::PERIOD_ROLLING;
+        return $period === ledger::PERIOD_MONTH
+            ? ledger::PERIOD_MONTH
+            : ledger::PERIOD_ROLLING;
     }
 
     /**
@@ -248,15 +277,15 @@ class budget extends base {
         $group = [
             $mform->createElement('select', 'budgetscope', '', [
                 '' => get_string('condition:budget:scope:none', 'local_airouter'),
-                spend_ledger::SCOPE_SITE => get_string('condition:budget:scope:site', 'local_airouter'),
-                spend_ledger::SCOPE_COURSE => get_string('condition:budget:scope:course', 'local_airouter'),
-                spend_ledger::SCOPE_USER => get_string('condition:budget:scope:user', 'local_airouter'),
+                ledger::SCOPE_SITE => get_string('condition:budget:scope:site', 'local_airouter'),
+                ledger::SCOPE_COURSE => get_string('condition:budget:scope:course', 'local_airouter'),
+                ledger::SCOPE_USER => get_string('condition:budget:scope:user', 'local_airouter'),
             ]),
             // What is being counted comes before the figure, because it decides what
             // the figure means, and in both languages the sentence wants it there.
             $mform->createElement('select', 'budgetmetric', '', [
-                spend_ledger::METRIC_COST => get_string('condition:budget:metric:cost', 'local_airouter'),
-                spend_ledger::METRIC_REQUESTS => get_string(
+                ledger::METRIC_COST => get_string('condition:budget:metric:cost', 'local_airouter'),
+                ledger::METRIC_REQUESTS => get_string(
                     'condition:budget:metric:requests',
                     'local_airouter',
                 ),
@@ -266,16 +295,23 @@ class budget extends base {
                 self::DIRECTION_OVER => get_string('condition:budget:over', 'local_airouter'),
             ]),
             $mform->createElement('text', 'budgetamount', '', ['size' => 10]),
-            // One unit is shown at a time. A budget in requests labelled with the site
-            // currency would be read as money by everybody who saw it.
-            $mform->createElement('static', 'budgetcurrency', '', price_book::legacy_currency()),
+            // Money is counted per provider, in the currency that provider bills in,
+            // so a budget in money says which provider it is about. A budget in
+            // requests counts every request whatever answered it, and hides this.
+            $mform->createElement(
+                'select',
+                'budgetprovider',
+                '',
+                ['' => get_string('condition:budget:provider:choose', 'local_airouter')]
+                    + target_resolver::get_provider_options(),
+            ),
             $mform->createElement('static', 'budgetrequests', '', get_string(
                 'condition:budget:unit:requests',
                 'local_airouter',
             )),
             $mform->createElement('select', 'budgetperiod', '', [
-                spend_ledger::PERIOD_ROLLING => get_string('condition:budget:period:rolling', 'local_airouter'),
-                spend_ledger::PERIOD_MONTH => get_string('condition:budget:period:month', 'local_airouter'),
+                ledger::PERIOD_ROLLING => get_string('condition:budget:period:rolling', 'local_airouter'),
+                ledger::PERIOD_MONTH => get_string('condition:budget:period:month', 'local_airouter'),
             ]),
             $mform->createElement('text', 'budgetdays', '', ['size' => 4]),
             $mform->createElement('static', 'budgetunit', '', get_string(
@@ -287,13 +323,13 @@ class budget extends base {
         $mform->setType('budgetamount', PARAM_RAW_TRIMMED);
         $mform->setType('budgetdays', PARAM_INT);
         $mform->setDefault('budgetdirection', self::DIRECTION_UNDER);
-        $mform->setDefault('budgetmetric', spend_ledger::METRIC_COST);
-        $mform->setDefault('budgetperiod', spend_ledger::PERIOD_ROLLING);
+        $mform->setDefault('budgetmetric', ledger::METRIC_COST);
+        $mform->setDefault('budgetperiod', ledger::PERIOD_ROLLING);
         $mform->setDefault('budgetdays', self::DEFAULT_DAYS);
-        $mform->hideIf('budgetdays', 'budgetperiod', 'eq', spend_ledger::PERIOD_MONTH);
-        $mform->hideIf('budgetunit', 'budgetperiod', 'eq', spend_ledger::PERIOD_MONTH);
-        $mform->hideIf('budgetcurrency', 'budgetmetric', 'eq', spend_ledger::METRIC_REQUESTS);
-        $mform->hideIf('budgetrequests', 'budgetmetric', 'eq', spend_ledger::METRIC_COST);
+        $mform->hideIf('budgetdays', 'budgetperiod', 'eq', ledger::PERIOD_MONTH);
+        $mform->hideIf('budgetunit', 'budgetperiod', 'eq', ledger::PERIOD_MONTH);
+        $mform->hideIf('budgetprovider', 'budgetmetric', 'eq', ledger::METRIC_REQUESTS);
+        $mform->hideIf('budgetrequests', 'budgetmetric', 'eq', ledger::METRIC_COST);
         $mform->addHelpButton('budgetgroup', 'condition:budget', 'local_airouter');
     }
 
@@ -312,14 +348,18 @@ class budget extends base {
             // wrongly is a rule that quietly matches every request instead of some.
             return ['budgetgroup' => get_string('condition:budget:error:amount', 'local_airouter')];
         }
-        $metric = (string) ($data['budgetmetric'] ?? spend_ledger::METRIC_COST);
-        if ($metric === spend_ledger::METRIC_REQUESTS && (float) $amount !== floor((float) $amount)) {
+        $metric = (string) ($data['budgetmetric'] ?? ledger::METRIC_COST);
+        if ($metric === ledger::METRIC_REQUESTS && (float) $amount !== floor((float) $amount)) {
             // Half a request is not a thing anybody can make.
             return ['budgetgroup' => get_string('condition:budget:error:requests', 'local_airouter')];
         }
+        if ($metric !== ledger::METRIC_REQUESTS && trim((string) ($data['budgetprovider'] ?? '')) === '') {
+            // Money is one figure per provider, so a budget in money has to say which.
+            return ['budgetgroup' => get_string('condition:budget:error:provider', 'local_airouter')];
+        }
 
         $problem = self::retention_problem(
-            (string) ($data['budgetperiod'] ?? spend_ledger::PERIOD_ROLLING),
+            (string) ($data['budgetperiod'] ?? ledger::PERIOD_ROLLING),
             (int) ($data['budgetdays'] ?? self::DEFAULT_DAYS),
         );
 
@@ -347,10 +387,8 @@ class budget extends base {
      * @return string|null The problem to show somebody, or null when there is none.
      */
     public static function retention_problem(string $period, int $days): ?string {
-        global $DB;
-
-        $reach = spend_ledger::reach_of($period, $days);
-        $kept = (new usage_aggregator($DB))->get_summary_retention_days();
+        $reach = ledger::reach_of($period, $days);
+        $kept = summariser::get_summary_retention_days();
         if ($kept <= 0 || $reach <= $kept) {
             return null;
         }
@@ -386,22 +424,23 @@ class budget extends base {
             return null;
         }
         $direction = (string) ($data->budgetdirection ?? self::DIRECTION_UNDER);
-        $period = (string) ($data->budgetperiod ?? spend_ledger::PERIOD_ROLLING);
-        $metric = (string) ($data->budgetmetric ?? spend_ledger::METRIC_COST);
-        $metric = $metric === spend_ledger::METRIC_REQUESTS
-            ? spend_ledger::METRIC_REQUESTS
-            : spend_ledger::METRIC_COST;
+        $period = (string) ($data->budgetperiod ?? ledger::PERIOD_ROLLING);
+        $metric = (string) ($data->budgetmetric ?? ledger::METRIC_COST);
+        $metric = $metric === ledger::METRIC_REQUESTS
+            ? ledger::METRIC_REQUESTS
+            : ledger::METRIC_COST;
 
         return [
-            'scope' => in_array($scope, spend_ledger::get_scopes(), true) ? $scope : spend_ledger::SCOPE_SITE,
+            'scope' => in_array($scope, ledger::get_scopes(), true) ? $scope : ledger::SCOPE_SITE,
             'direction' => $direction === self::DIRECTION_OVER ? self::DIRECTION_OVER : self::DIRECTION_UNDER,
             'metric' => $metric,
-            'amount' => $metric === spend_ledger::METRIC_REQUESTS
+            'provider' => $metric === ledger::METRIC_REQUESTS ? '' : trim((string) ($data->budgetprovider ?? '')),
+            'amount' => $metric === ledger::METRIC_REQUESTS
                 ? (float) round((float) $amount)
                 : (float) $amount,
-            'period' => $period === spend_ledger::PERIOD_MONTH
-                ? spend_ledger::PERIOD_MONTH
-                : spend_ledger::PERIOD_ROLLING,
+            'period' => $period === ledger::PERIOD_MONTH
+                ? ledger::PERIOD_MONTH
+                : ledger::PERIOD_ROLLING,
             'days' => max(1, (int) ($data->budgetdays ?? self::DEFAULT_DAYS)),
         ];
     }
@@ -411,9 +450,10 @@ class budget extends base {
         return [
             'budgetscope' => $config['scope'] ?? '',
             'budgetdirection' => $config['direction'] ?? self::DIRECTION_UNDER,
-            'budgetmetric' => $config['metric'] ?? spend_ledger::METRIC_COST,
+            'budgetmetric' => $config['metric'] ?? ledger::METRIC_COST,
+            'budgetprovider' => $config['provider'] ?? '',
             'budgetamount' => isset($config['amount']) ? (string) $config['amount'] : '',
-            'budgetperiod' => $config['period'] ?? spend_ledger::PERIOD_ROLLING,
+            'budgetperiod' => $config['period'] ?? ledger::PERIOD_ROLLING,
             'budgetdays' => $config['days'] ?? self::DEFAULT_DAYS,
         ];
     }
@@ -421,7 +461,7 @@ class budget extends base {
     #[\Override]
     public function get_description(): string {
         $scope = $this->get_scope();
-        $period = $this->get_period() === spend_ledger::PERIOD_MONTH
+        $period = $this->get_period() === ledger::PERIOD_MONTH
             ? get_string('condition:describe:budget:month', 'local_airouter')
             : get_string('condition:describe:budget:rolling', 'local_airouter', $this->get_days());
 
@@ -434,7 +474,7 @@ class budget extends base {
             'local_airouter',
             [
                 'scope' => get_string(
-                    'condition:budget:scope:' . ($scope ?: spend_ledger::SCOPE_SITE),
+                    'condition:budget:scope:' . ($scope ?: ledger::SCOPE_SITE),
                     'local_airouter',
                 ),
                 'amount' => $this->get_amount_label(),
@@ -452,8 +492,8 @@ class budget extends base {
      */
     protected function get_scopeid(string $scope, evaluation_context $context): int {
         return match ($scope) {
-            spend_ledger::SCOPE_COURSE => (int) ($context->get_courseid() ?? 0),
-            spend_ledger::SCOPE_USER => $context->get_userid(),
+            ledger::SCOPE_COURSE => (int) ($context->get_courseid() ?? 0),
+            ledger::SCOPE_USER => $context->get_userid(),
             default => 0,
         };
     }
@@ -465,11 +505,11 @@ class budget extends base {
      * weighed against. What that costs in accuracy is written down where the cache is
      * defined.
      *
-     * @return spend_ledger The ledger.
+     * @return ledger The ledger.
      */
-    protected function get_ledger(): spend_ledger {
+    protected function get_ledger(): ledger {
         global $DB;
 
-        return new spend_ledger($DB);
+        return new ledger($DB);
     }
 }

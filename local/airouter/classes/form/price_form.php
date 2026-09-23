@@ -45,7 +45,7 @@ class price_form extends \moodleform {
             'select',
             'provider',
             get_string('price:provider', 'local_airouter'),
-            ['' => get_string('choosedots')] + self::get_provider_options(),
+            ['' => get_string('choosedots')] + target_resolver::get_provider_options(),
         );
         $mform->setType('provider', PARAM_COMPONENT);
         $mform->addHelpButton('provider', 'price:provider', 'local_airouter');
@@ -130,29 +130,5 @@ class price_form extends \moodleform {
         $value = trim((string) $value);
 
         return $value === '' ? null : (float) $value;
-    }
-
-    /**
-     * The providers a rate can be entered for.
-     *
-     * Rates belong to a provider plugin rather than to an instance, so the list is of
-     * the plugins behind the instances this site can delegate to.
-     *
-     * @return string[] Plugin names keyed by component.
-     */
-    protected static function get_provider_options(): array {
-        $options = [];
-        foreach (\core\di::get(\core_ai\manager::class)->get_provider_instances() as $instance) {
-            if ($instance instanceof \local_airouter\provider) {
-                continue;
-            }
-            $component = $instance->get_name();
-            $options[$component] = get_string_manager()->string_exists('pluginname', $component)
-                ? get_string('pluginname', $component)
-                : $component;
-        }
-        ksort($options);
-
-        return $options;
     }
 }

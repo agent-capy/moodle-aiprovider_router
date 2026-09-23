@@ -365,7 +365,7 @@ class rule_repository {
      *                       set no budget today, but what they will measure on their
      *                       first day is the history sitting in the table now, which
      *                       is the one thing that has to survive until then.
-     * @return \stdClass[] Rows of scope, metric, amount, period and days, each with the
+     * @return \stdClass[] Rows of scope, metric, provider, amount, period and days, each with the
      *                     courses it is limited to, or null where it is limited to none
      *                     and an empty array where it is limited to no course at all.
      */
@@ -402,6 +402,7 @@ class rule_repository {
             $found = (object) [
                 'scope' => $condition->get_scope(),
                 'metric' => $condition->get_metric(),
+                'provider' => $condition->get_provider(),
                 'amount' => $condition->get_amount(),
                 'period' => $condition->get_period(),
                 'days' => $condition->get_days(),

@@ -72,9 +72,11 @@ Feature: Routing requests by rule
       | Rule name   | While there is money left |
       | Delegate to | Test OpenAI               |
     And I set the field "budgetscope" to "The site"
+    And I set the field "budgetprovider" to "OpenAI API provider"
     And I set the field "budgetamount" to "100"
     And I click on "Save changes" "button"
     Then I should see "The site has spent under"
+    And I should see "OpenAI API provider"
     And I should see "in the last 30 days"
 
   Scenario: A rule can route on how many requests have been made
@@ -95,6 +97,7 @@ Feature: Routing requests by rule
       | Rule name   | Bad budget  |
       | Delegate to | Test OpenAI |
     And I set the field "budgetscope" to "The site"
+    And I set the field "budgetprovider" to "OpenAI API provider"
     And I set the field "budgetamount" to "lots"
     And I click on "Save changes" "button"
     Then I should see "Enter the budget as a number above zero."

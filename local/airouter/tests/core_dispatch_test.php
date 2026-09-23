@@ -16,6 +16,7 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
 use local_airouter\condition\budget;
 use local_airouter\exception\declined_request;
 use core_ai\aiactions\generate_text;
@@ -139,11 +140,11 @@ final class core_dispatch_test extends \advanced_testcase {
 
         (new rule_repository($DB))->save($rule, [
             'budget' => [
-                'scope' => spend_ledger::SCOPE_SITE,
+                'scope' => ledger::SCOPE_SITE,
                 'direction' => $direction,
                 'amount' => $allowance,
-                'metric' => spend_ledger::METRIC_REQUESTS,
-                'period' => spend_ledger::PERIOD_ROLLING,
+                'metric' => ledger::METRIC_REQUESTS,
+                'period' => ledger::PERIOD_ROLLING,
                 'days' => 30,
             ],
         ]);
@@ -169,28 +170,33 @@ final class core_dispatch_test extends \advanced_testcase {
     }
 
     /**
-     * Record requests already made, so that a budget has something to weigh.
+     * Record requests already made, as the records hold them, so that a budget has something to weigh.
      *
      * @param int $count How many.
      */
     protected function spend(int $count): void {
-        global $DB;
-
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $when = time() - HOURSECS;
         for ($i = 0; $i < $count; $i++) {
-            $DB->insert_record(usage_logger::TABLE, (object) [
-                'timecreated' => time() - HOURSECS,
-                'userid' => get_admin()->id,
+            $request = $generator->create_request([
+                'userid' => (int) get_admin()->id,
                 'contextid' => \context_system::instance()->id,
-                'actionname' => 'generate_text',
+                'keysource' => 'site',
+                'answeredby' => 1,
+                'timestarted' => $when,
+                'timeended' => $when,
+            ]);
+            $generator->create_attempt([
+                'requestid' => $request->id,
                 'targetid' => 1,
                 'targetname' => 'Target',
                 'targetprovider' => 'aiprovider_mock',
-                'success' => 1,
-                'attempts' => 1,
-                'keysource' => usage_logger::KEY_SITE,
+                'keysource' => 'site',
+                'timestarted' => $when,
+                'timeended' => $when,
             ]);
         }
-        \core_cache\helper::purge_by_definition('local_airouter', spend_ledger::CACHE_AREA);
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
     }
 
     public function test_a_spent_budget_is_not_handed_to_the_next_provider_to_pay_for(): void {

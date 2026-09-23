@@ -16,6 +16,8 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
+
 /**
  * The only place a brought key is written, read back or destroyed.
  *
@@ -80,9 +82,9 @@ class key_repository {
      */
     public function set_cap(key $record, ?float $amount, string $period, int $days): key {
         $record->set('capamount', $amount !== null && $amount > 0 ? $amount : null);
-        $record->set('capperiod', $period === spend_ledger::PERIOD_ROLLING
-            ? spend_ledger::PERIOD_ROLLING
-            : spend_ledger::PERIOD_MONTH);
+        $record->set('capperiod', $period === ledger::PERIOD_ROLLING
+            ? ledger::PERIOD_ROLLING
+            : ledger::PERIOD_MONTH);
         $record->set('capdays', max(1, $days));
         $record->save();
 

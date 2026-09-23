@@ -165,6 +165,7 @@ class provider implements
                 'kind' => 'privacy:metadata:notice:kind',
                 'subjectid' => 'privacy:metadata:notice:subjectid',
                 'metric' => 'privacy:metadata:notice:metric',
+                'provider' => 'privacy:metadata:notice:provider',
                 'limitamount' => 'privacy:metadata:notice:limitamount',
                 'threshold' => 'privacy:metadata:notice:threshold',
                 'timenotified' => 'privacy:metadata:notice:timenotified',

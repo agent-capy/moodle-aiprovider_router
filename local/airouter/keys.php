@@ -39,7 +39,7 @@ use local_airouter\key_repository;
 use local_airouter\key_tester;
 use local_airouter\price_book;
 use local_airouter\provider;
-use local_airouter\spend_ledger;
+use local_airouter\record\ledger;
 use local_airouter\target_settings;
 
 $courseid = optional_param('courseid', 0, PARAM_INT);
@@ -129,10 +129,16 @@ if ($allowed && $action === 'test') {
     );
 }
 
-$currency = price_book::legacy_currency();
+// A limit on a key is a figure in the currency of the key's provider, which is the
+// currency of that provider's rates; a provider with no rates yet has none.
+$book = new price_book($DB);
+$currencies = [];
+foreach ($targets as $targetid => $instance) {
+    $currencies[(int) $targetid] = $book->currency_of($instance->get_name());
+}
 // Not cached: somebody looking at their own limit is asking what it is now, and the
 // figure is being shown rather than weighed on the path of a request.
-$ledger = new spend_ledger($DB, null, false);
+$ledger = new ledger($DB, false);
 
 $capform = null;
 if ($allowed && $action === 'cap') {
@@ -142,7 +148,7 @@ if ($allowed && $action === 'cap') {
     }
     $capform = new key_cap_form(
         new moodle_url($url),
-        ['currency' => $currency] + ($courseid > 0 ? ['courseid' => $courseid] : []),
+        ['currency' => $currencies[(int) $capkey->get('targetid')] ?? ''] + ($courseid > 0 ? ['courseid' => $courseid] : []),
     );
     if ($capform->is_cancelled()) {
         redirect($url);
@@ -151,7 +157,7 @@ if ($allowed && $action === 'cap') {
         $repository->set_cap(
             $capkey,
             key_cap_form::read_amount($capdata),
-            (string) ($capdata->capperiod ?? spend_ledger::PERIOD_MONTH),
+            (string) ($capdata->capperiod ?? ledger::PERIOD_MONTH),
             (int) ($capdata->capdays ?? 30),
         );
         redirect(
@@ -220,7 +226,7 @@ if ($capform !== null) {
 }
 
 if ($keys) {
-    echo html_writer::table(key_formatter::table($keys, $names, $url, $ledger, $currency, $allowed));
+    echo html_writer::table(key_formatter::table($keys, $names, $url, $ledger, $currencies, $allowed));
     if ($allowed) {
         echo html_writer::div(get_string('keys:testcost', 'local_airouter'), 'text-muted');
     }
