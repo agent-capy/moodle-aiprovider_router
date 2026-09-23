@@ -18,6 +18,7 @@ namespace local_airouter\condition;
 
 use local_airouter\evaluation_context;
 use local_airouter\price_book;
+use local_airouter\retention_policy;
 use local_airouter\record\ledger;
 use local_airouter\record\summariser;
 use local_airouter\target_resolver;
@@ -387,17 +388,14 @@ class budget extends base {
      * @return string|null The problem to show somebody, or null when there is none.
      */
     public static function retention_problem(string $period, int $days): ?string {
-        $reach = ledger::reach_of($period, $days);
-        $kept = summariser::get_summary_retention_days();
-        if ($kept <= 0 || $reach <= $kept) {
+        global $DB;
+
+        $short = (new retention_policy($DB))->shortfall_of($period, $days);
+        if ($short === null) {
             return null;
         }
 
-        return get_string(
-            'condition:budget:error:retention',
-            'local_airouter',
-            ['reach' => $reach, 'kept' => $kept],
-        );
+        return get_string('condition:budget:error:retention', 'local_airouter', $short);
     }
 
     /**

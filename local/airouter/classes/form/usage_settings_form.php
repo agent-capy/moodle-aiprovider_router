@@ -17,8 +17,7 @@
 namespace local_airouter\form;
 
 use local_airouter\budget_notifier;
-use local_airouter\rule_repository;
-use local_airouter\record\ledger;
+use local_airouter\retention_policy;
 use local_airouter\usage_aggregator;
 
 defined('MOODLE_INTERNAL') || die();
@@ -78,22 +77,16 @@ class usage_settings_form extends \moodleform {
 
     #[\Override]
     public function validation($data, $files): array {
+        global $DB;
         $errors = parent::validation($data, $files);
 
-        foreach (['logretentiondays', 'summaryretentiondays'] as $field) {
-            if ((int) ($data[$field] ?? 0) < 0) {
-                $errors[$field] = get_string('usage:error:retention', 'local_airouter');
-            }
-        }
-
-        // Summaries are what the detail rows leave behind, so keeping them for less time
-        // than the detail asks for the impossible: reports read the summaries for the
-        // older half of any period, and those days would simply read as empty.
-        $detail = (int) ($data['logretentiondays'] ?? 0);
-        $summary = (int) ($data['summaryretentiondays'] ?? 0);
-        if ($detail > 0 && $summary > 0 && $summary < $detail) {
-            $errors['summaryretentiondays'] = get_string('usage:error:summaryretention', 'local_airouter');
-        }
+        // The rules about how long the record is kept live with the policy, which is
+        // what saves the setting whichever screen or script asks; the form only shows
+        // what it says, against the fields of the same names.
+        $errors += (new retention_policy($DB))->problems(
+            (int) ($data['logretentiondays'] ?? 0),
+            (int) ($data['summaryretentiondays'] ?? 0),
+        );
 
         // A warning at or past the budget is the budget, said twice.
         $share = (int) ($data['budgetnotifyshare'] ?? 0);
@@ -101,35 +94,6 @@ class usage_settings_form extends \moodleform {
             $errors['budgetnotifyshare'] = get_string('usage:error:notifyshare', 'local_airouter');
         }
 
-        // Budgets are worked out from what is still stored. Throwing away history the
-        // budgets still reach back into does not make the figure unknown, which is the
-        // one thing this plugin is careful about everywhere else -- it makes it a
-        // smaller number, so a limit that has been reached is under the limit again
-        // and the requests it was stopping start going through.
-        $reach = $this->longest_budget_days();
-        if ($reach > 0 && $summary > 0 && $summary < $reach) {
-            $errors['summaryretentiondays'] = get_string(
-                'usage:error:budgetretention',
-                'local_airouter',
-                $reach,
-            );
-        }
-
         return $errors;
-    }
-
-    /**
-     * How far back the furthest limit on this site has to be able to see.
-     *
-     * Both kinds count: the budgets a rule sets, and the limits people put on keys
-     * they brought. The second was missed at first, and a site with no rule budgets
-     * and a monthly key limit could throw away the month the limit was about.
-     *
-     * @return int Days, or zero where nothing on the site sets a limit.
-     */
-    protected function longest_budget_days(): int {
-        global $DB;
-
-        return ledger::longest_reach_days($DB);
     }
 }

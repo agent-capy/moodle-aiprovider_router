@@ -122,6 +122,16 @@ foreach ((new rule_repository($DB))->get_budgets($now) as $budget) {
             'limit' => number_format($budget->amount),
         ]) . ' ' . $note;
     }
+    if ($spend->is_partial()) {
+        // Counted from where the record begins, not from the start of the period:
+        // the share is a floor, and the page says so rather than rounding it up to a
+        // total.
+        $note .= ' ' . get_string(
+            'courseusage:budget:partial',
+            'local_airouter',
+            userdate($spend->get_covered_from(), get_string('strftimedateshort', 'langconfig')),
+        );
+    }
     $bars[] = usage_formatter::progress(
         $spend->get_measure($budget->metric, $provider) / $budget->amount,
         get_string($requests ? 'usage:budget:label:requests' : 'usage:budget:label', 'local_airouter'),

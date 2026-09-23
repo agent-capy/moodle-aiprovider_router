@@ -99,6 +99,34 @@ final class key_formatter_test extends \advanced_testcase {
         $this->assertStringNotContainsString('progress-bar', $html);
     }
 
+    public function test_spending_counted_over_part_of_the_period_is_shown_as_a_floor(): void {
+        global $DB;
+
+        (new key_repository($DB))->set_cap($this->key, 2000.0, ledger::PERIOD_ROLLING, 30);
+        $this->spend(1000.0, 'USD');
+        $this->rate_in('USD');
+        // The site discarded everything before five days ago.
+        set_config(\local_airouter\record\summariser::HISTORY_SETTING, time() - 5 * DAYSECS, 'local_airouter');
+
+        $html = key_formatter::cap($this->key, new ledger($DB, false), 'USD');
+
+        $this->assertStringContainsString('at least ' . format_float(1000.0, 2, true) . ' USD', $html);
+        $this->assertStringContainsString('progress-bar', $html, 'Still measured, still a bar.');
+    }
+
+    public function test_a_limit_the_summaries_do_not_cover_says_so(): void {
+        global $DB;
+
+        (new key_repository($DB))->set_cap($this->key, 2000.0, ledger::PERIOD_ROLLING, 30);
+        // Shorter than the limit, which the screen would refuse: set another way.
+        set_config(retention_policy::SUMMARY_SETTING, 7, 'local_airouter');
+
+        $html = key_formatter::cap($this->key, null, 'USD');
+
+        $this->assertStringContainsString('Looks back 30 days', $html);
+        $this->assertStringContainsString('7', $html);
+    }
+
     public function test_a_key_is_not_stopped_by_money_counted_in_another_currency(): void {
         global $DB;
 

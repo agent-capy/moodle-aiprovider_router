@@ -56,6 +56,9 @@ class spend {
      *                               where no call to that provider had a rate, and
      *                               comparable is false where the amount is in a
      *                               currency the provider's limits are not written in.
+     * @param int $coveredfrom The first moment the site can still account for, or
+     *                         zero when it has discarded nothing. A period that
+     *                         starts before it is counted over part of itself.
      */
     public function __construct(
         /** @var int How many requests the period held. */
@@ -68,7 +71,32 @@ class spend {
         public readonly int $to,
         /** @var \stdClass[] The providers called, keyed by component. */
         public readonly array $providers = [],
+        /** @var int The first moment the site can still account for. */
+        public readonly int $coveredfrom = 0,
     ) {
+    }
+
+    /**
+     * Whether the period was counted over part of itself.
+     *
+     * The site discarded history from inside the period before it was measured, so
+     * every figure here is a floor: not unknown, and not to be made unknown, since a
+     * limit that cannot be measured stops restricting anything; simply smaller than
+     * the spending was. Anywhere the figures are shown should say so.
+     *
+     * @return bool True when the earlier part of the period cannot be accounted for.
+     */
+    public function is_partial(): bool {
+        return $this->coveredfrom > $this->from;
+    }
+
+    /**
+     * The moment the figures are counted from.
+     *
+     * @return int The start of the period, or the later moment the record begins.
+     */
+    public function get_covered_from(): int {
+        return max($this->from, $this->coveredfrom);
     }
 
     /**

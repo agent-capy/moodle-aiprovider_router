@@ -89,11 +89,20 @@ class key_formatter {
      * @return string HTML.
      */
     public static function cap(key $key, ?ledger $ledger, ?string $currency): string {
+        global $DB;
+
         if (!$key->has_cap()) {
             return \html_writer::span(get_string('keys:cap:none', 'local_airouter'), 'text-muted');
         }
 
         $output = \html_writer::div(self::limit($key, $currency));
+        $short = (new retention_policy($DB))->shortfall_of($key->get_cap_period(), $key->get_cap_days());
+        if ($short !== null) {
+            // The site keeps less than this limit looks back over. The owner cannot
+            // change that, so it is said rather than refused: the figure below is a
+            // floor.
+            $output .= \html_writer::div(get_string('keys:cap:short', 'local_airouter', $short), 'text-warning small');
+        }
 
         if ($ledger === null) {
             return $output;
@@ -128,13 +137,16 @@ class key_formatter {
         // currency the costs were recorded in, which is the provider's.
         $spent = $spend->get_amount($provider);
         $spentin = $spend->get_currency($provider) ?? $currency;
-        $output .= usage_formatter::progress(
-            $spent / $key->get_cap_amount(),
-            get_string('keys:cap', 'local_airouter'),
-            get_string('keys:cap:spent', 'local_airouter', [
-                'amount' => format_float($spent, 2, true) . ($spentin === null ? '' : ' ' . $spentin),
-            ]),
-        );
+        $amount = format_float($spent, 2, true) . ($spentin === null ? '' : ' ' . $spentin);
+        // A period the site cannot account for the start of gives a floor, and a
+        // floor is said to be one.
+        $note = $spend->is_partial()
+            ? get_string('keys:cap:spent:atleast', 'local_airouter', [
+                'amount' => $amount,
+                'from' => userdate($spend->get_covered_from(), get_string('strftimedateshort', 'langconfig')),
+            ])
+            : get_string('keys:cap:spent', 'local_airouter', ['amount' => $amount]);
+        $output .= usage_formatter::progress($spent / $key->get_cap_amount(), get_string('keys:cap', 'local_airouter'), $note);
         if ($spend->has_reached($key->get_cap_amount(), ledger::METRIC_COST, $provider)) {
             $output .= \html_writer::div(
                 get_string('keys:cap:reached', 'local_airouter'),

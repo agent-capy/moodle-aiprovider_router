@@ -362,16 +362,51 @@ final class check_test extends \advanced_testcase {
         global $DB;
 
         // Something was discarded, but long enough ago that no budget reaches it.
+        // The short retention it was discarded under is gone too: kept, it would be
+        // reported on its own account, as a retention the budget does not fit in.
         $this->rate();
         $this->budget_rule();
         $this->request(1.0, time() - 200 * DAYSECS);
         set_config('logretentiondays', 1, 'local_airouter');
         set_config('summaryretentiondays', 2, 'local_airouter');
         (new summariser($DB))->run(time() - 150 * DAYSECS);
+        set_config('summaryretentiondays', 60, 'local_airouter');
 
         $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
 
         $this->assertSame(result::OK, $result->get_status());
+    }
+
+    public function test_summaries_kept_shorter_than_a_limit_are_reported_before_anything_is_lost(): void {
+        global $CFG;
+        // The screen and the rule form both refuse this, so it got here by way of
+        // config.php. Nothing has been thrown away yet, and the check says so now,
+        // while it is still worth saying.
+        $this->rate();
+        $this->budget_rule();
+        $CFG->forced_plugin_settings['local_airouter'][\local_airouter\retention_policy::SUMMARY_SETTING] = 2;
+        try {
+            $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        } finally {
+            unset($CFG->forced_plugin_settings['local_airouter']);
+        }
+
+        $this->assertSame(result::WARNING, $result->get_status());
+        $this->assertStringContainsString('2 days', $result->get_summary());
+        $this->assertStringContainsString('config.php', $result->get_details());
+    }
+
+    public function test_a_limit_on_a_key_is_enough_for_the_history_to_matter(): void {
+        global $DB;
+        // No rule sets a budget, but somebody has put a limit on their own key, and
+        // that limit is measured from the same record.
+        $repository = new \local_airouter\key_repository($DB);
+        $repository->set_cap($repository->save(\local_airouter\key::SCOPE_USER, 7, 3, 'sk-mine'), 5.0, ledger::PERIOD_ROLLING, 30);
+        set_config('summaryretentiondays', 2, 'local_airouter');
+
+        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+
+        $this->assertSame(result::WARNING, $result->get_status());
     }
 
     public function test_without_a_budget_there_is_nothing_to_report(): void {

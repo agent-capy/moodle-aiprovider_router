@@ -39,6 +39,7 @@ use local_airouter\usage_aggregator;
 use local_airouter\usage_formatter;
 use local_airouter\record\reader;
 use local_airouter\record\summariser;
+use local_airouter\retention_policy;
 
 $days = optional_param('days', 30, PARAM_INT);
 $keysource = optional_param('keysource', rule::KEYSOURCE_SITE, PARAM_ALPHA);
@@ -65,12 +66,21 @@ if (!in_array($keysource, $keysources, true)) {
 
 $form = new usage_settings_form($url);
 if ($data = $form->get_data()) {
-    set_config(usage_aggregator::RETENTION_SETTING, max(0, (int) $data->logretentiondays), 'local_airouter');
-    set_config(
-        usage_aggregator::SUMMARY_RETENTION_SETTING,
+    // Through the policy, which refuses a retention the site's limits could not be
+    // measured over; the form has asked it the same question, so this is not
+    // expected to refuse, and a refusal is shown rather than swallowed.
+    $problems = (new retention_policy($DB))->save(
+        max(0, (int) $data->logretentiondays),
         max(0, (int) $data->summaryretentiondays),
-        'local_airouter',
     );
+    if ($problems) {
+        redirect(
+            new moodle_url($url, ['days' => $days]),
+            implode(' ', $problems),
+            null,
+            \core\output\notification::NOTIFY_ERROR,
+        );
+    }
     set_config(budget_notifier::ENABLED_SETTING, empty($data->budgetnotify) ? 0 : 1, 'local_airouter');
     set_config(
         budget_notifier::SHARE_SETTING,

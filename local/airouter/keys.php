@@ -41,6 +41,7 @@ use local_airouter\key_tester;
 use local_airouter\price_book;
 use local_airouter\provider;
 use local_airouter\record\ledger;
+use local_airouter\retention_policy;
 use local_airouter\target_settings;
 
 $courseid = optional_param('courseid', 0, PARAM_INT);
@@ -161,17 +162,29 @@ if ($allowed && $action === 'cap') {
     if ($capdata = $capform->get_data()) {
         // Refused when the key was replaced by one for another account meanwhile:
         // the limit was decided about the key that was on the screen.
-        $applied = $repository->set_cap(
-            $capkey,
-            key_cap_form::read_amount($capdata),
-            (string) ($capdata->capperiod ?? ledger::PERIOD_MONTH),
-            (int) ($capdata->capdays ?? 30),
-        );
+        $capperiod = (string) ($capdata->capperiod ?? ledger::PERIOD_MONTH);
+        $capdays = (int) ($capdata->capdays ?? 30);
+        $applied = $repository->set_cap($capkey, key_cap_form::read_amount($capdata), $capperiod, $capdays);
+        // A limit that looks back further than the site keeps its summaries is the
+        // owner's to set all the same -- the retention is not theirs to change -- so
+        // it is saved, and they are told that the figure against it will be a floor.
+        $short = $applied && $capkey->has_cap()
+            ? (new retention_policy($DB))->shortfall_of($capperiod, $capdays)
+            : null;
+        if (!$applied) {
+            $message = get_string('keys:cap:changed', 'local_airouter');
+        } else if ($short !== null) {
+            $message = get_string('keys:cap:saved:short', 'local_airouter', $short);
+        } else {
+            $message = get_string('keys:cap:saved', 'local_airouter');
+        }
         redirect(
             $url,
-            get_string($applied ? 'keys:cap:saved' : 'keys:cap:changed', 'local_airouter'),
+            $message,
             null,
-            $applied ? \core\output\notification::NOTIFY_SUCCESS : \core\output\notification::NOTIFY_WARNING,
+            $applied && $short === null
+                ? \core\output\notification::NOTIFY_SUCCESS
+                : \core\output\notification::NOTIFY_WARNING,
         );
     }
     $capform->set_data([

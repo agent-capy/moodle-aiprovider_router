@@ -16,9 +16,11 @@
 
 namespace local_airouter\check;
 
+use local_airouter\key;
 use local_airouter\record\ledger;
 use local_airouter\record\summariser;
 use local_airouter\record\usage_recorder;
+use local_airouter\retention_policy;
 use local_airouter\rule_repository;
 use core\check\result;
 
@@ -53,6 +55,11 @@ use core\check\result;
  * says what can be said -- that the period before that date cannot be accounted for
  * -- rather than asserting how it came to be that way.
  *
+ * The other thing said here is a retention shorter than a limit. The screen refuses
+ * that, and so does saving a rule; what neither can refuse is a setting fixed in
+ * config.php. That is reported before anything has been thrown away under it, since
+ * afterwards is too late.
+ *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -70,9 +77,27 @@ class budgethistory extends base {
     protected function check_router(): result {
         global $DB;
 
-        $budgets = (new rule_repository($DB))->get_budgets(null, true);
-        if (!$budgets) {
+        // Every limit counts: the budgets rules set, and the limits people put on
+        // keys they brought, which are measured from the same record.
+        $limits = [];
+        foreach ((new rule_repository($DB))->get_budgets(null, true) as $budget) {
+            $limits[] = [(string) $budget->period, (int) $budget->days];
+        }
+        foreach ($DB->get_records_select(key::TABLE, 'capamount IS NOT NULL') as $record) {
+            $cap = new key(0, $record);
+            $limits[] = [$cap->get_cap_period(), $cap->get_cap_days()];
+        }
+        if (!$limits) {
             return new result(result::NA, get_string('check:budgethistory:nobudget', 'local_airouter'));
+        }
+
+        $short = (new retention_policy($DB))->shortfall();
+        if ($short !== null) {
+            return new result(
+                result::WARNING,
+                get_string('check:budgethistory:short', 'local_airouter', $short),
+                get_string('check:budgethistory:short_details', 'local_airouter', $short),
+            );
         }
 
         $from = summariser::get_history_from();
@@ -91,8 +116,8 @@ class budgethistory extends base {
 
         $now = time();
         $shortest = null;
-        foreach ($budgets as $budget) {
-            [$start] = ledger::get_window((string) $budget->period, (int) $budget->days, $now);
+        foreach ($limits as [$period, $days]) {
+            [$start] = ledger::get_window($period, $days, $now);
             if ($start >= $from) {
                 continue;
             }

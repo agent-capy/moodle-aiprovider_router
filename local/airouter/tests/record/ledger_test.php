@@ -415,6 +415,31 @@ final class ledger_test extends \advanced_testcase {
         $this->assertSame(2, $each[7]->requests);
     }
 
+    public function test_a_period_the_site_cannot_account_for_the_start_of_is_a_floor(): void {
+        global $DB;
+        $this->spend(9.0);
+        // The purge discarded everything before three days ago, and wrote that down.
+        set_config(summariser::HISTORY_SETTING, $this->now - 3 * DAYSECS, 'local_airouter');
+        [$from, $to] = $this->week();
+
+        $spend = $this->ledger->measure(ledger::SCOPE_SITE, 0, $from, $to);
+
+        $this->assertTrue($spend->is_partial());
+        $this->assertSame($this->now - 3 * DAYSECS, $spend->get_covered_from());
+        $this->assertEqualsWithDelta(9.0, $spend->get_amount('aiprovider_mock'), 0.000001, 'A floor, not unknown.');
+        $this->assertTrue($spend->is_known(ledger::METRIC_COST, 'aiprovider_mock'));
+
+        [$from, $to] = ledger::get_window(ledger::PERIOD_ROLLING, 1, $this->now);
+        $today = $this->ledger->measure(ledger::SCOPE_SITE, 0, $from, $to);
+        $this->assertFalse($today->is_partial(), 'A period inside what the site still holds.');
+        $this->assertSame($from, $today->get_covered_from());
+
+        // And the held figure says the same.
+        $cached = new ledger($DB, true);
+        $this->assertTrue($cached->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now)->is_partial());
+        $this->assertTrue($cached->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now + 1)->is_partial());
+    }
+
     public function test_a_budget_for_no_course_is_a_coding_error(): void {
         [$from, $to] = $this->week();
 

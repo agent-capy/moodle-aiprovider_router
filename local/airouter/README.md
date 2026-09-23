@@ -733,13 +733,22 @@ what is still stored, so throwing away history inside a budget's period does not
 figure unknown -- it makes it smaller, and a limit that had been reached comes back under
 the line. Limits people put on brought keys count, and so do budgets on rules that have
 not started yet: a rule written today to begin next week looks back over its whole period
-from its first day, and those days are in the table now. The settings screen refuses a
-retention shorter than the longest limit, the rule screen refuses a budget longer than the
-summaries are kept for, and the purge itself refuses whatever the settings say. What none
-of them can do is bring back history that was already gone when the budget was written,
-so lengthen the retention before writing a long budget rather than after, and where
-that was not done, the **Budget history** check says so rather than leaving a figure
-that looks complete.
+from its first day, and those days are in the table now. A retention shorter than the
+longest limit is refused however it is saved, not only from the settings screen; the
+rule screen refuses a budget longer than the summaries are kept for, and switching such
+a rule back on is refused too; and the purge itself refuses whatever the settings say. A
+limit somebody puts on their own key is the one exception: it is theirs to set and the
+retention is not, so it is saved, and they are told that the figure against it is a
+floor.
+
+The one way round the refusals is `config.php`, which can fix the retention beyond the
+reach of any screen. That cannot be refused, so the **Budget history** check reports it
+before anything has been thrown away under it, and every figure a short retention
+produces is shown as a floor -- "at least", counted from the date the record begins --
+rather than as a total. What none of this can do is bring back history that was already
+gone when the budget was written, so lengthen the retention before writing a long budget
+rather than after, and where that was not done, the same check says so rather than
+leaving a figure that looks complete.
 
 Days are the site's days, in the server timezone, and are counted through the calendar, so
 the boundaries stay in place when a timezone changes offset.

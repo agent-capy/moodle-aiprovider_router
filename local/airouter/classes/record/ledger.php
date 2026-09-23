@@ -400,7 +400,7 @@ class ledger extends reader {
                 $providers[$provider] = (object) $entry;
             }
 
-            return new spend($held['requests'], $held['calls'], $from, $to, $providers);
+            return new spend($held['requests'], $held['calls'], $from, $to, $providers, (int) ($held['coveredfrom'] ?? 0));
         }
 
         $spend = $this->read($filters, $from, $to);
@@ -413,7 +413,12 @@ class ledger extends reader {
         foreach ($spend->providers as $provider => $entry) {
             $providers[$provider] = (array) $entry;
         }
-        $cache->set($cachekey, ['requests' => $spend->requests, 'calls' => $spend->calls, 'providers' => $providers]);
+        $cache->set($cachekey, [
+            'requests' => $spend->requests,
+            'calls' => $spend->calls,
+            'providers' => $providers,
+            'coveredfrom' => $spend->coveredfrom,
+        ]);
 
         return $spend;
     }
@@ -501,6 +506,8 @@ class ledger extends reader {
         }
         ksort($providers);
 
-        return new spend($requests, $calls, $from, $to, $providers);
+        // Where the record begins, so that a period the purge has eaten into is
+        // handed over as the floor it is rather than as a total.
+        return new spend($requests, $calls, $from, $to, $providers, summariser::get_history_from());
     }
 }
