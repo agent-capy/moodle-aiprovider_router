@@ -64,6 +64,9 @@ class target_resolver {
     /** @var int[]|null The targets a brought key may not be used at, once read. */
     protected ?array $byokdisallowed = null;
 
+    /** @var target_settings|null The targets' settings for this resolution, once made. */
+    protected ?target_settings $targetsettings = null;
+
     /** @var key|null A key that is registered and cannot be decrypted. */
     protected ?key $unreadable = null;
 
@@ -131,6 +134,7 @@ class target_resolver {
         $this->budgetspent = false;
         $this->byokonly = null;
         $this->byokdisallowed = null;
+        $this->targetsettings = null;
         $instances = $this->get_instances_by_id();
 
         $this->evaluated = $context ?? $this->get_evaluation_context($action);
@@ -616,7 +620,9 @@ class target_resolver {
             return false;
         }
 
-        return $brought->is_spent(new ledger($DB), time());
+        // The request's own ledger when there is one, so that the key and the budgets
+        // the rules carried are weighed under one reading of the record.
+        return $brought->is_spent($this->evaluated?->get_ledger() ?? new ledger($DB), time());
     }
 
     /**
@@ -628,9 +634,7 @@ class target_resolver {
      * @return int[] The target ids.
      */
     protected function get_byok_only(): array {
-        global $DB;
-
-        $this->byokonly ??= (new target_settings($DB))->get_byok_only_ids();
+        $this->byokonly ??= $this->get_target_settings()->get_byok_only_ids();
 
         return $this->byokonly;
     }
@@ -641,11 +645,21 @@ class target_resolver {
      * @return int[] The instance ids.
      */
     protected function get_byok_disallowed(): array {
-        global $DB;
-
-        $this->byokdisallowed ??= (new target_settings($DB))->get_byok_disallowed_ids();
+        $this->byokdisallowed ??= $this->get_target_settings()->get_byok_disallowed_ids();
 
         return $this->byokdisallowed;
+    }
+
+    /**
+     * The targets' settings, one object for one resolution, so that both of the
+     * questions above are answered from a single read.
+     *
+     * @return target_settings The settings.
+     */
+    protected function get_target_settings(): target_settings {
+        global $DB;
+
+        return $this->targetsettings ??= new target_settings($DB);
     }
 
     /**

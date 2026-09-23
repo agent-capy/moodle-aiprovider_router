@@ -405,6 +405,13 @@ What changes the history as a whole — a currency correction, the daily summary
 effect on the next request instead: figures are held against the state of the history
 they were read from, and are not used once it has moved on.
 
+The part of a budget's period the daily task has already summarised does not change
+until the task runs again, so it is not added up again on every request. The task works
+it out for every course and every person once it has summarised the day, and a request
+adds to it only what has not been summarised yet, which is mostly today. Both are kept in
+Moodle's cache (the **Budget figures** and **Budget history** definitions of this plugin);
+a site with APCu or another memory store can map them to it in the cache administration.
+
 ### Being told about a budget
 
 A daily task looks at every budget the enabled rules set and at every limit somebody has

@@ -16,6 +16,7 @@
 
 namespace local_airouter\task;
 
+use local_airouter\record\ledger;
 use local_airouter\record\summariser;
 
 /**
@@ -47,5 +48,11 @@ class summarise_records extends \core\task\scheduled_task {
             return;
         }
         mtrace(get_string('task:summariserecords:done', 'local_airouter', (object) $result));
+
+        // With the day folded in, the settled part of every budget's period is known
+        // for the day to come. Worked out here for every course and person at once,
+        // rather than by the first request to ask about each of them.
+        $primed = (new ledger($DB))->prime(time());
+        mtrace(get_string('task:summariserecords:primed', 'local_airouter', $primed));
     }
 }

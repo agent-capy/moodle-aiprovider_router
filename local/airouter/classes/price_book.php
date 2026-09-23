@@ -71,25 +71,25 @@ class price_book {
         if ($provider === '') {
             return null;
         }
-        foreach ([(string) $model, ''] as $candidate) {
-            $record = $this->db->get_records_select(
-                price::TABLE,
-                'provider = :provider AND model = :model AND timefrom <= :when',
-                ['provider' => $provider, 'model' => $candidate, 'when' => $when],
-                'timefrom DESC',
-                '*',
-                0,
-                1,
-            );
-            if ($record) {
-                return new price(0, reset($record));
+        // The model's own rates and the provider-wide ones, in one statement: this is
+        // asked on the path of every call. The model's own newest rate in force wins;
+        // the provider-wide one is only for a model with none of its own.
+        $model = (string) $model;
+        $records = $this->db->get_records_select(
+            price::TABLE,
+            'provider = :provider AND (model = :model OR model = :anymodel) AND timefrom <= :when',
+            ['provider' => $provider, 'model' => $model, 'anymodel' => '', 'when' => $when],
+            'timefrom DESC, id DESC',
+        );
+        $fallback = null;
+        foreach ($records as $record) {
+            if ((string) $record->model === $model) {
+                return new price(0, $record);
             }
-            if ($candidate === '') {
-                break;
-            }
+            $fallback ??= $record;
         }
 
-        return null;
+        return $fallback === null ? null : new price(0, $fallback);
     }
 
     /**

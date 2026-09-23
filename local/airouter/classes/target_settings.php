@@ -69,6 +69,9 @@ class target_settings {
         'secret',
     ];
 
+    /** @var \stdClass[]|null Every target's settings, once read for the path of a request. */
+    protected ?array $rows = null;
+
     /**
      * Constructor.
      *
@@ -78,6 +81,18 @@ class target_settings {
         /** @var \moodle_database The database. */
         protected readonly \moodle_database $db,
     ) {
+    }
+
+    /**
+     * Every target's settings, read once for this object and forgotten when it writes.
+     *
+     * The two questions a request asks -- where only a brought key may go, and where a
+     * brought key may not -- are answered from one read.
+     *
+     * @return \stdClass[] The rows.
+     */
+    protected function rows(): array {
+        return $this->rows ??= $this->db->get_records(self::TABLE);
     }
 
     /**
@@ -116,6 +131,7 @@ class target_settings {
     protected function write(int $targetid, array $values): void {
         global $USER;
 
+        $this->rows = null;
         $now = time();
         $record = $this->db->get_record(self::TABLE, ['targetid' => $targetid]);
         if ($record === false) {
@@ -225,7 +241,10 @@ class target_settings {
      */
     public function get_byok_only_ids(): array {
         $ids = [];
-        foreach ($this->db->get_records(self::TABLE, ['byokmode' => self::MODE_ONLY]) as $record) {
+        foreach ($this->rows() as $record) {
+            if (self::clean_mode((string) $record->byokmode) !== self::MODE_ONLY) {
+                continue;
+            }
             // A target set to "brought keys only" with nowhere to put a brought key
             // would be reachable by nobody at all. An unfinished setting narrows what
             // can be done, it does not take a provider away.
@@ -247,8 +266,10 @@ class target_settings {
      */
     public function get_byok_disallowed_ids(): array {
         $ids = [];
-        foreach ($this->db->get_records(self::TABLE, ['byokmode' => self::MODE_DISALLOWED]) as $record) {
-            $ids[] = (int) $record->targetid;
+        foreach ($this->rows() as $record) {
+            if (self::clean_mode((string) $record->byokmode) === self::MODE_DISALLOWED) {
+                $ids[] = (int) $record->targetid;
+            }
         }
 
         return $ids;
@@ -289,6 +310,7 @@ class target_settings {
      * @param int $targetid The delegation target.
      */
     public function forget(int $targetid): void {
+        $this->rows = null;
         $this->db->delete_records(self::TABLE, ['targetid' => $targetid]);
     }
 

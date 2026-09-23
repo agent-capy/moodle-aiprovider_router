@@ -83,6 +83,18 @@ class ledger extends reader {
     /** @var string The cache area holding recently measured figures. */
     public const CACHE_AREA = 'budget';
 
+    /** @var string The cache area holding the settled part of each budget's period. */
+    public const HISTORY_CACHE_AREA = 'budgethistory';
+
+    /** @var bool Whether the generation is read once for this ledger's lookups rather than once each. */
+    protected bool $onegeneration = false;
+
+    /** @var int|null The generation this ledger's lookups are made under, once read. */
+    protected ?int $lookupgeneration = null;
+
+    /** @var array|null The settled history the read under way worked out, to keep once the read proves consistent. */
+    protected ?array $pendinghistory = null;
+
     /**
      * Constructor.
      *
@@ -104,6 +116,27 @@ class ledger extends reader {
     ) {
         parent::__construct($db, $stop);
         $this->prices ??= new price_book($db);
+    }
+
+    /**
+     * A ledger for the length of one request, whose lookups share one reading of the generation.
+     *
+     * One request weighs every budget its rules carry and the limit on any key it would
+     * use, and each weighing looks the figure up under the generation of the record. Read
+     * once, it is one statement for the request rather than one for every limit. The
+     * request answers from the record as it stood when it began weighing, which is the
+     * answer it would have had a moment earlier; a figure read afresh is still kept under
+     * the generation it was read in. Only for something that ends with the request: a
+     * screen or a task that goes on reading makes an ordinary ledger.
+     *
+     * @param \moodle_database $db The database to read.
+     * @return self The ledger.
+     */
+    public static function for_one_request(\moodle_database $db): self {
+        $ledger = new self($db);
+        $ledger->onegeneration = true;
+
+        return $ledger;
     }
 
     /**
@@ -400,7 +433,10 @@ class ledger extends reader {
 
         $cache = \core_cache\cache::make('local_airouter', self::CACHE_AREA);
         $cachekey = $subject . '_' . $from . '_';
-        $held = $cache->get($cachekey . generation::get($this->db));
+        $now = $this->onegeneration
+            ? ($this->lookupgeneration ??= generation::get($this->db))
+            : generation::get($this->db);
+        $held = $cache->get($cachekey . $now);
         if (is_array($held)) {
             $providers = [];
             foreach ($held['providers'] as $provider => $entry) {
@@ -449,16 +485,215 @@ class ledger extends reader {
         // The rates' currencies are read with the record, as part of the same
         // consistent read: a correction changes both together, and a figure read
         // before it weighed against a currency read after it would be about nothing.
+        $this->pendinghistory = null;
         [$summary, $detail, $currencies] = $this->consistently(fn() => [
-            $this->summarised($fields, $from, $to, $courseid, $keysource, $userid, $targetid, $walletid),
-            $this->detailed($fields, $from, $to, $courseid, $keysource, $userid, $targetid, $walletid),
+            $this->settled($filters, $fields, $from, $to),
+            $this->detailed_by_provider($from, $to, $courseid, $keysource, $userid, $targetid, $walletid),
             $this->prices->get_provider_currencies(),
         ]);
+        $this->keep_history();
         $rows = [];
         $this->collect($rows, $fields, $summary);
         $this->collect($rows, $fields, $detail);
 
         return $this->build(array_values($rows), $from, $to, $currencies);
+    }
+
+    /**
+     * The summarised part of a period: the days the daily task has already folded in.
+     *
+     * Settled until the record's generation moves -- the daily task folding another day
+     * in, a purge, a currency correction all move it -- so a ledger that may use the
+     * cache keeps it under the generation it was read in and does not add it up again.
+     * What has not been summarised yet, which is mostly today, is read afresh every
+     * time, beside it. Where the daily task has worked a period out ahead for every
+     * course or every person (prime()), one with no entry had nothing summarised.
+     *
+     * The end of the period counts to the end of its day: the summary holds whole days,
+     * and today is never among them.
+     *
+     * @param array $filters Filters the reader understands.
+     * @param string[] $fields Fields to group by.
+     * @param int $from The first moment counted.
+     * @param int $to The first moment not counted.
+     * @return \stdClass[] The summarised rows.
+     */
+    protected function settled(array $filters, array $fields, int $from, int $to): array {
+        $read = fn(): array => $this->summarised(
+            $fields,
+            $from,
+            $to,
+            $filters['courseid'] ?? null,
+            (string) $filters['keysource'],
+            $filters['userid'] ?? null,
+            $filters['targetid'] ?? null,
+            $filters['walletid'] ?? null,
+        );
+        if (!$this->cached || $this->passgeneration === null || $fields !== ['targetprovider']) {
+            return $read();
+        }
+
+        $cache = \core_cache\cache::make('local_airouter', self::HISTORY_CACHE_AREA);
+        $key = self::history_key($filters, $from, $to, $this->passgeneration);
+        $held = $cache->get($key);
+        if (is_array($held)) {
+            return array_map(fn(array $row): \stdClass => (object) $row, $held);
+        }
+        $family = self::history_family($filters);
+        if ($family !== null && $cache->get(self::history_marker($family, $from, $to, $this->passgeneration)) !== false) {
+            return [];
+        }
+
+        $rows = $read();
+        $this->pendinghistory = [$key, $rows, $this->passgeneration];
+
+        return $rows;
+    }
+
+    /**
+     * Keep the settled history the read just made, if the read was consistent in the generation it was filed under.
+     */
+    protected function keep_history(): void {
+        if ($this->pendinghistory === null) {
+            return;
+        }
+        [$key, $rows, $generation] = $this->pendinghistory;
+        $this->pendinghistory = null;
+        if ($this->get_read_generation() !== $generation) {
+            return;
+        }
+        \core_cache\cache::make('local_airouter', self::HISTORY_CACHE_AREA)
+            ->set($key, array_map(fn(\stdClass $row): array => (array) $row, $rows));
+    }
+
+    /**
+     * Work out ahead the settled part of every budget's period, for every subject at once.
+     *
+     * Called by the daily task once it has folded the day in. A budget on a course or on
+     * a person is otherwise worked out, on the first request of the day to ask about
+     * that course or person, by adding up every summarised day of its period; here one
+     * statement per period adds them up for all of them. Kept under the generation read
+     * before and checked after: if the record moved while this ran, nothing is kept, and
+     * the requests work it out as they would have.
+     *
+     * @param int $now The moment the periods end at.
+     * @return int How many subjects were worked out.
+     */
+    public function prime(int $now): int {
+        $windows = [];
+        foreach ((new rule_repository($this->db))->get_budgets($now) as $budget) {
+            [$from, $to] = self::get_window((string) $budget->period, (int) $budget->days, $now);
+            $windows[$budget->scope . '|' . $from] = [(string) $budget->scope, $from, $to];
+        }
+        ksort($windows);
+
+        $cache = \core_cache\cache::make('local_airouter', self::HISTORY_CACHE_AREA);
+        $primed = 0;
+        foreach ($windows as [$scope, $from, $to]) {
+            $generation = generation::get($this->db);
+            $entries = [];
+            $marker = null;
+            if ($scope === self::SCOPE_SITE) {
+                $filters = $this->filters_for($scope, 0);
+                $entries[self::history_key($filters, $from, $to, $generation)] = $this->summarised(
+                    ['targetprovider'],
+                    $from,
+                    $to,
+                    null,
+                    rule::KEYSOURCE_SITE,
+                );
+            } else {
+                $field = $scope === self::SCOPE_COURSE ? 'courseid' : 'userid';
+                $bysubject = [];
+                foreach ($this->summarised([$field, 'targetprovider'], $from, $to, null, rule::KEYSOURCE_SITE) as $row) {
+                    $id = (int) $row->$field;
+                    unset($row->$field);
+                    $bysubject[$id][] = $row;
+                }
+                foreach ($bysubject as $id => $rows) {
+                    if ($id > 0) {
+                        $entries[self::history_key($this->filters_for($scope, $id), $from, $to, $generation)] = $rows;
+                    }
+                }
+                $marker = self::history_marker(self::history_family($this->filters_for($scope, 1)), $from, $to, $generation);
+            }
+            if (generation::get($this->db) !== $generation) {
+                continue;
+            }
+            $cache->set_many(array_map(
+                fn(array $rows): array => array_map(fn(\stdClass $row): array => (array) $row, $rows),
+                $entries,
+            ));
+            if ($marker !== null) {
+                $cache->set($marker, true);
+            }
+            $primed += count($entries);
+        }
+
+        return $primed;
+    }
+
+    /**
+     * The key one subject's settled history is kept under.
+     *
+     * @param array $filters Filters the reader understands.
+     * @param int $from The first moment counted.
+     * @param int $to The first moment not counted.
+     * @param int $generation The generation it was read in.
+     * @return string The key.
+     */
+    protected static function history_key(array $filters, int $from, int $to, int $generation): string {
+        ksort($filters);
+
+        return 'h' . sha1(json_encode($filters) . '|' . $from . '|' . self::history_end($to)) . '_' . $generation;
+    }
+
+    /**
+     * The key that says every subject of one kind has been worked out ahead.
+     *
+     * @param array $family What the filters of every such subject share.
+     * @param int $from The first moment counted.
+     * @param int $to The first moment not counted.
+     * @param int $generation The generation it was read in.
+     * @return string The key.
+     */
+    protected static function history_marker(array $family, int $from, int $to, int $generation): string {
+        ksort($family);
+
+        return 'a' . sha1(json_encode($family) . '|' . $from . '|' . self::history_end($to)) . '_' . $generation;
+    }
+
+    /**
+     * What every course's, or every person's, filters share, or null for any other subject.
+     *
+     * @param array $filters Filters the reader understands.
+     * @return array|null The shared part, naming which of the two it is.
+     */
+    protected static function history_family(array $filters): ?array {
+        foreach (['courseid', 'userid'] as $field) {
+            if (array_key_exists($field, $filters) && count($filters) === 2) {
+                unset($filters[$field]);
+
+                return $filters + ['every' => $field];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The end of the summarised part of a period: the start of the day after the one it ends in.
+     *
+     * The summary holds whole days, by the moment each begins, so every end within one
+     * day reads the same summarised days.
+     *
+     * @param int $to The first moment not counted.
+     * @return int The start of the first day not counted.
+     */
+    protected static function history_end(int $to): int {
+        $day = summariser::day_of($to);
+
+        return $day === $to ? $to : summariser::add_days($day, 1);
     }
 
     /**

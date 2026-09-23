@@ -17,6 +17,7 @@
 namespace local_airouter;
 
 use core_ai\aiactions\base as action_base;
+use local_airouter\record\ledger;
 
 /**
  * Everything a rule is allowed to ask about one request.
@@ -65,6 +66,9 @@ class evaluation_context {
     /** @var bool Whether placement detection has run. */
     protected bool $placementresolved = false;
 
+    /** @var ledger|null The ledger every limit on this request is weighed in, once made. */
+    protected ?ledger $ledger = null;
+
     /**
      * Constructor.
      *
@@ -85,6 +89,20 @@ class evaluation_context {
             $this->placement = $placement;
             $this->placementresolved = true;
         }
+    }
+
+    /**
+     * The ledger every limit on this request is weighed in.
+     *
+     * One for the request, so that the budgets its rules carry and the limit on the key
+     * it would use read the record under the same generation, and read it once.
+     *
+     * @return ledger The ledger.
+     */
+    public function get_ledger(): ledger {
+        global $DB;
+
+        return $this->ledger ??= ledger::for_one_request($DB);
     }
 
     /**

@@ -101,7 +101,7 @@ class budget extends base {
             return false;
         }
 
-        $spend = $this->get_ledger()->get_spend(
+        $spend = $this->get_ledger($context)->get_spend(
             $scope,
             $scopeid,
             $this->get_period(),
@@ -517,11 +517,11 @@ class budget extends base {
      * weighed against. What that costs in accuracy is written down where the cache is
      * defined.
      *
+     * @param evaluation_context $context The request being weighed, which holds one
+     *                                    ledger for all of its limits.
      * @return ledger The ledger.
      */
-    protected function get_ledger(): ledger {
-        global $DB;
-
-        return new ledger($DB);
+    protected function get_ledger(evaluation_context $context): ledger {
+        return $context->get_ledger();
     }
 }

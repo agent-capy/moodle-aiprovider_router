@@ -63,4 +63,22 @@ $definitions = [
         'staticaccelerationsize' => 20,
         'ttl' => 60,
     ],
+
+    // The settled part of each budget's period: the days the daily task has folded into
+    // the summary. A budget's figure is that and what has not been summarised yet, and
+    // only the second changes between runs of the daily task, so the first is worked out
+    // once -- by the daily task itself, where it can -- and kept. Kept under the
+    // generation of the record it was read in, which everything that rewrites the
+    // summary moves, so an entry is never found once it is out of date; the lifetime
+    // only clears away entries nobody will ask for again.
+    //
+    // A site that has APCu, or another memory store, can map this definition to it.
+    'budgethistory' => [
+        'mode' => cache_store::MODE_APPLICATION,
+        'simplekeys' => true,
+        'simpledata' => false,
+        'staticacceleration' => true,
+        'staticaccelerationsize' => 50,
+        'ttl' => 2 * DAYSECS,
+    ],
 ];

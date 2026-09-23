@@ -107,6 +107,9 @@ class reader {
     /** @var int|null The generation the last paired read belongs to, or null when it belongs to none. */
     protected ?int $generation = null;
 
+    /** @var int|null The generation the pass under way began in, for what the pass reads to be filed by. */
+    protected ?int $passgeneration = null;
+
     /**
      * Constructor.
      *
@@ -165,6 +168,7 @@ class reader {
         $this->consistent = true;
         for ($pass = 1; $pass <= self::MAX_READS; $pass++) {
             $before = generation::get($this->db);
+            $this->passgeneration = $before;
             $result = $read();
             if (generation::get($this->db) === $before) {
                 $this->generation = $before;
@@ -548,27 +552,22 @@ class reader {
     }
 
     /**
-     * The detail not yet in the summary, grouped, for a period.
+     * What picks out the detail not yet in the summary, for requests and for attempts.
      *
-     * Read row by row and added up here: what has not been applied is at most a day
-     * or so of traffic plus whatever ended late, and the day a fact belongs to is a
-     * timezone calculation the database is not asked to make.
+     * One place for it, so that the detail read row by row and the detail added up by
+     * the database are the same detail.
      *
-     * @param string[] $fields Fields to group on; day or daystart for the day the fact ended.
      * @param int $from The start of the period.
      * @param int $to The end of the period.
      * @param int|null $courseid Limit to one course, or null for the whole site.
      * @param string|null $keysource Limit to one payer, or null for all.
      * @param int|null $userid Limit to one person, or null for everybody.
-     * @param int|null $targetid Limit to one delegation target, or null for all. A
-     *                           request counts as that target's when it answered.
-     * @param int|null $walletid Limit to what one wallet paid for, or null for all. A
-     *                           request counts as a wallet's when a call it paid for
-     *                           answered, as in the summary.
-     * @return \stdClass[] Normalised rows carrying the group fields and the metrics.
+     * @param int|null $targetid Limit to one delegation target, or null for all.
+     * @param int|null $walletid Limit to what one wallet paid for, or null for all.
+     * @return array The condition on requests (r, with the answering attempt as s), the
+     *               condition on attempts (a, with its request as r), and their parameters.
      */
-    protected function detailed(
-        array $fields,
+    protected function detail_conditions(
         int $from,
         int $to,
         ?int $courseid,
@@ -605,6 +604,133 @@ class reader {
             $awhere .= ' AND r.userid = :userid';
             $params['userid'] = $userid;
         }
+
+        return [$rwhere, $awhere, $params];
+    }
+
+    /**
+     * The detail not yet in the summary, added up by the database, provider by provider.
+     *
+     * The same figures detailed() gives when grouped on the provider alone, for the one
+     * question asked on the path of a request: what a budget or a key has spent. There
+     * is no day to work out, so nothing needs reading row by row, and a busy day's
+     * detail comes back as a row or two per provider rather than as every call in it.
+     *
+     * The grouping is on columns and constants only: a grouped expression carrying a
+     * parameter is not the same expression twice to every database.
+     *
+     * @param int $from The start of the period.
+     * @param int $to The end of the period.
+     * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to one payer, or null for all.
+     * @param int|null $userid Limit to one person, or null for everybody.
+     * @param int|null $targetid Limit to one delegation target, or null for all.
+     * @param int|null $walletid Limit to what one wallet paid for, or null for all.
+     * @return \stdClass[] Rows carrying the provider, the currency and the metrics.
+     */
+    protected function detailed_by_provider(
+        int $from,
+        int $to,
+        ?int $courseid,
+        ?string $keysource,
+        ?int $userid = null,
+        ?int $targetid = null,
+        ?int $walletid = null,
+    ): array {
+        [$rwhere, $awhere, $params] = $this->detail_conditions($from, $to, $courseid, $keysource, $userid, $targetid, $walletid);
+        $params += [
+            'open' => request_state::OPEN,
+            'started' => attempt_state::STARTED,
+            'succeeded' => attempt_state::SUCCEEDED,
+            'answered' => request_state::SUCCEEDED,
+        ];
+        $rows = [];
+
+        // A request sits with the provider that answered it, as in the summary.
+        $recordset = $this->db->get_recordset_sql(
+            'SELECT s.targetprovider, COUNT(1) AS requests,
+                    SUM(CASE WHEN r.state = :answered THEN 0 ELSE 1 END) AS failures
+               FROM {' . usage_recorder::REQUEST_TABLE . '} r
+          LEFT JOIN {' . usage_recorder::ATTEMPT_TABLE . '} s ON s.requestid = r.id AND s.state = :succeeded
+              WHERE ' . $rwhere . '
+           GROUP BY s.targetprovider',
+            $params,
+        );
+        foreach ($recordset as $group) {
+            $row = self::blank();
+            $row->targetprovider = $group->targetprovider ?? '-';
+            $row->currency = '-';
+            $row->requests = (int) $group->requests;
+            $row->failures = (int) $group->failures;
+            $rows[] = $row;
+        }
+        $recordset->close();
+
+        $recordset = $this->db->get_recordset_sql(
+            'SELECT a.targetprovider, a.currency, CASE WHEN a.cost IS NULL THEN 0 ELSE 1 END AS costed,
+                    COUNT(1) AS calls, SUM(a.usageknown) AS knowncalls,
+                    SUM(CASE WHEN a.usageknown = 1 THEN a.prompttokens ELSE 0 END) AS prompttokens,
+                    SUM(CASE WHEN a.usageknown = 1 THEN a.completiontokens ELSE 0 END) AS completiontokens,
+                    SUM(a.cost) AS cost
+               FROM {' . usage_recorder::ATTEMPT_TABLE . '} a
+               JOIN {' . usage_recorder::REQUEST_TABLE . '} r ON r.id = a.requestid
+              WHERE ' . $awhere . '
+           GROUP BY a.targetprovider, a.currency, CASE WHEN a.cost IS NULL THEN 0 ELSE 1 END',
+            $params,
+        );
+        foreach ($recordset as $group) {
+            $costed = (int) $group->costed === 1;
+            $provider = (string) ($group->targetprovider ?? '-');
+            $currency = $costed ? (string) ($group->currency ?? '-') : '-';
+            $row = self::blank();
+            $row->targetprovider = $provider;
+            $row->currency = $currency;
+            $row->calls = (int) $group->calls;
+            $row->knowncalls = (int) $group->knowncalls;
+            $row->prompttokens = (int) $group->prompttokens;
+            $row->completiontokens = (int) $group->completiontokens;
+            $row->costedcalls = $costed ? (int) $group->calls : 0;
+            $row->costs = $costed ? self::money($provider, $currency, (float) $group->cost) : [];
+            self::settle($row);
+            $rows[] = $row;
+        }
+        $recordset->close();
+        $this->at('detailed');
+
+        return $rows;
+    }
+
+    /**
+     * The detail not yet in the summary, grouped, for a period.
+     *
+     * Read row by row and added up here: what has not been applied is at most a day
+     * or so of traffic plus whatever ended late, and the day a fact belongs to is a
+     * timezone calculation the database is not asked to make.
+     *
+     * @param string[] $fields Fields to group on; day or daystart for the day the fact ended.
+     * @param int $from The start of the period.
+     * @param int $to The end of the period.
+     * @param int|null $courseid Limit to one course, or null for the whole site.
+     * @param string|null $keysource Limit to one payer, or null for all.
+     * @param int|null $userid Limit to one person, or null for everybody.
+     * @param int|null $targetid Limit to one delegation target, or null for all. A
+     *                           request counts as that target's when it answered.
+     * @param int|null $walletid Limit to what one wallet paid for, or null for all. A
+     *                           request counts as a wallet's when a call it paid for
+     *                           answered, as in the summary.
+     * @return \stdClass[] Normalised rows carrying the group fields and the metrics.
+     */
+    protected function detailed(
+        array $fields,
+        int $from,
+        int $to,
+        ?int $courseid,
+        ?string $keysource,
+        ?int $userid = null,
+        ?int $targetid = null,
+        ?int $walletid = null,
+    ): array {
+        [$rwhere, $awhere, $params] = $this->detail_conditions($from, $to, $courseid, $keysource, $userid, $targetid, $walletid);
 
         $facts = [];
         // A request sits with the target and model that answered it, as in the summary.

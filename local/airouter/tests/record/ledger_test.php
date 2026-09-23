@@ -16,11 +16,13 @@
 
 namespace local_airouter\record;
 
+use local_airouter\condition\budget;
 use local_airouter\key;
 use local_airouter\key_repository;
 use local_airouter\price;
 use local_airouter\price_book;
 use local_airouter\rule;
+use local_airouter\rule_repository;
 
 /**
  * Tests for the ledger every limit is measured against.
@@ -596,5 +598,206 @@ final class ledger_test extends \advanced_testcase {
         $held = (new ledger($DB, true))->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now + 1);
         $this->assertSame('JPY', $held->get_currency('aiprovider_mock'));
         $this->assertTrue($held->is_known(ledger::METRIC_COST, 'aiprovider_mock'));
+    }
+
+    public function test_the_summarised_part_of_a_period_is_kept_until_the_record_moves(): void {
+        // A budget's figure is the days the daily task has folded in and what has not
+        // been summarised yet. Only the second changes between runs, so the first is
+        // kept under the generation it was read in. To show the kept part is what
+        // answers, a summary row is changed here without moving the generation -- which
+        // nothing in the plugin does -- and the figure does not follow it until the
+        // generation moves. Today's detail is read afresh every time.
+        global $DB;
+        $this->spend(1.0, ['ended' => $this->now - DAYSECS]);
+        (new summariser($DB))->run($this->now);
+        $spend = fn() => (new ledger($DB))->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now);
+        $this->assertEqualsWithDelta(1.0, $spend()->get_amount('aiprovider_mock'), 0.000001);
+
+        $DB->set_field(summariser::TABLE, 'cost', 5.0, ['currency' => 'USD']);
+        $this->spend(2.0);
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
+        $this->assertEqualsWithDelta(3.0, $spend()->get_amount('aiprovider_mock'), 0.000001, 'Kept, and today added afresh.');
+
+        generation::bump();
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
+        $this->assertEqualsWithDelta(7.0, $spend()->get_amount('aiprovider_mock'), 0.000001, 'Read again once it moved.');
+    }
+
+    public function test_the_daily_task_works_out_the_summarised_part_for_every_course_at_once(): void {
+        global $DB;
+        $rule = new rule();
+        $rule->set('name', 'A course may spend so much a week');
+        $rule->set('targetid', 1);
+        (new rule_repository($DB))->save($rule, ['budget' => [
+            'scope' => ledger::SCOPE_COURSE, 'direction' => budget::DIRECTION_UNDER, 'metric' => ledger::METRIC_COST,
+            'provider' => 'aiprovider_mock', 'amount' => 100.0, 'period' => ledger::PERIOD_ROLLING, 'days' => 7,
+        ]]);
+        $this->spend(3.0, ['courseid' => 7, 'ended' => $this->now - DAYSECS]);
+        $this->spend(2.0, ['courseid' => 8, 'ended' => $this->now - 2 * DAYSECS]);
+        (new summariser($DB))->run($this->now);
+
+        $this->assertSame(2, (new ledger($DB))->prime($this->now));
+
+        $week = fn(ledger $ledger, int $course) => $ledger->get_spend(
+            ledger::SCOPE_COURSE,
+            $course,
+            ledger::PERIOD_ROLLING,
+            7,
+            $this->now,
+        );
+        $cached = fn(int $course) => $week(new ledger($DB), $course);
+        $fresh = fn(int $course) => $week(new ledger($DB, false), $course);
+        foreach ([7, 8] as $course) {
+            $this->assertEqualsWithDelta(
+                $fresh($course)->get_amount('aiprovider_mock'),
+                $cached($course)->get_amount('aiprovider_mock'),
+                0.000001,
+            );
+        }
+        // A course the daily task found nothing for had nothing summarised, and is
+        // answered without asking. Shown by giving it a summary row the task never saw.
+        $DB->set_field(summariser::TABLE, 'courseid', 9, ['courseid' => 8]);
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
+        $this->assertTrue($cached(9)->is_known(ledger::METRIC_COST, 'aiprovider_mock'));
+        $this->assertEqualsWithDelta(0.0, (float) $cached(9)->get_amount('aiprovider_mock'), 0.000001);
+        generation::bump();
+        \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
+        $this->assertEqualsWithDelta(2.0, $cached(9)->get_amount('aiprovider_mock'), 0.000001);
+    }
+
+    public function test_working_periods_out_ahead_while_the_record_moves_keeps_nothing(): void {
+        global $DB;
+        $rule = new rule();
+        $rule->set('name', 'The site may spend so much a week');
+        $rule->set('targetid', 1);
+        (new rule_repository($DB))->save($rule, ['budget' => [
+            'scope' => ledger::SCOPE_SITE, 'direction' => budget::DIRECTION_UNDER, 'metric' => ledger::METRIC_COST,
+            'provider' => 'aiprovider_mock', 'amount' => 100.0, 'period' => ledger::PERIOD_ROLLING, 'days' => 7,
+        ]]);
+        $this->spend(1.0, ['ended' => $this->now - DAYSECS]);
+        (new summariser($DB))->run($this->now);
+        $moving = new class ($DB) extends ledger {
+            #[\Override]
+            protected function summarised(
+                array $fields,
+                int $from,
+                int $to,
+                ?int $courseid,
+                ?string $keysource,
+                ?int $userid = null,
+                ?int $targetid = null,
+                ?int $walletid = null,
+            ): array {
+                $rows = parent::summarised($fields, $from, $to, $courseid, $keysource, $userid, $targetid, $walletid);
+                generation::bump();
+
+                return $rows;
+            }
+        };
+
+        $this->assertSame(0, $moving->prime($this->now));
+    }
+
+    public function test_the_detail_added_up_by_the_database_is_the_detail_read_row_by_row(): void {
+        // The request path adds up what has not been summarised in the database, a row
+        // or two per provider, where the reports read it call by call. The two have to
+        // be the same figures for every kind of fact and every subject a limit is on.
+        global $DB;
+        $this->rate('aiprovider_other', 'JPY');
+        $facts = [
+            // Course 7, person 5: answered at once, priced.
+            [['userid' => 5, 'courseid' => 7], [['state' => attempt_state::SUCCEEDED, 'cost' => 1.25]]],
+            // An empty answer charged for, then an answer nobody could price.
+            [['userid' => 5, 'courseid' => 7], [
+                ['state' => attempt_state::EMPTY, 'cost' => 0.1],
+                ['state' => attempt_state::SUCCEEDED, 'cost' => null],
+            ]],
+            // Failed everywhere, one call free and one whose usage is not known.
+            [['userid' => 6, 'courseid' => 7, 'state' => request_state::FAILED], [
+                ['state' => attempt_state::FAILED, 'cost' => 0.0],
+                ['state' => attempt_state::THREW, 'cost' => null, 'usageknown' => 0],
+            ]],
+            // Another provider, billed in yen, in another course.
+            [['userid' => 6, 'courseid' => 8], [['state' => attempt_state::SUCCEEDED, 'cost' => 300.0,
+                'targetprovider' => 'aiprovider_other', 'currency' => 'JPY']]],
+            // Somebody's own key.
+            [['userid' => 5, 'courseid' => 8, 'keysource' => rule::KEYSOURCE_USER], [
+                ['state' => attempt_state::SUCCEEDED, 'cost' => 2.0, 'keysource' => rule::KEYSOURCE_USER, 'walletid' => 77],
+            ]],
+        ];
+        foreach ($facts as $i => [$request, $attempts]) {
+            $ended = $this->now - 100 + $i;
+            $made = $this->generator->create_request($request + [
+                'keysource' => rule::KEYSOURCE_SITE, 'state' => request_state::SUCCEEDED,
+                'answeredby' => 1, 'timestarted' => $ended - 5, 'timeended' => $ended,
+            ]);
+            foreach ($attempts as $seq => $attempt) {
+                $this->generator->create_attempt($attempt + [
+                    'requestid' => $made->id, 'seq' => $seq + 1, 'targetid' => 1,
+                    'targetprovider' => 'aiprovider_mock', 'keysource' => rule::KEYSOURCE_SITE, 'walletid' => 0,
+                    'currency' => $attempt['cost'] === null ? null : 'USD', 'usageknown' => 1,
+                    'prompttokens' => 100 + $seq, 'completiontokens' => 10 + $seq,
+                    'timestarted' => $ended - 4, 'timeended' => $ended,
+                ]);
+            }
+        }
+        $rowbyrow = new class ($DB, false) extends ledger {
+            #[\Override]
+            protected function detailed_by_provider(
+                int $from,
+                int $to,
+                ?int $courseid,
+                ?string $keysource,
+                ?int $userid = null,
+                ?int $targetid = null,
+                ?int $walletid = null,
+            ): array {
+                return $this->detailed(['targetprovider'], $from, $to, $courseid, $keysource, $userid, $targetid, $walletid);
+            }
+
+            /**
+             * What a set of filters has spent.
+             *
+             * @param array $filters Filters the reader understands.
+             * @param int $from The first moment counted.
+             * @param int $to The first moment not counted.
+             * @return spend The spending.
+             */
+            public function spent(array $filters, int $from, int $to): spend {
+                return $this->read($filters, $from, $to);
+            }
+        };
+        $summed = new class ($DB, false) extends ledger {
+            /**
+             * What a set of filters has spent.
+             *
+             * @param array $filters Filters the reader understands.
+             * @param int $from The first moment counted.
+             * @param int $to The first moment not counted.
+             * @return spend The spending.
+             */
+            public function spent(array $filters, int $from, int $to): spend {
+                return $this->read($filters, $from, $to);
+            }
+        };
+        [$from, $to] = $this->week();
+
+        $subjects = [
+            ['keysource' => rule::KEYSOURCE_SITE],
+            ['keysource' => rule::KEYSOURCE_SITE, 'courseid' => 7],
+            ['keysource' => rule::KEYSOURCE_SITE, 'courseid' => 8],
+            ['keysource' => rule::KEYSOURCE_SITE, 'userid' => 5],
+            ['keysource' => rule::KEYSOURCE_SITE, 'userid' => 6],
+            ['keysource' => rule::KEYSOURCE_USER, 'walletid' => 77],
+        ];
+        foreach ($subjects as $filters) {
+            $expected = $rowbyrow->spent($filters, $from, $to);
+            $actual = $summed->spent($filters, $from, $to);
+            $label = json_encode($filters);
+            $this->assertSame($expected->requests, $actual->requests, $label);
+            $this->assertSame($expected->calls, $actual->calls, $label);
+            $this->assertEquals($expected->providers, $actual->providers, $label);
+        }
+        $this->assertGreaterThan(0, $summed->spent(['keysource' => rule::KEYSOURCE_SITE], $from, $to)->requests);
     }
 }
