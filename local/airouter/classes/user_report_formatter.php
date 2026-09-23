@@ -33,17 +33,10 @@ class user_report_formatter {
      *
      * @param \stdClass[] $people Rows from the report.
      * @param string[] $names User names keyed by id.
-     * @param string|null $currency What the figures are in, or null where the period
-     *                              holds more than one currency.
      * @param \moodle_url $url The page each person's name links back into.
      * @return \html_table The table.
      */
-    public static function people(
-        array $people,
-        array $names,
-        ?string $currency,
-        \moodle_url $url,
-    ): \html_table {
+    public static function people(array $people, array $names, \moodle_url $url): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('report:person', 'local_airouter'),
@@ -60,8 +53,8 @@ class user_report_formatter {
                 self::person($userid, $names, $url),
                 number_format((int) $person->requests),
                 number_format((int) $person->prompttokens + (int) $person->completiontokens),
-                usage_formatter::cost($person->sitecost, $currency),
-                self::brought($person, $currency),
+                usage_formatter::costs($person->sitecosts),
+                self::brought($person),
             ];
         }
 
@@ -99,16 +92,14 @@ class user_report_formatter {
      * What somebody spent on their own key, with the warning that belongs beside it.
      *
      * @param \stdClass $person The person's figures.
-     * @param string|null $currency What the figures are in, or null where the period
-     *                              holds more than one currency.
      * @return string HTML.
      */
-    protected static function brought(\stdClass $person, ?string $currency): string {
+    protected static function brought(\stdClass $person): string {
         if ((int) $person->broughtrequests === 0) {
             return \html_writer::span('-', 'text-muted');
         }
 
-        return usage_formatter::cost($person->broughtcost, $currency)
+        return usage_formatter::costs($person->broughtcosts)
             . \html_writer::div(
                 get_string('report:broughtrequests', 'local_airouter', number_format($person->broughtrequests)),
                 'text-muted small',
@@ -119,11 +110,9 @@ class user_report_formatter {
      * One person's usage, day by day.
      *
      * @param \stdClass[] $days Rows from the report.
-     * @param string|null $currency What the figures are in, or null where the period
-     *                              holds more than one currency.
      * @return \html_table The table.
      */
-    public static function days(array $days, ?string $currency): \html_table {
+    public static function days(array $days): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('report:day', 'local_airouter'),
@@ -146,7 +135,7 @@ class user_report_formatter {
                 self::keysource((string) $day->keysource),
                 number_format((int) $day->requests),
                 number_format((int) $day->prompttokens + (int) $day->completiontokens),
-                usage_formatter::cost($day->cost, $currency),
+                usage_formatter::costs($day->costs),
             ];
         }
 
@@ -157,11 +146,9 @@ class user_report_formatter {
      * One person's individual requests.
      *
      * @param \stdClass[] $requests Rows from the report.
-     * @param string|null $currency What to fall back to for a row recorded before
-     *                              there was a currency at all.
      * @return \html_table The table.
      */
-    public static function requests(array $requests, ?string $currency): \html_table {
+    public static function requests(array $requests): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('report:when', 'local_airouter'),
@@ -185,12 +172,9 @@ class user_report_formatter {
                 usage_formatter::model_name($request),
                 self::keysource((string) $request->keysource),
                 number_format((int) $request->prompttokens + (int) $request->completiontokens),
-                // The currency the row was recorded in, not the one the site uses
-                // today. Costs are worked out when a request happens and kept, so a
-                // site that changed its currency afterwards has rows in both, and
-                // relabelling the old ones is a different number rather than the same
-                // one said again.
-                usage_formatter::cost($request->cost, (string) ($request->currency ?: $currency)),
+                // In the currency each call was charged in, and in two when a request
+                // that fell through was charged in two.
+                usage_formatter::costs($request->costs),
             ];
             if (!$request->success) {
                 $row->attributes['class'] = 'dimmed_text';
@@ -209,8 +193,6 @@ class user_report_formatter {
      * @param string[] $names User names keyed by id.
      * @param string[] $courses Course names keyed by id.
      * @param string[] $targets Target names keyed by id.
-     * @param string|null $currency What the figures are in, or null where the period
-     *                              holds more than one currency.
      * @return \html_table The table.
      */
     public static function holders(
@@ -219,7 +201,6 @@ class user_report_formatter {
         array $names,
         array $courses,
         array $targets,
-        ?string $currency,
     ): \html_table {
         $table = new \html_table();
         $table->head = [
@@ -241,7 +222,7 @@ class user_report_formatter {
                 userdate((int) $holder->timecreated, get_string('strftimedateshort', 'langconfig')),
                 self::verified($holder),
                 $used === null ? '0' : number_format((int) $used->requests),
-                $used === null ? '-' : usage_formatter::cost($used->cost, $currency),
+                $used === null ? '-' : usage_formatter::costs($used->costs),
             ];
         }
 
@@ -324,33 +305,35 @@ class user_report_formatter {
      * Exported rather than linked, because this is the form the figures leave in: a
      * report somebody has been asked to produce, which will be read outside Moodle.
      *
+     * Money is a pair of columns per provider, named for the provider and its
+     * currency, so that a column can be added up by whoever reads the file and never
+     * adds one provider's money to another's: this is the one output that leaves
+     * Moodle and gets added up by somebody else. A cell is empty where nothing of
+     * that person's was priced at that provider, and zero where what was priced cost
+     * nothing.
+     *
      * @param \stdClass[] $people Rows from the report.
      * @param string[] $names User names keyed by id.
-     * @param string|null $currency What the figures are in, or null where the period
-     *                              holds more than one currency.
+     * @param array[] $money The entries the file has columns for, in column order, as money_of() gives them.
      * @return array[] Rows of plain values.
      */
-    public static function people_rows(array $people, array $names, ?string $currency): array {
-        // A spreadsheet has nowhere to put "it depends". Where the period holds more
-        // than one currency the money columns are left empty and the currency column
-        // says why, because a number in the file would be read as a number: this is
-        // the one output that leaves Moodle and gets added up by somebody else.
-        $mixed = $currency === null;
-
+    public static function people_rows(array $people, array $names, array $money): array {
         $rows = [];
         foreach ($people as $person) {
             $userid = (int) $person->userid;
-            $rows[] = [
+            $row = [
                 $userid > 0 ? $userid : '',
                 $names[$userid] ?? get_string('report:unattributed', 'local_airouter'),
                 (int) $person->requests,
                 (int) $person->prompttokens,
                 (int) $person->completiontokens,
-                $mixed || $person->sitecost === null ? '' : (float) $person->sitecost,
-                $mixed || $person->broughtcost === null ? '' : (float) $person->broughtcost,
-                (int) $person->broughtrequests,
-                $mixed ? get_string('usage:cost:mixed', 'local_airouter') : $currency,
             ];
+            foreach (array_keys($money) as $key) {
+                $row[] = isset($person->sitecosts[$key]) ? (float) $person->sitecosts[$key]['amount'] : '';
+                $row[] = isset($person->broughtcosts[$key]) ? (float) $person->broughtcosts[$key]['amount'] : '';
+            }
+            $row[] = (int) $person->broughtrequests;
+            $rows[] = $row;
         }
 
         return $rows;
@@ -359,19 +342,44 @@ class user_report_formatter {
     /**
      * The column headings of the exported file.
      *
+     * @param array[] $money The entries the file has columns for, in column order, as money_of() gives them.
      * @return string[] The headings.
      */
-    public static function export_columns(): array {
-        return [
+    public static function export_columns(array $money): array {
+        $columns = [
             get_string('report:column:userid', 'local_airouter'),
             get_string('report:person', 'local_airouter'),
             get_string('usage:total:requests', 'local_airouter'),
             get_string('usage:column:prompttokens', 'local_airouter'),
             get_string('usage:column:completiontokens', 'local_airouter'),
-            get_string('report:sitecost', 'local_airouter'),
-            get_string('report:broughtcost', 'local_airouter'),
-            get_string('report:column:broughtrequests', 'local_airouter'),
-            get_string('report:column:currency', 'local_airouter'),
         ];
+        foreach ($money as $entry) {
+            $label = usage_formatter::provider_name((string) $entry['provider']) . ', ' . $entry['currency'];
+            $columns[] = get_string('report:sitecost:in', 'local_airouter', $label);
+            $columns[] = get_string('report:broughtcost:in', 'local_airouter', $label);
+        }
+        $columns[] = get_string('report:column:broughtrequests', 'local_airouter');
+
+        return $columns;
+    }
+
+    /**
+     * Every provider anybody's money went to, with its currency.
+     *
+     * @param \stdClass[] $people Rows from the report.
+     * @return array[] Entries of provider, currency and a zero amount, by key, sorted.
+     */
+    public static function money_of(array $people): array {
+        $money = [];
+        foreach ($people as $person) {
+            foreach ([$person->sitecosts, $person->broughtcosts] as $costs) {
+                foreach ($costs as $key => $entry) {
+                    $money[$key] ??= ['provider' => $entry['provider'], 'currency' => $entry['currency'], 'amount' => 0.0];
+                }
+            }
+        }
+        ksort($money);
+
+        return $money;
     }
 }

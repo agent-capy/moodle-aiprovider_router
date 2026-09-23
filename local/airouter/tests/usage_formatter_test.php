@@ -16,6 +16,8 @@
 
 namespace local_airouter;
 
+use local_airouter\record\reader;
+
 /**
  * Tests for what the dashboard says about figures it is not showing.
  *
@@ -72,54 +74,78 @@ final class usage_formatter_test extends \advanced_testcase {
     }
 
     /**
-     * A set of totals with a cost on it.
+     * A set of totals with money on it.
      *
-     * @param float $cost What the period cost.
+     * @param array[] $costs The money, by provider, as the reader gives it.
      * @return \stdClass The totals.
      */
-    protected function totals(float $cost): \stdClass {
-        return (object) [
+    protected function totals(array $costs): \stdClass {
+        $totals = (object) [
             'requests' => 5,
             'failures' => 0,
             'calls' => 5,
             'prompttokens' => 100,
             'completiontokens' => 50,
-            'cost' => $cost,
-            'costedcalls' => 5,
+            'costs' => $costs,
+            'costedcalls' => $costs ? 5 : 0,
         ];
+        $entry = count($costs) === 1 ? reset($costs) : null;
+        $totals->cost = $entry === null ? null : $entry['amount'];
+        $totals->currency = $entry === null ? null : $entry['currency'];
+
+        return $totals;
     }
 
-    public function test_a_period_in_one_currency_shows_the_figure_in_it(): void {
+    public function test_a_period_paid_to_one_provider_shows_the_figure_in_its_currency(): void {
         $this->resetAfterTest();
 
-        $out = usage_formatter::totals($this->totals(1010.0), 'JPY');
+        $out = usage_formatter::totals($this->totals(reader::money('aiprovider_sakuraaiengine', 'JPY', 1010.0)));
 
-        // The currency the costs were recorded in, not the one the site uses today.
-        $this->assertStringContainsString('JPY', $out);
+        // The currency the provider bills in, and the provider named beside it.
+        $this->assertStringContainsString('1010 JPY', $out);
         $this->assertStringNotContainsString('USD', $out);
     }
 
-    public function test_a_period_holding_two_currencies_gives_no_total(): void {
+    public function test_a_period_paid_to_two_providers_shows_both_and_adds_neither(): void {
         $this->resetAfterTest();
 
-        $out = usage_formatter::totals($this->totals(1010.0), null);
+        $out = usage_formatter::totals($this->totals(reader::add_costs(
+            reader::money('aiprovider_sakuraaiengine', 'JPY', 1000.0),
+            reader::money('aiprovider_openai', 'USD', 10.0),
+        )));
 
-        // 1000 JPY and 10 USD do not add up to 1010 of anything. Nothing here
-        // converts between currencies, and a figure that looks like money in the
-        // site's own currency is worse than saying there is no total to give.
-        $this->assertStringContainsString(
-            get_string('usage:cost:mixed', 'local_airouter'),
-            $out,
-        );
-        $this->assertStringNotContainsString('1,010', $out);
+        // 1000 JPY and 10 USD do not add up to 1010 of anything, and two providers
+        // are not added even when they bill alike: the figures sit side by side and
+        // the site adds them or not, as its budget is one figure or one per provider.
+        $this->assertStringContainsString('1000 JPY', $out);
+        $this->assertStringContainsString('10 USD', $out);
+        $this->assertStringNotContainsString('1010', $out);
     }
 
-    public function test_a_period_that_priced_nothing_uses_the_site_currency(): void {
+    public function test_a_period_that_priced_nothing_says_so_rather_than_showing_zero(): void {
         $this->resetAfterTest();
 
-        $out = usage_formatter::totals($this->totals(0.0), 'USD');
+        $out = usage_formatter::totals($this->totals([]));
 
-        $this->assertStringContainsString('USD', $out);
+        $this->assertStringContainsString(get_string('usage:cost:unknown', 'local_airouter'), $out);
+        $this->assertStringNotContainsString('0.0000', $out);
+    }
+
+    public function test_the_table_by_provider_names_each_provider_with_its_currency(): void {
+        $this->resetAfterTest();
+        $rows = [
+            (object) ['targetprovider' => 'aiprovider_openai', 'requests' => 3, 'calls' => 4, 'costedcalls' => 4,
+                'costs' => reader::money('aiprovider_openai', 'USD', 1.5), 'cost' => 1.5, 'currency' => 'USD'],
+            (object) ['targetprovider' => 'aiprovider_sakuraaiengine', 'requests' => 2, 'calls' => 2, 'costedcalls' => 0,
+                'costs' => [], 'cost' => null, 'currency' => null],
+        ];
+
+        $table = usage_formatter::provider_table($rows);
+
+        $this->assertSame('USD', $table->data[0][1]);
+        $this->assertSame('1.5 USD', $table->data[0][5]);
+        $this->assertSame('-', $table->data[1][1], 'Nothing priced: no currency to name.');
+        $this->assertSame(get_string('usage:cost:unknown', 'local_airouter'), $table->data[1][5]);
     }
 
     public function test_a_core_action_is_named_the_way_core_names_it(): void {

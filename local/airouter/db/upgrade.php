@@ -125,6 +125,7 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         $table->add_field('cost', XMLDB_TYPE_NUMBER, '16, 6', null, XMLDB_NOTNULL, null, '0');
         $table->add_field('costedcalls', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
         $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        // The shape of the day this step was written; the next step widens the key.
         $table->add_index(
             'key',
             XMLDB_INDEX_UNIQUE,
@@ -156,6 +157,55 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         unset_config('currency', 'local_airouter');
 
         upgrade_plugin_savepoint(true, 2026092302, 'local', 'airouter');
+    }
+
+    if ($oldversion < 2026092303) {
+        // Money is added up by provider, so the summary says which provider each row
+        // belongs to, and keeps the image count so that a day can be priced again.
+        $table = new xmldb_table('local_airouter_summary');
+        $field = new xmldb_field('targetprovider', XMLDB_TYPE_CHAR, '60', null, XMLDB_NOTNULL, null, '-', 'targetname');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+            // Rows written before this knew their target by id alone; the provider is
+            // whatever that instance's plugin is, for the instances that still exist.
+            // Core keeps the instance's class name, not its component, so it is turned
+            // into the component the attempt table records, the way core names it.
+            $targetids = $DB->get_fieldset_sql(
+                'SELECT DISTINCT targetid FROM {local_airouter_summary} WHERE targetid > 0'
+            );
+            foreach ($targetids as $targetid) {
+                $classname = $DB->get_field('ai_providers', 'provider', ['id' => $targetid]);
+                if ($classname === false || $classname === null || $classname === '') {
+                    continue;
+                }
+                $component = \core\component::get_component_from_classname((string) $classname);
+                if ($component !== null && $component !== '') {
+                    $DB->set_field('local_airouter_summary', 'targetprovider', $component, ['targetid' => $targetid]);
+                }
+            }
+        }
+        $field = new xmldb_field('images', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'completiontokens');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+        $index = new xmldb_index(
+            'key',
+            XMLDB_INDEX_UNIQUE,
+            ['daystart', 'userid', 'courseid', 'actionname', 'targetid', 'model', 'keysource', 'currency']
+        );
+        if ($dbman->index_exists($table, $index)) {
+            $dbman->drop_index($table, $index);
+        }
+        $index = new xmldb_index(
+            'key',
+            XMLDB_INDEX_UNIQUE,
+            ['daystart', 'userid', 'courseid', 'actionname', 'targetprovider', 'targetid', 'model', 'keysource', 'currency']
+        );
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        upgrade_plugin_savepoint(true, 2026092303, 'local', 'airouter');
     }
 
     return true;

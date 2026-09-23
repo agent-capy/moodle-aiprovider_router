@@ -554,10 +554,18 @@ screen is not mistaken for the whole of what the site did.
 
 | | |
 | --- | --- |
-| Day by day | Requests and estimated cost, cost on its own axis |
+| By provider | One row per provider plugin: its currency, requests, provider calls, how many of them were priced, and the cost. **The table to add up by hand, if your budget is one figure for all AI** |
+| Day by day | Requests and estimated cost, cost on its own axis, one cost line per provider |
 | By which provider answered | Share of the requests each target took |
 | By what was asked for | Share of the requests each action took |
 | By model | Requests, prompt tokens, generated tokens and cost |
+
+**Money is shown by provider and is never added across providers**, not even when two
+bill in the same currency. Each provider's figure is in the currency that provider bills
+in. Whether a site's budget is one figure for all its AI or one per provider differs from
+site to site, so the page lays the providers side by side and leaves the adding to you.
+The headline cost and every table follow the same rule; a cell for a period that used two
+providers shows two figures.
 
 Two figures sit beside them. **Requests that reached the router** compares this plugin's
 history with Moodle's own register: if only part of the site's AI went through the router,
@@ -580,13 +588,15 @@ detailed records have gone.
 
 | | |
 | --- | --- |
-| By person | Requests, tokens, what the site's key paid and what the person's own key paid, kept apart |
+| By person | Requests, tokens, what the site's key paid and what the person's own key paid, kept apart, and each by provider in that provider's currency |
 | One person, day by day | Goes back as far as the summaries do |
 | One person's individual requests | When, where in Moodle, which provider and model. ⚠ Only as far back as the detailed records |
 | Who has registered a key | Every brought key, whose it is, when it was registered and whether it last worked |
 
 It also downloads as a spreadsheet, since a report like this is usually produced to be
-read outside Moodle.
+read outside Moodle. Money in the file is a pair of columns per provider, named for the
+provider and its currency, so that a column can be added up and nothing in the file adds
+one provider's money to another's.
 
 **Every cost on that page is an estimate**, worked out from the rates entered for this
 site — including the costs shown against keys people brought, where it is an estimate of
@@ -655,15 +665,27 @@ sent back.
 
 Each rate is in the currency its provider bills in, and that currency is entered with
 the rate: a provider billed in dollars has its rates in USD, one billed in yen has them
-in JPY, and a site using both holds money in both. There is no site-wide currency. A
-provider bills in one currency, so saving a rate in a different currency changes the
-currency of every rate of that provider, and the page says so when it does. A cost is
-recorded in the currency of the rate that produced it and keeps it, so relabelling a
-provider's rates changes nothing already recorded.
+in JPY, and a site using both holds money in both. There is no site-wide currency, and a
+cost is recorded in the currency of the rate that produced it.
+
+A provider's currency does not change while the site is in use. It changes once, if at
+all, when a provisional entry is corrected — rates typed in before anybody checked what
+the provider bills in — and the correction is meant to leave nothing of the provisional
+figure behind. So **saving a rate in a different currency from the provider's other
+rates corrects the provider**: every rate of that provider is put in the new currency,
+and **every cost already recorded for that provider is worked out again**, from what
+each call used, at the rates now in force for its time, in the new currency. Attempts are
+priced call by call; a summarised day is priced from the day's tokens and images at the
+rate in force at the start of that day, which is as near as a day whose detail has been
+purged can be brought. The page says what it changed. To correct a provisional rate,
+**edit the provisional row** rather than adding a new rate from today: a new row leaves
+the old figures in force for the old dates, and the recalculation would reproduce them.
+Editing a rate's numbers without changing the currency recalculates nothing; that is an
+ordinary revision, and last month keeps last month's figures.
 
 Nothing is converted between currencies: choosing an exchange rate source, a moment and
 a rounding rule would lay a second layer of error over a figure that is already an
-estimate. Figures in different currencies are kept apart rather than added.
+estimate. Figures from different providers are kept apart rather than added.
 
 The token estimation ratios are on the same page, since they are also rates an
 administrator maintains. Neither they nor the prices can change where a request goes.

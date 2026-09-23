@@ -99,12 +99,15 @@ $form->set_data([
 $report = new reader($DB);
 $now = time();
 $from = summariser::add_days(summariser::day_of($now), -($days - 1));
-// One answer for the whole screen: the headline, the tables, the chart and the
-// exported file must not disagree about what the money is counted in.
-$currency = $report->currency_for($from, $now, null, $keysource);
 
+// Money is shown by provider throughout, each provider in the currency it bills in:
+// the headline, the chart and the tables lay the providers side by side and none of
+// them adds across providers. Whether to add them is the site's decision, since a
+// budget can be one figure for all AI or one per provider, and the table by provider
+// is what it adds up by hand when it is one.
 $series = $report->get_series($from, $now, null, $keysource);
 $totals = reader::total($series);
+$byprovider = $report->get_breakdown(reader::BY_PROVIDER, $from, $now, null, $keysource);
 $bytarget = $report->get_breakdown(reader::BY_TARGET, $from, $now, null, $keysource);
 $byaction = $report->get_breakdown(reader::BY_ACTION, $from, $now, null, $keysource);
 $bymodel = $report->get_breakdown(reader::BY_MODEL, $from, $now, null, $keysource);
@@ -157,11 +160,15 @@ if ((int) $totals->requests === 0) {
     echo $OUTPUT->notification(get_string('usage:none', 'local_airouter'), 'info');
     echo usage_formatter::elsewhere($bykeysource, $keysource);
 } else {
-    echo usage_formatter::totals($totals, $currency);
+    echo usage_formatter::totals($totals);
     echo usage_formatter::elsewhere($bykeysource, $keysource);
 
+    echo $OUTPUT->heading(get_string('usage:table:byprovider', 'local_airouter'), 3);
+    echo html_writer::div(get_string('usage:table:byprovider_intro', 'local_airouter'), 'text-muted');
+    echo html_writer::table(usage_formatter::provider_table($byprovider));
+
     echo $OUTPUT->heading(get_string('usage:chart:daily', 'local_airouter'), 3);
-    echo $OUTPUT->render_chart(usage_formatter::daily_chart($series, $currency));
+    echo $OUTPUT->render_chart(usage_formatter::daily_chart($series));
 
     echo $OUTPUT->heading(get_string('usage:chart:bytarget', 'local_airouter'), 3);
     echo $OUTPUT->render_chart(usage_formatter::breakdown_chart(
@@ -176,7 +183,7 @@ if ((int) $totals->requests === 0) {
     ));
 
     echo $OUTPUT->heading(get_string('usage:table:bymodel', 'local_airouter'), 3);
-    echo html_writer::table(usage_formatter::model_table($bymodel, $currency));
+    echo html_writer::table(usage_formatter::model_table($bymodel));
 }
 
 echo $OUTPUT->heading(get_string('usage:passthrough', 'local_airouter'), 3);

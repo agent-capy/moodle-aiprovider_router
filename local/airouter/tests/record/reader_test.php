@@ -191,26 +191,63 @@ final class reader_test extends \advanced_testcase {
         $this->assertSame(2, reader::total($this->reader->get_series($from, $to, null, reader::KEYSOURCE_ALL))->requests);
     }
 
-    public function test_the_currency_is_the_one_the_money_is_in_or_none_when_it_is_in_two(): void {
+    public function test_money_is_kept_by_provider_and_never_added_across_them(): void {
         global $DB;
         [$from, $to] = $this->week();
-        $this->assertSame(
-            \local_airouter\price_book::legacy_currency(),
-            $this->reader->currency_for($from, $to),
-            'Nothing priced: the site currency, and the figures read as not known.'
-        );
+        $this->assertSame([], $this->reader->get_money($from, $to), 'Nothing priced: no money, not zero money.');
+        $this->assertNull(reader::total($this->reader->get_series($from, $to))->cost);
 
         $this->request($this->now - DAYSECS);
-        $this->assertSame('USD', $this->reader->currency_for($from, $to));
-        (new summariser($DB))->run($this->now);
-        $this->assertSame('USD', $this->reader->currency_for($from, $to));
+        $total = reader::total($this->reader->get_series($from, $to));
+        $this->assertSame('aiprovider_mock', $total->provider, 'One provider: one figure, with its currency.');
+        $this->assertSame('USD', $total->currency);
+        $this->assertEqualsWithDelta(0.004, $total->cost, 0.000001);
 
+        // A second provider, billed in yen. Its money is laid beside the first's,
+        // not added to it, before and after the summariser has run.
         $other = $this->generator->create_request(['timeended' => $this->now, 'answeredby' => 1]);
         $this->generator->create_attempt([
-            'requestid' => $other->id, 'cost' => 100, 'currency' => 'JPY', 'timeended' => $this->now,
+            'requestid' => $other->id, 'targetprovider' => 'aiprovider_sakuraaiengine', 'cost' => 100,
+            'currency' => 'JPY', 'timeended' => $this->now,
         ]);
-        $this->assertNull($this->reader->currency_for($from, $to), 'Two currencies are not one figure.');
-        $this->assert_same_values(['USD', 'JPY'], $this->reader->get_currencies($from, $to));
+        $expected = [
+            'aiprovider_mock|USD' => ['provider' => 'aiprovider_mock', 'currency' => 'USD', 'amount' => 0.004],
+            'aiprovider_sakuraaiengine|JPY' => ['provider' => 'aiprovider_sakuraaiengine', 'currency' => 'JPY', 'amount' => 100.0],
+        ];
+        $before = $this->reader->get_money($from, $to);
+        $this->assertEqualsWithDelta($expected, $before, 0.000001);
+        $total = reader::total($this->reader->get_series($from, $to));
+        $this->assertNull($total->cost, 'Two providers are not one figure.');
+        $this->assertNull($total->currency);
+        $this->assertEqualsWithDelta($expected, $total->costs, 0.000001);
+
+        (new summariser($DB))->run($this->now);
+        $this->assertEqualsWithDelta($expected, $this->reader->get_money($from, $to), 0.000001, 'Applying moves nothing.');
+
+        // The breakdown by provider is the table a site adds up by hand, or does not.
+        $byprovider = $this->reader->get_breakdown(reader::BY_PROVIDER, $from, $to);
+        $this->assertSame(['aiprovider_mock', 'aiprovider_sakuraaiengine'], array_column($byprovider, 'targetprovider'));
+        $this->assertSame('USD', $byprovider[0]->currency);
+        $this->assertSame(2, $byprovider[0]->calls);
+        $this->assertSame('JPY', $byprovider[1]->currency);
+        $this->assertEqualsWithDelta(100.0, $byprovider[1]->cost, 0.000001);
+    }
+
+    public function test_two_providers_billed_alike_are_still_not_added(): void {
+        // Whether a budget is one figure for all AI or one per provider is the site's
+        // to decide, so the figures are laid side by side for it to add or not.
+        [$from, $to] = $this->week();
+        $this->request($this->now);
+        $other = $this->generator->create_request(['timeended' => $this->now, 'answeredby' => 1]);
+        $this->generator->create_attempt([
+            'requestid' => $other->id, 'targetprovider' => 'aiprovider_openai', 'cost' => 1, 'currency' => 'USD',
+            'timeended' => $this->now,
+        ]);
+
+        $total = reader::total($this->reader->get_series($from, $to));
+
+        $this->assertCount(2, $total->costs);
+        $this->assertNull($total->cost);
     }
 
     public function test_failure_reasons_come_from_every_request_still_recorded(): void {

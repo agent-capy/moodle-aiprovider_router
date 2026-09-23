@@ -67,6 +67,7 @@ if ($action === 'edit') {
     }
     if ($data = $form->get_data()) {
         $currency = price::normalise_currency((string) $data->currency);
+        $before = $book->currency_of($data->provider);
         $record = $existing ?? new price();
         $record->set('provider', $data->provider);
         $record->set('model', trim((string) $data->model));
@@ -78,12 +79,20 @@ if ($action === 'edit') {
         $existing ? $record->update() : $record->create();
 
         // A provider bills in one currency, so the currency entered here is the
-        // provider's, and its other rates follow. Said in the message when it
-        // changed any, because a rate somebody else entered has just been relabelled.
-        $relabelled = $book->set_provider_currency($data->provider, $currency);
-        $message = $relabelled > 0
-            ? get_string('rates:saved:currency', 'local_airouter', ['currency' => $currency, 'count' => $relabelled])
-            : get_string('rates:saved', 'local_airouter');
+        // provider's. When it differs from what the provider's rates said until now,
+        // a provisional entry is being corrected: its other rates follow, and every
+        // cost recorded for the provider is worked out again at the rates now in
+        // force. Said in the message, because figures elsewhere have just changed.
+        $message = get_string('rates:saved', 'local_airouter');
+        if ($before !== null && $before !== $currency) {
+            $changed = $book->recost_provider($data->provider, $currency);
+            $message = get_string('rates:saved:currency', 'local_airouter', [
+                'currency' => $currency,
+                'rates' => $changed['rates'],
+                'calls' => $changed['attempts'] + $changed['logs'],
+                'days' => $changed['summaries'],
+            ]);
+        }
 
         redirect($url, $message, null, \core\output\notification::NOTIFY_SUCCESS);
     }

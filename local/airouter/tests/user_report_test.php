@@ -16,6 +16,8 @@
 
 namespace local_airouter;
 
+use local_airouter\record\reader;
+
 /**
  * Tests for the report that answers who used the AI.
  *
@@ -289,52 +291,63 @@ final class user_report_test extends \advanced_testcase {
         ));
     }
 
-    public function test_the_exported_rows_carry_the_same_split_as_the_screen(): void {
-        $this->log($this->day(0) + HOURSECS, ['userid' => 5, 'cost' => 0.25]);
-        $this->log($this->day(0) + HOURSECS, [
+    public function test_the_exported_rows_carry_the_same_split_as_the_screen_by_provider(): void {
+        // Somebody whose site key paid a provider billed in dollars, and whose own key
+        // paid one billed in yen. The file has a pair of columns for each provider,
+        // and nothing in it adds the two.
+        $people = [(object) [
             'userid' => 5,
-            'cost' => 9.0,
-            'keysource' => rule::KEYSOURCE_COURSE,
-        ]);
+            'requests' => 2,
+            'prompttokens' => 200,
+            'completiontokens' => 100,
+            'sitecosts' => reader::money('aiprovider_openai', 'USD', 0.25),
+            'broughtcosts' => reader::money('aiprovider_sakuraaiengine', 'JPY', 900.0),
+            'broughtrequests' => 1,
+        ]];
+        $money = user_report_formatter::money_of($people);
 
-        $rows = user_report_formatter::people_rows(
-            $this->report->get_people($this->week(), $this->now),
-            [5 => 'Ada Lovelace'],
-            'USD',
-        );
+        $columns = user_report_formatter::export_columns($money);
+        $rows = user_report_formatter::people_rows($people, [5 => 'Ada Lovelace'], $money);
 
+        $this->assertSame(['aiprovider_openai|USD', 'aiprovider_sakuraaiengine|JPY'], array_keys($money));
         $this->assertCount(1, $rows);
         $this->assertSame('Ada Lovelace', $rows[0][1]);
-        $this->assertCount(count(user_report_formatter::export_columns()), $rows[0]);
-        $this->assertEqualsWithDelta(0.25, $rows[0][5], 0.000001);
-        $this->assertEqualsWithDelta(9.0, $rows[0][6], 0.000001);
+        $this->assertCount(count($columns), $rows[0]);
+        $this->assertStringContainsString('USD', $columns[5]);
+        $this->assertEqualsWithDelta(0.25, $rows[0][5], 0.000001, 'Site key, at the dollar provider.');
+        $this->assertSame('', $rows[0][6], 'Nothing of their own at the dollar provider: empty, not zero.');
+        $this->assertStringContainsString('JPY', $columns[7]);
+        $this->assertSame('', $rows[0][7]);
+        $this->assertEqualsWithDelta(900.0, $rows[0][8], 0.000001, 'Own key, at the yen provider.');
+        $this->assertSame(1, $rows[0][9]);
     }
 
-    public function test_a_request_is_shown_in_the_currency_it_was_recorded_in(): void {
-        // A site that changed its currency after it started using AI. Costs are worked
-        // out when a request happens and kept, so the old rows are still in the old
-        // currency and relabelling them is a different number, not the same one again.
+    public function test_a_request_is_shown_in_the_currency_of_each_provider_it_was_charged_by(): void {
+        // A request that fell through from a provider billed in yen to one billed in
+        // dollars was charged twice, in two currencies, and the row says both.
         $table = user_report_formatter::requests(
             [(object) [
                 'timecreated' => $this->now,
                 'actionname' => 'generate_text',
                 'placement' => null,
                 'targetname' => 'Target one',
-                'targetprovider' => 'aiprovider_openai',
                 'model' => 'gpt-4o',
                 'keysource' => 'site',
                 'prompttokens' => 100,
                 'completiontokens' => 50,
-                'cost' => 1000.0,
-                'currency' => 'JPY',
+                'costs' => reader::add_costs(
+                    reader::money('aiprovider_sakuraaiengine', 'JPY', 1000.0),
+                    reader::money('aiprovider_openai', 'USD', 0.5),
+                ),
                 'success' => 1,
                 'reason' => null,
                 'courseid' => null,
             ]],
-            'USD',
         );
 
-        $this->assertStringContainsString('JPY', $table->data[0]->cells[7]);
-        $this->assertStringNotContainsString('USD', $table->data[0]->cells[7]);
+        $cell = $table->data[0]->cells[7];
+        $this->assertStringContainsString('1000 JPY', $cell);
+        $this->assertStringContainsString('0.5 USD', $cell);
+        $this->assertStringNotContainsString('1000.5', $cell, 'Not added.');
     }
 }

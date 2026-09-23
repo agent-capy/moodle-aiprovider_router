@@ -57,9 +57,14 @@ class summariser {
     /** @var int How many ids one marking statement carries. */
     protected const CHUNK = 500;
 
+    /** @var string[] The columns that make a summary row's natural key. */
+    public const KEY = [
+        'daystart', 'userid', 'courseid', 'actionname', 'targetprovider', 'targetid', 'model', 'keysource', 'currency',
+    ];
+
     /** @var string[] The columns a fact can add to. */
-    protected const COUNTERS = [
-        'requests', 'failures', 'calls', 'knowncalls', 'prompttokens', 'completiontokens', 'cost', 'costedcalls',
+    public const COUNTERS = [
+        'requests', 'failures', 'calls', 'knowncalls', 'prompttokens', 'completiontokens', 'images', 'cost', 'costedcalls',
     ];
 
     /** @var array<string, array{key: array, delta: array, targetname: ?string}> Increments gathered for this run. */
@@ -177,7 +182,8 @@ class summariser {
         $transaction = $this->db->start_delegated_transaction();
         try {
             $requests = $this->db->get_records_sql(
-                'SELECT r.*, a.model AS answeredmodel, a.targetname AS answeredname
+                'SELECT r.*, a.model AS answeredmodel, a.targetname AS answeredname,
+                        a.targetprovider AS answeredprovider
                    FROM {' . usage_recorder::REQUEST_TABLE . '} r
               LEFT JOIN {' . usage_recorder::ATTEMPT_TABLE . '} a
                      ON a.requestid = r.id AND a.state = :succeeded
@@ -332,6 +338,7 @@ class summariser {
             'userid' => (int) $request->userid,
             'courseid' => (int) ($request->courseid ?? 0),
             'actionname' => $request->actionname,
+            'targetprovider' => $request->answeredprovider ?? '-',
             'targetid' => (int) ($request->answeredby ?? 0),
             'model' => $request->answeredmodel ?? '-',
             'keysource' => $request->keysource,
@@ -355,15 +362,17 @@ class summariser {
             'userid' => (int) $attempt->userid,
             'courseid' => (int) ($attempt->courseid ?? 0),
             'actionname' => $attempt->actionname,
+            'targetprovider' => $attempt->targetprovider ?? '-',
             'targetid' => (int) $attempt->targetid,
             'model' => $attempt->model ?? '-',
             'keysource' => $attempt->keysource,
-            'currency' => $attempt->currency ?? '-',
+            'currency' => $costed ? ($attempt->currency ?? '-') : '-',
         ], [
             'calls' => 1,
             'knowncalls' => $known ? 1 : 0,
             'prompttokens' => $known ? (int) $attempt->prompttokens : 0,
             'completiontokens' => $known ? (int) $attempt->completiontokens : 0,
+            'images' => (int) $attempt->images,
             'cost' => $costed ? (float) $attempt->cost : 0,
             'costedcalls' => $costed ? 1 : 0,
         ], $attempt->targetname);

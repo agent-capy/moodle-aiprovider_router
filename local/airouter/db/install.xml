@@ -267,23 +267,25 @@
         <FIELD NAME="actionname" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="For an attempt, the target asked. For a request, the target that answered, or zero when none did, which is how refusals and total failures are counted."/>
         <FIELD NAME="targetname" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Carried over from the attempt, because once the detail is purged this is the only readable name left."/>
+        <FIELD NAME="targetprovider" TYPE="char" LENGTH="60" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="The provider plugin behind the target. Part of the key, because money is added up by provider: a provider bills in one currency, and money is never added across providers. Kept here rather than looked up, since a target can be deleted. A dash for rows with no target. Shorter than the attempt table gives the same name, because a composed index has a length limit and no component name approaches sixty characters."/>
         <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="The model that answered, or a dash where none did or none was named."/>
         <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Who paid. Part of the key, so that what people spent out of their own pocket is never added into what the site spent."/>
-        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="Part of the key, so that changing the site currency splits the summary instead of adding unlike figures. A dash for rows carrying no money."/>
+        <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="The currency the money on the row is in, which is the provider's. Part of the key so that unlike figures are never added. A dash for rows carrying no money."/>
         <FIELD NAME="requests" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Requests that ended that day, whatever the outcome."/>
         <FIELD NAME="failures" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Of those, the ones that did not succeed: declined or failed."/>
         <FIELD NAME="calls" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Attempts that ended that day, whatever the outcome. A request that fell through to a second provider is one request and two calls."/>
         <FIELD NAME="knowncalls" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Of the calls, the ones whose token counts were reported. The token totals are totals of these alone."/>
         <FIELD NAME="prompttokens" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="completiontokens" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
-        <FIELD NAME="cost" TYPE="number" LENGTH="16" NOTNULL="true" DEFAULT="0" SEQUENCE="false" DECIMALS="6" COMMENT="The costs recorded on the attempts added up, never recalculated. Only as complete as costedcalls says."/>
+        <FIELD NAME="images" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Images the calls produced. Kept so that a day's cost can be worked out again, images included, when a provider's provisional currency is corrected."/>
+        <FIELD NAME="cost" TYPE="number" LENGTH="16" NOTNULL="true" DEFAULT="0" SEQUENCE="false" DECIMALS="6" COMMENT="The costs recorded on the attempts added up. Worked out again only when the provider's currency is corrected, and then from the day's tokens and images at the rate in force that day. Only as complete as costedcalls says."/>
         <FIELD NAME="costedcalls" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Of the calls, the ones that had a cost. Without it a total cannot be told apart from a total of the few calls a rate happened to cover."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
       </KEYS>
       <INDEXES>
-        <INDEX NAME="key" UNIQUE="true" FIELDS="daystart, userid, courseid, actionname, targetid, model, keysource, currency"/>
+        <INDEX NAME="key" UNIQUE="true" FIELDS="daystart, userid, courseid, actionname, targetprovider, targetid, model, keysource, currency"/>
         <INDEX NAME="userid-daystart" UNIQUE="false" FIELDS="userid, daystart"/>
         <INDEX NAME="courseid-daystart" UNIQUE="false" FIELDS="courseid, daystart"/>
       </INDEXES>

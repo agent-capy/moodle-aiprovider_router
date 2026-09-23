@@ -16,8 +16,6 @@
 
 namespace local_airouter\record;
 
-use local_airouter\price_book;
-
 /**
  * Reads the requests and attempts as one history: the summary for what has been
  * counted, the detail for what has not.
@@ -51,6 +49,9 @@ class reader {
     /** @var string Break the figures down by the person who asked. */
     public const BY_USER = 'user';
 
+    /** @var string Break the figures down by the provider plugin behind the target. */
+    public const BY_PROVIDER = 'provider';
+
     /** @var string Every payer at once, as a filter value. */
     public const KEYSOURCE_ALL = 'all';
 
@@ -61,20 +62,32 @@ class reader {
         self::BY_MODEL => ['model'],
         self::BY_KEYSOURCE => ['keysource'],
         self::BY_USER => ['userid', 'keysource'],
+        self::BY_PROVIDER => ['targetprovider'],
     ];
 
     /**
-     * The figures every row carries.
+     * The counts every row carries.
      *
      * Requests and calls are different counts: one request that fell through to a
      * second provider is one request and two calls, and the money is on the calls.
      * Of the calls, knowncalls is how many reported their tokens and costedcalls how
-     * many had a rate; the token and cost totals are totals of those alone.
+     * many had a rate; the token totals and the money are totals of those alone.
+     *
+     * The money is not here, because it is not one number. Every row carries costs:
+     * one entry per provider, each an amount in the currency that provider bills in,
+     * present only when at least one call to that provider was priced. A known zero
+     * is a zero in there, and nothing priced is an empty array. Money is never added
+     * across providers, not even when two bill in the same currency: whether a site's
+     * budget is one figure or one per provider is the site's to decide, so the
+     * figures are laid side by side for it to add or not. For the common case a row
+     * also carries cost, currency and provider, which are the one entry's when the
+     * row holds exactly one, and null otherwise; they are worked out from costs and
+     * never the other way round.
      *
      * @var string[]
      */
     public const METRICS = [
-        'requests', 'failures', 'calls', 'knowncalls', 'prompttokens', 'completiontokens', 'cost', 'costedcalls',
+        'requests', 'failures', 'calls', 'knowncalls', 'prompttokens', 'completiontokens', 'costedcalls',
     ];
 
     /**
@@ -167,49 +180,21 @@ class reader {
     }
 
     /**
-     * The one currency the period's money is in, if it is in one.
+     * The money in the period, by provider.
      *
      * @param int $from The start of the period.
      * @param int $to The end of the period.
      * @param int|null $courseid Limit to one course, or null for the whole site.
      * @param string|null $keysource Limit to one payer, or null for all.
-     * @return string|null The currency, or null when the period mixes two.
+     * @return array[] Entries of provider, currency and amount, as a row's costs.
      */
-    public function currency_for(int $from, int $to, ?int $courseid = null, ?string $keysource = null): ?string {
-        $found = $this->get_currencies($from, $to, $courseid, $keysource);
+    public function get_money(int $from, int $to, ?int $courseid = null, ?string $keysource = null): array {
+        $rows = array_merge(
+            $this->summarised(['targetprovider'], $from, $to, $courseid, $keysource),
+            $this->detailed(['targetprovider'], $from, $to, $courseid, $keysource),
+        );
 
-        return match (count($found)) {
-            // Nothing in the period was priced, so the site's own currency is as good
-            // an answer as any and the figures will all read "not known" anyway.
-            0 => price_book::legacy_currency(),
-            1 => (string) reset($found),
-            default => null,
-        };
-    }
-
-    /**
-     * The currencies any money in the period is in.
-     *
-     * @param int $from The start of the period.
-     * @param int $to The end of the period.
-     * @param int|null $courseid Limit to one course, or null for the whole site.
-     * @param string|null $keysource Limit to one payer, or null for all.
-     * @return string[] The currencies, in no particular order.
-     */
-    public function get_currencies(int $from, int $to, ?int $courseid = null, ?string $keysource = null): array {
-        $found = [];
-        foreach ($this->summarised(['currency'], $from, $to, $courseid, $keysource) as $row) {
-            if ((int) $row->costedcalls > 0 && $row->currency !== '-') {
-                $found[$row->currency] = true;
-            }
-        }
-        foreach ($this->detailed(['currency'], $from, $to, $courseid, $keysource) as $row) {
-            if ((int) $row->costedcalls > 0 && $row->currency !== null && $row->currency !== '-') {
-                $found[$row->currency] = true;
-            }
-        }
-
-        return array_keys($found);
+        return self::total($rows)->costs;
     }
 
     /**
@@ -285,8 +270,8 @@ class reader {
     /**
      * Add rows up.
      *
-     * A cost that nothing priced is null, and stays null however many such rows are
-     * added: a total of nothing known is not zero.
+     * Money is added within each currency and never across them. A currency that no
+     * row was priced in stays absent, so a total of nothing known is not zero.
      *
      * @param \stdClass[] $rows The rows.
      * @return \stdClass One row of totals.
@@ -295,9 +280,11 @@ class reader {
         $total = self::blank();
         foreach ($rows as $row) {
             foreach (self::METRICS as $metric) {
-                $total->$metric = self::add($total->$metric, $row->$metric ?? null);
+                $total->$metric += (int) ($row->$metric ?? 0);
             }
+            $total->costs = self::add_costs($total->costs, $row->costs ?? []);
         }
+        self::settle($total);
 
         return $total;
     }
@@ -310,10 +297,75 @@ class reader {
     public static function blank(): \stdClass {
         $row = new \stdClass();
         foreach (self::METRICS as $metric) {
-            $row->$metric = $metric === 'cost' ? null : 0;
+            $row->$metric = 0;
         }
+        $row->costs = [];
+        self::settle($row);
 
         return $row;
+    }
+
+    /**
+     * One entry of a row's money: what a provider was paid, in its currency.
+     *
+     * @param string $provider The provider component.
+     * @param string $currency The currency the amount is in.
+     * @param float $amount The amount.
+     * @return array The entry.
+     */
+    public static function money(string $provider, string $currency, float $amount): array {
+        return [self::money_key($provider, $currency) => [
+            'provider' => $provider,
+            'currency' => $currency,
+            'amount' => $amount,
+        ]];
+    }
+
+    /**
+     * The key an entry of money sits under in a row's costs.
+     *
+     * Provider and currency both, so that should a provider's rows ever disagree
+     * about its currency the two are shown apart rather than added.
+     *
+     * @param string $provider The provider component.
+     * @param string $currency The currency.
+     * @return string The key.
+     */
+    public static function money_key(string $provider, string $currency): string {
+        return $provider . '|' . $currency;
+    }
+
+    /**
+     * Add money to money, provider by provider.
+     *
+     * @param array[] $carried Entries of money, by key.
+     * @param array[] $addition Entries of money to add, by key.
+     * @return array[] Entries of money, by key, sorted by key.
+     */
+    public static function add_costs(array $carried, array $addition): array {
+        foreach ($addition as $key => $entry) {
+            if (isset($carried[$key])) {
+                $carried[$key]['amount'] += (float) $entry['amount'];
+            } else {
+                $carried[$key] = $entry;
+            }
+        }
+        ksort($carried);
+
+        return $carried;
+    }
+
+    /**
+     * Give a row the one figure view of its money, where it has one.
+     *
+     * @param \stdClass $row A row carrying costs.
+     */
+    protected static function settle(\stdClass $row): void {
+        $costs = $row->costs ?? [];
+        $entry = count($costs) === 1 ? reset($costs) : null;
+        $row->provider = $entry === null ? null : (string) $entry['provider'];
+        $row->currency = $entry === null ? null : (string) $entry['currency'];
+        $row->cost = $entry === null ? null : (float) $entry['amount'];
     }
 
     /**
@@ -349,9 +401,9 @@ class reader {
             $where .= ' AND userid = :userid';
             $params['userid'] = $userid;
         }
-        // The currency has to be part of every grouping: money in two currencies is
-        // never one figure, and a row that mixed them could not be read.
-        $groups = array_values(array_unique(array_merge($fields, ['currency'])));
+        // The provider and its currency have to be part of every grouping: money is
+        // one figure per provider, and a row that mixed two could not be read.
+        $groups = array_values(array_unique(array_merge($fields, ['targetprovider', 'currency'])));
         $select = implode(', ', $groups);
         // When rows are grouped by target id, the name a target carries is the same on
         // every one of its rows, so any will do; grouping on the name as well would
@@ -428,7 +480,7 @@ class reader {
         // A request sits with the target and model that answered it, as in the summary.
         $requests = $this->db->get_records_sql(
             'SELECT r.id, r.userid, r.courseid, r.actionname, r.keysource, r.state, r.timeended,
-                    r.answeredby AS targetid, s.targetname, s.model
+                    r.answeredby AS targetid, s.targetname, s.targetprovider, s.model
                FROM {' . usage_recorder::REQUEST_TABLE . '} r
           LEFT JOIN {' . usage_recorder::ATTEMPT_TABLE . '} s ON s.requestid = r.id AND s.state = :succeeded
               WHERE ' . $rwhere,
@@ -444,18 +496,19 @@ class reader {
                 'actionname' => $request->actionname,
                 'targetid' => (int) ($request->targetid ?? 0),
                 'targetname' => $request->targetname,
+                'targetprovider' => $request->targetprovider ?? '-',
                 'model' => $request->model,
                 'keysource' => $request->keysource,
                 'currency' => '-',
                 'requests' => 1,
                 'failures' => $request->state === request_state::SUCCEEDED ? 0 : 1,
                 'calls' => 0, 'knowncalls' => 0, 'prompttokens' => 0, 'completiontokens' => 0,
-                'cost' => null, 'costedcalls' => 0,
+                'costs' => [], 'costedcalls' => 0,
             ];
         }
         $attempts = $this->db->get_records_sql(
-            'SELECT a.id, r.userid, r.courseid, r.actionname, a.targetid, a.targetname, a.model, a.keysource,
-                    a.currency, a.usageknown, a.prompttokens, a.completiontokens, a.cost, a.timeended
+            'SELECT a.id, r.userid, r.courseid, r.actionname, a.targetid, a.targetname, a.targetprovider, a.model,
+                    a.keysource, a.currency, a.usageknown, a.prompttokens, a.completiontokens, a.cost, a.timeended
                FROM {' . usage_recorder::ATTEMPT_TABLE . '} a
                JOIN {' . usage_recorder::REQUEST_TABLE . '} r ON r.id = a.requestid
               WHERE ' . $awhere,
@@ -472,21 +525,26 @@ class reader {
                 'actionname' => $attempt->actionname,
                 'targetid' => (int) $attempt->targetid,
                 'targetname' => $attempt->targetname,
+                'targetprovider' => $attempt->targetprovider ?? '-',
                 'model' => $attempt->model,
                 'keysource' => $attempt->keysource,
-                'currency' => $attempt->currency ?? '-',
+                'currency' => $attempt->cost === null ? '-' : ($attempt->currency ?? '-'),
                 'requests' => 0, 'failures' => 0,
                 'calls' => 1,
                 'knowncalls' => $known ? 1 : 0,
                 'prompttokens' => $known ? (int) $attempt->prompttokens : 0,
                 'completiontokens' => $known ? (int) $attempt->completiontokens : 0,
-                'cost' => $attempt->cost === null ? null : (float) $attempt->cost,
+                'costs' => $attempt->cost === null ? [] : self::money(
+                    (string) ($attempt->targetprovider ?? '-'),
+                    (string) ($attempt->currency ?? '-'),
+                    (float) $attempt->cost,
+                ),
                 'costedcalls' => $attempt->cost === null ? 0 : 1,
             ];
         }
 
         $rows = [];
-        $this->collect($rows, array_values(array_unique(array_merge($fields, ['currency']))), $facts);
+        $this->collect($rows, array_values(array_unique(array_merge($fields, ['targetprovider', 'currency']))), $facts);
 
         return array_values($rows);
     }
@@ -512,13 +570,20 @@ class reader {
                 }
             }
             foreach (self::METRICS as $metric) {
-                $rows[$key]->$metric = self::add($rows[$key]->$metric, $row->$metric ?? null);
+                $rows[$key]->$metric += (int) ($row->$metric ?? 0);
             }
+            $rows[$key]->costs = self::add_costs($rows[$key]->costs, $row->costs ?? []);
+        }
+        foreach ($rows as $row) {
+            self::settle($row);
         }
     }
 
     /**
-     * The metrics as numbers, with an unpriced cost as null rather than as zero.
+     * A summary row as the reader hands rows out: counts as integers, money by currency.
+     *
+     * A summary row belongs to one provider and is in one currency, since both are
+     * part of its key, and carries money only when something on it was priced.
      *
      * @param \stdClass $row A row from the summary.
      * @return \stdClass The row, normalised.
@@ -528,26 +593,14 @@ class reader {
         foreach (self::METRICS as $metric) {
             $out->$metric = (int) ($row->$metric ?? 0);
         }
-        $out->cost = (int) $out->costedcalls > 0 ? (float) $row->cost : null;
+        $out->costs = $out->costedcalls > 0 && (string) ($row->currency ?? '-') !== '-'
+            ? self::money((string) ($row->targetprovider ?? '-'), (string) $row->currency, (float) $row->cost)
+            : [];
         if (isset($out->model) && $out->model === '-') {
             $out->model = null;
         }
+        self::settle($out);
 
         return $out;
-    }
-
-    /**
-     * Add two figures, keeping an unknown unknown.
-     *
-     * @param int|float|null $carried What there was.
-     * @param int|float|null $addition What to add.
-     * @return int|float|null The sum, or null when neither was known.
-     */
-    protected static function add(int|float|null $carried, int|float|null $addition): int|float|null {
-        if ($addition === null) {
-            return $carried;
-        }
-
-        return ($carried ?? 0) + $addition;
     }
 }

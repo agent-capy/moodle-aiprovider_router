@@ -33,16 +33,14 @@ class usage_formatter {
      * The headline figures for the period.
      *
      * @param \stdClass $totals The totals.
-     * @param string|null $currency What the figures are in, or null where the period
-     *                              holds more than one currency.
      * @return string HTML.
      */
-    public static function totals(\stdClass $totals, ?string $currency): string {
+    public static function totals(\stdClass $totals): string {
         $items = [
             'usage:total:requests' => number_format((int) $totals->requests),
             'usage:total:failures' => number_format((int) $totals->failures),
             'usage:total:tokens' => number_format((int) $totals->prompttokens + (int) $totals->completiontokens),
-            'usage:total:cost' => self::cost($totals->cost, $currency),
+            'usage:total:cost' => self::costs($totals->costs),
         ];
 
         $cells = '';
@@ -116,23 +114,90 @@ class usage_formatter {
     }
 
     /**
+     * Money by provider, each provider's amount in its own currency, side by side.
+     *
+     * Costs are worked out when a request happens and nothing here converts between
+     * currencies, so a period that used a provider billed in dollars and one billed
+     * in yen is shown as an amount for each. They are not added even when two
+     * providers bill alike: whether the site's budget is one figure or one per
+     * provider is the site's to decide, and the figures are laid out for it to add.
+     *
+     * @param array[] $costs Entries of provider, currency and amount, empty when nothing was priced.
+     * @return string The formatted amounts.
+     */
+    public static function costs(array $costs): string {
+        if (!$costs) {
+            return get_string('usage:cost:unknown', 'local_airouter');
+        }
+        $parts = [];
+        foreach ($costs as $entry) {
+            $parts[] = get_string('usage:cost:byprovider', 'local_airouter', (object) [
+                'provider' => self::provider_name((string) $entry['provider']),
+                'amount' => self::cost((float) $entry['amount'], (string) $entry['currency']),
+            ]);
+        }
+
+        return implode(' / ', $parts);
+    }
+
+    /**
+     * The name of a provider plugin, for a row's money or a row grouped by provider.
+     *
+     * @param string $component The provider component, or a dash for none.
+     * @return string The name.
+     */
+    public static function provider_name(string $component): string {
+        if ($component === '' || $component === '-') {
+            return get_string('usage:notarget', 'local_airouter');
+        }
+
+        return get_string_manager()->string_exists('pluginname', $component)
+            ? get_string('pluginname', $component)
+            : $component;
+    }
+
+    /**
+     * What each provider was asked, and what it cost, for the period.
+     *
+     * The table a site adds up by hand, or does not: one row per provider, each in
+     * the currency that provider bills in, and no total across them.
+     *
+     * @param \stdClass[] $rows The rows by provider, busiest first.
+     * @return \html_table The table.
+     */
+    public static function provider_table(array $rows): \html_table {
+        $table = new \html_table();
+        $table->head = [
+            get_string('usage:column:provider', 'local_airouter'),
+            get_string('usage:column:currency', 'local_airouter'),
+            get_string('usage:total:requests', 'local_airouter'),
+            get_string('usage:column:calls', 'local_airouter'),
+            get_string('usage:column:costedcalls', 'local_airouter'),
+            get_string('usage:total:cost', 'local_airouter'),
+        ];
+        $table->attributes['class'] = 'admintable generaltable';
+        foreach ($rows as $row) {
+            $table->data[] = [
+                self::provider_name((string) ($row->targetprovider ?? '-')),
+                $row->currency ?? '-',
+                number_format((int) $row->requests),
+                number_format((int) $row->calls),
+                number_format((int) $row->costedcalls),
+                $row->cost === null ? self::costs($row->costs) : self::cost($row->cost, $row->currency),
+            ];
+        }
+
+        return $table;
+    }
+
+    /**
      * A cost, with the currency it is counted in.
      *
      * @param int|float|null $cost The cost, or null when nothing priced it.
-     * @param string|null $currency What it is in, or null where the period holds more
-     *                              than one currency and no figure can be given.
+     * @param string $currency What it is in.
      * @return string The formatted cost.
      */
-    public static function cost(int|float|null $cost, ?string $currency): string {
-        if ($currency === null) {
-            // More than one currency in the period, so there is no figure to give.
-            // Costs are worked out when a request happens and nothing here converts
-            // between currencies, so adding them would produce a number in no
-            // currency at all -- and it would look exactly like a number in the
-            // site's own. Said at every figure rather than only at the total,
-            // because a table of them is where somebody reads the detail.
-            return get_string('usage:cost:mixed', 'local_airouter');
-        }
+    public static function cost(int|float|null $cost, string $currency): string {
         if ($cost === null) {
             return get_string('usage:cost:unknown', 'local_airouter');
         }
@@ -191,20 +256,24 @@ class usage_formatter {
      *
      * Cost is on its own axis. The two are measured in different things, and a cost of a
      * few units drawn against a few hundred requests is a flat line along the bottom.
+     * The money is drawn as a line per provider, each named for the provider and its
+     * currency; they share the cost axis, since core's charts offer one axis on each
+     * side, and each line is read against its own name.
      *
      * @param array $series Rows keyed by the midnight of their day.
-     * @param string|null $currency What the costs are in, or null where the period
-     *                              holds more than one and the cost axis is left off.
      * @return \core\chart_line The chart.
      */
-    public static function daily_chart(array $series, ?string $currency): \core\chart_line {
+    public static function daily_chart(array $series): \core\chart_line {
         $labels = [];
         $requests = [];
-        $costs = [];
+        $entries = self::total_costs($series);
+        $costs = array_fill_keys(array_keys($entries), []);
         foreach ($series as $day => $row) {
             $labels[] = userdate($day, get_string('strftimedateshort', 'langconfig'));
             $requests[] = (int) $row->requests;
-            $costs[] = $row->cost === null ? 0 : round((float) $row->cost, 4);
+            foreach ($entries as $key => $entry) {
+                $costs[$key][] = round((float) ($row->costs[$key]['amount'] ?? 0), 4);
+            }
         }
 
         $chart = new \core\chart_line();
@@ -214,24 +283,42 @@ class usage_formatter {
             $requests,
         ));
 
-        if ($currency === null) {
-            // More than one currency in the period, so the cost line would be a sum
-            // of things that do not add up. The request count is still worth drawing.
+        if (!$entries) {
+            // Nothing in the period was priced, so there is no cost line to draw. The
+            // request count is still worth drawing.
             return $chart;
         }
 
-        $cost = new \core\chart_series(
-            get_string('usage:total:cost', 'local_airouter') . ' (' . $currency . ')',
-            $costs,
-        );
-        $cost->set_yaxis(1);
-        $chart->add_series($cost);
+        foreach ($entries as $key => $entry) {
+            $cost = new \core\chart_series(
+                get_string('usage:total:cost', 'local_airouter')
+                    . ' (' . self::provider_name((string) $entry['provider']) . ', ' . $entry['currency'] . ')',
+                $costs[$key],
+            );
+            $cost->set_yaxis(1);
+            $chart->add_series($cost);
+        }
         // The second axis cannot be created before the first one exists, so the axis the
         // request count already uses is asked for by name before the cost axis is added.
         $chart->get_yaxis(0, true);
         $chart->get_yaxis(1, true)->set_position(\core\chart_axis::POS_RIGHT);
 
         return $chart;
+    }
+
+    /**
+     * The money in a set of rows, by provider.
+     *
+     * @param \stdClass[] $rows Rows carrying costs.
+     * @return array[] Entries of provider, currency and amount, by key.
+     */
+    protected static function total_costs(array $rows): array {
+        $total = [];
+        foreach ($rows as $row) {
+            $total = record\reader::add_costs($total, $row->costs ?? []);
+        }
+
+        return $total;
     }
 
     /**
@@ -289,11 +376,9 @@ class usage_formatter {
      * What each model was asked for, what it used and what it cost.
      *
      * @param \stdClass[] $rows The rows, busiest first.
-     * @param string|null $currency What the costs are in, or null where the period
-     *                              holds more than one.
      * @return \html_table The table.
      */
-    public static function model_table(array $rows, ?string $currency): \html_table {
+    public static function model_table(array $rows): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('usage:column:model', 'local_airouter'),
@@ -309,7 +394,7 @@ class usage_formatter {
                 number_format((int) $row->requests),
                 number_format((int) $row->prompttokens),
                 number_format((int) $row->completiontokens),
-                self::cost($row->cost, $currency),
+                self::costs($row->costs),
             ];
         }
 

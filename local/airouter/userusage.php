@@ -63,8 +63,6 @@ if (!in_array($days, $periods, true)) {
 $report = new person_reader($DB);
 $now = time();
 $from = summariser::add_days(summariser::day_of($now), -($days - 1));
-// One answer for the whole screen, including the exported file.
-$currency = $report->currency_for($from, $now);
 
 $people = $report->get_people($from, $now);
 $names = person_reader::get_names(array_column($people, 'userid'));
@@ -72,12 +70,15 @@ $names = person_reader::get_names(array_column($people, 'userid'));
 if ($download !== '') {
     require_sesskey();
     // Sent as a file because that is the form these figures leave in: somebody has been
-    // asked to produce a report, and it will be read outside Moodle.
+    // asked to produce a report, and it will be read outside Moodle. Money is a pair of
+    // columns per provider the period paid, each in that provider's currency, so that
+    // nothing in the file adds across providers and nothing read from it can either.
+    $money = user_report_formatter::money_of($people);
     \core\dataformat::download_data(
         'ai-router-usage-' . userdate($now, '%Y%m%d'),
         $download,
-        user_report_formatter::export_columns(),
-        user_report_formatter::people_rows($people, $names, $currency),
+        user_report_formatter::export_columns($money),
+        user_report_formatter::people_rows($people, $names, $money),
     );
     die;
 }
@@ -124,7 +125,7 @@ if ($userid > 0) {
         echo $OUTPUT->notification(get_string('usage:none', 'local_airouter'), 'info');
     } else {
         echo $OUTPUT->heading(get_string('report:bydays', 'local_airouter'), 4);
-        echo html_writer::table(user_report_formatter::days($perdays, $currency));
+        echo html_writer::table(user_report_formatter::days($perdays));
     }
 
     $requests = $report->get_requests($userid, $from, $now);
@@ -142,7 +143,7 @@ if ($userid > 0) {
                 'warning',
             );
         }
-        echo html_writer::table(user_report_formatter::requests($requests, $currency));
+        echo html_writer::table(user_report_formatter::requests($requests));
     }
 
     echo $OUTPUT->footer();
@@ -153,7 +154,7 @@ if (!$people) {
     echo $OUTPUT->notification(get_string('usage:none', 'local_airouter'), 'info');
 } else {
     echo $OUTPUT->heading(get_string('report:bypeople', 'local_airouter'), 3);
-    echo html_writer::table(user_report_formatter::people($people, $names, $currency, $url));
+    echo html_writer::table(user_report_formatter::people($people, $names, $url));
 
     echo html_writer::div(implode(' ', array_map(
         fn($format) => html_writer::link(
@@ -190,7 +191,6 @@ if (!$holders) {
         person_reader::get_names($holderids),
         $courses,
         target_resolver::get_delegation_targets(),
-        $currency,
     ));
 }
 

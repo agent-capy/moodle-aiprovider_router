@@ -96,9 +96,12 @@ final class person_reader_test extends \advanced_testcase {
         $this->assertSame(2, $five->requests);
         $this->assertSame(1, $five->broughtrequests);
         $this->assertSame(500, $five->prompttokens + $five->completiontokens);
-        $this->assertEqualsWithDelta(0.004, $five->sitecost, 0.000001);
-        $this->assertEqualsWithDelta(0.004, $five->broughtcost, 0.000001);
-        $this->assertNull($before[1]->broughtcost, 'Nothing brought is not zero brought.');
+        // Money by provider, each in its currency, the site's key and the person's own apart.
+        $this->assertSame(['aiprovider_mock|USD'], array_keys($five->sitecosts));
+        $this->assertEqualsWithDelta(0.004, $five->sitecosts['aiprovider_mock|USD']['amount'], 0.000001);
+        $this->assertSame('USD', $five->sitecosts['aiprovider_mock|USD']['currency']);
+        $this->assertEqualsWithDelta(0.004, $five->broughtcosts['aiprovider_mock|USD']['amount'], 0.000001);
+        $this->assertSame([], $before[1]->broughtcosts, 'Nothing brought is not zero brought.');
 
         (new summariser($DB))->run($this->now);
         $this->assertEquals($before, $this->reader->get_people($from, $to), 'Applying moves nothing.');

@@ -16,6 +16,10 @@
 
 namespace local_airouter;
 
+use local_airouter\record\attempt_state;
+use local_airouter\record\summariser;
+use local_airouter\record\usage_recorder;
+
 /**
  * Finds the rate that applied to a request, and the currency each provider bills in.
  *
@@ -28,6 +32,11 @@ namespace local_airouter;
  * it, and nothing converts between currencies: picking exchange rates would mean
  * choosing a source, a moment and a rounding rule, and would lay a second layer of
  * error over a figure that is already an estimate.
+ *
+ * A provider's currency does not change while a site is in use. It changes once, if
+ * at all, when a provisional entry is corrected, and then every cost recorded for
+ * that provider is worked out again at the rates now in force, so that nothing of
+ * the provisional figure survives. That is the one time a recorded cost is revised.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -177,32 +186,179 @@ class price_book {
     }
 
     /**
-     * Put every rate of a provider in one currency.
+     * Put every rate of a provider in one currency, and work its recorded costs out again.
      *
      * A provider bills in one currency, so the currency is changed for the provider
-     * rather than for a rate at a time. Costs already recorded keep the currency they
-     * were recorded in: this relabels rates, and a recorded cost is not a rate.
+     * rather than for a rate at a time. The change is the correction of a provisional
+     * entry, and the costs recorded under the provisional entry are as provisional as
+     * it was, so every one of them is worked out again from what the call used, at the
+     * rate now in force for its time, and in the new currency: attempts and the older
+     * log by call, summary rows by day. A summary row is priced as one call of its
+     * size at the rate in force at the start of its day, images included, which is as
+     * near as a day whose detail has been purged can be brought.
+     *
+     * Taken under the record lock and the summariser's lock, in one transaction, so
+     * that a request being recorded or a run of the summariser cannot interleave.
      *
      * @param string $provider The provider component.
      * @param string $currency The currency, already normalised.
-     * @return int How many rates were in another currency until now.
+     * @return int[] How many rates, attempts, log rows and summary rows were touched.
+     * @throws \moodle_exception When the record is busy.
      */
-    public function set_provider_currency(string $provider, string $currency): int {
-        $changed = $this->db->count_records_select(
-            price::TABLE,
-            'provider = :provider AND currency <> :currency',
-            ['provider' => $provider, 'currency' => $currency],
-        );
-        if ($changed > 0) {
-            $this->db->set_field_select(
-                price::TABLE,
-                'currency',
-                $currency,
-                'provider = :provider AND currency <> :currency',
-                ['provider' => $provider, 'currency' => $currency],
-            );
+    public function recost_provider(string $provider, string $currency): array {
+        $factory = \core\lock\lock_config::get_lock_factory('local_airouter');
+        $recordlock = $factory->get_lock(usage_recorder::LOCK, usage_recorder::LOCK_TIMEOUT);
+        if (!$recordlock) {
+            throw new \moodle_exception('rates:error:busy', 'local_airouter');
+        }
+        $summarylock = $factory->get_lock(summariser::LOCK, usage_recorder::LOCK_TIMEOUT);
+        if (!$summarylock) {
+            $recordlock->release();
+            throw new \moodle_exception('rates:error:busy', 'local_airouter');
+        }
+        try {
+            $transaction = $this->db->start_delegated_transaction();
+            try {
+                $this->db->set_field(price::TABLE, 'currency', $currency, ['provider' => $provider]);
+                $counts = [
+                    'rates' => $this->db->count_records(price::TABLE, ['provider' => $provider]),
+                    'attempts' => $this->recost_attempts($provider),
+                    'logs' => $this->recost_log($provider),
+                    'summaries' => $this->recost_summaries($provider),
+                ];
+                $transaction->allow_commit();
+            } catch (\Throwable $e) {
+                $transaction->rollback($e);
+            }
+        } finally {
+            $summarylock->release();
+            $recordlock->release();
         }
 
-        return $changed;
+        return $counts;
+    }
+
+    /**
+     * Work every recorded attempt to a provider out again.
+     *
+     * @param string $provider The provider component.
+     * @return int How many attempts were touched.
+     */
+    protected function recost_attempts(string $provider): int {
+        $count = 0;
+        $attempts = $this->db->get_recordset_select(
+            usage_recorder::ATTEMPT_TABLE,
+            'targetprovider = :provider AND state <> :started',
+            ['provider' => $provider, 'started' => attempt_state::STARTED],
+            'id ASC',
+            'id, model, prompttokens, completiontokens, images, timestarted, timeended',
+        );
+        foreach ($attempts as $attempt) {
+            $price = $this->find($provider, $attempt->model, (int) ($attempt->timeended ?? $attempt->timestarted));
+            $this->db->update_record(usage_recorder::ATTEMPT_TABLE, (object) [
+                'id' => $attempt->id,
+                'cost' => $price?->cost(
+                    self::tokens($attempt->prompttokens),
+                    self::tokens($attempt->completiontokens),
+                    (int) $attempt->images,
+                ),
+                'currency' => $price?->get('currency'),
+            ]);
+            $count++;
+        }
+        $attempts->close();
+
+        return $count;
+    }
+
+    /**
+     * Work every row of the older log for a provider out again.
+     *
+     * The older log kept no image count, so an image is not priced here. It goes when
+     * the log does.
+     *
+     * @param string $provider The provider component.
+     * @return int How many rows were touched.
+     */
+    protected function recost_log(string $provider): int {
+        $count = 0;
+        $rows = $this->db->get_recordset_select(
+            usage_logger::TABLE,
+            'targetprovider = :provider',
+            ['provider' => $provider],
+            'id ASC',
+            'id, model, prompttokens, completiontokens, timecreated',
+        );
+        foreach ($rows as $row) {
+            $price = $this->find($provider, $row->model, (int) $row->timecreated);
+            $this->db->update_record(usage_logger::TABLE, (object) [
+                'id' => $row->id,
+                'cost' => $price?->cost(self::tokens($row->prompttokens), self::tokens($row->completiontokens)),
+                'currency' => $price?->get('currency'),
+            ]);
+            $count++;
+        }
+        $rows->close();
+
+        return $count;
+    }
+
+    /**
+     * Work every summary row of a provider out again, by day.
+     *
+     * A row's new currency can make its key another row's, when the day was already
+     * partly in the new currency; the two are then added into one.
+     *
+     * @param string $provider The provider component.
+     * @return int How many rows were touched.
+     */
+    protected function recost_summaries(string $provider): int {
+        $count = 0;
+        $ids = $this->db->get_fieldset_select(summariser::TABLE, 'id', 'targetprovider = :provider', ['provider' => $provider]);
+        sort($ids);
+        foreach ($ids as $id) {
+            // Read now rather than at the start: a row earlier in this loop may have
+            // been folded into this one, or this one into another and deleted.
+            $row = $this->db->get_record(summariser::TABLE, ['id' => $id]);
+            if ($row === false) {
+                continue;
+            }
+            $price = $this->find($provider, $row->model === '-' ? null : $row->model, (int) $row->daystart);
+            $priced = $price !== null && ((int) $row->knowncalls > 0 || (int) $row->images > 0);
+            $row->cost = $priced
+                ? (float) ($price->cost((int) $row->prompttokens, (int) $row->completiontokens, (int) $row->images) ?? 0.0)
+                : 0.0;
+            $row->costedcalls = $priced ? max((int) $row->knowncalls, (int) $row->images > 0 ? (int) $row->calls : 0) : 0;
+            $row->currency = $priced ? $price->get('currency') : '-';
+
+            $key = [];
+            foreach (summariser::KEY as $field) {
+                $key[$field] = $row->$field;
+            }
+            $twin = $this->db->get_record(summariser::TABLE, $key);
+            if ($twin && (int) $twin->id !== (int) $row->id) {
+                foreach (summariser::COUNTERS as $column) {
+                    $twin->$column += $row->$column;
+                }
+                $twin->targetname ??= $row->targetname;
+                $this->db->update_record(summariser::TABLE, $twin);
+                $this->db->delete_records(summariser::TABLE, ['id' => $row->id]);
+            } else {
+                $this->db->update_record(summariser::TABLE, $row);
+            }
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * A stored token count as the rate wants it: null where none was reported.
+     *
+     * @param mixed $stored The stored count.
+     * @return int|null The count, or null.
+     */
+    protected static function tokens(mixed $stored): ?int {
+        return $stored === null ? null : (int) $stored;
     }
 }

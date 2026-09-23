@@ -39,7 +39,8 @@ class person_reader extends reader {
      * Everybody who used the AI in the period, busiest first.
      *
      * What the site paid for somebody and what they paid for themselves are kept
-     * apart: a total that added the two would be nobody's expenditure.
+     * apart: a total that added the two would be nobody's expenditure. Each is money
+     * by currency, as everywhere here.
      *
      * @param int $from The start of the period.
      * @param int $to The end of the period.
@@ -54,8 +55,8 @@ class person_reader extends reader {
                 'requests' => 0,
                 'prompttokens' => 0,
                 'completiontokens' => 0,
-                'sitecost' => null,
-                'broughtcost' => null,
+                'sitecosts' => [],
+                'broughtcosts' => [],
                 'broughtrequests' => 0,
             ];
             $person = $people[$userid];
@@ -63,9 +64,9 @@ class person_reader extends reader {
             $person->prompttokens += (int) $row->prompttokens;
             $person->completiontokens += (int) $row->completiontokens;
             if ((string) $row->keysource === rule::KEYSOURCE_SITE) {
-                $person->sitecost = self::add($person->sitecost, $row->cost);
+                $person->sitecosts = self::add_costs($person->sitecosts, $row->costs);
             } else {
-                $person->broughtcost = self::add($person->broughtcost, $row->cost);
+                $person->broughtcosts = self::add_costs($person->broughtcosts, $row->costs);
                 $person->broughtrequests += (int) $row->requests;
             }
         }
@@ -98,7 +99,8 @@ class person_reader extends reader {
      * A request's figures are the figures of every call made for it, answered or
      * not: what a provider charged for a failed call was charged to this person's
      * request. The target and model shown are the ones that answered, or the last
-     * ones asked when nothing did.
+     * ones asked when nothing did. The money is by currency, with cost and currency
+     * as one figure where the request was charged in one.
      *
      * @param int $userid The person.
      * @param int $from The start of the period.
@@ -124,7 +126,8 @@ class person_reader extends reader {
             "requestid $insql",
             $params,
             'requestid ASC, seq ASC',
-            'id, requestid, seq, targetid, targetname, model, state, usageknown, prompttokens, completiontokens, cost, currency',
+            'id, requestid, seq, targetid, targetname, targetprovider, model, state, usageknown, prompttokens,
+             completiontokens, cost, currency',
         );
 
         $rows = [];
@@ -144,11 +147,9 @@ class person_reader extends reader {
                 'model' => null,
                 'prompttokens' => null,
                 'completiontokens' => null,
-                'cost' => null,
-                'currency' => null,
+                'costs' => [],
             ];
         }
-        $currencies = [];
         foreach ($attempts as $attempt) {
             $row = $rows[(int) $attempt->requestid];
             // The last one asked, until one answers.
@@ -162,16 +163,15 @@ class person_reader extends reader {
                 $row->completiontokens = (int) $row->completiontokens + (int) $attempt->completiontokens;
             }
             if ($attempt->cost !== null) {
-                $row->cost = self::add($row->cost, (float) $attempt->cost);
-                $currencies[$row->id][$attempt->currency] = true;
+                $row->costs = self::add_costs($row->costs, self::money(
+                    (string) ($attempt->targetprovider ?? '-'),
+                    (string) ($attempt->currency ?? '-'),
+                    (float) $attempt->cost,
+                ));
             }
         }
-        foreach ($currencies as $id => $found) {
-            // Money in one currency is a figure; in two it is not, and says so.
-            $rows[$id]->currency = count($found) === 1 ? (string) array_key_first($found) : null;
-            if (count($found) > 1) {
-                $rows[$id]->cost = null;
-            }
+        foreach ($rows as $row) {
+            self::settle($row);
         }
 
         return array_values($rows);
@@ -195,20 +195,50 @@ class person_reader extends reader {
      * What each brought key was used for in the period.
      *
      * A request that tried two of somebody's keys is one request at each, because
-     * each was asked; the money is what each was charged.
+     * each was asked; the money is what each was charged. A key goes to one target
+     * and so to one provider, so its money is normally one entry, but it is added
+     * up by provider here as everywhere else.
      *
      * @param int $from The start of the period.
      * @param int $to The end of the period.
-     * @return \stdClass[] Rows of keyid, requests and cost, keyed by key id.
+     * @return \stdClass[] Rows of keyid, requests, costs, cost and currency, keyed by key id.
      */
     public function get_key_usage(int $from, int $to): array {
-        return $this->db->get_records_sql(
-            'SELECT keyid, COUNT(DISTINCT requestid) AS requests, SUM(cost) AS cost
+        $where = 'keyid IS NOT NULL AND timeended IS NOT NULL AND timeended >= :from AND timeended < :to';
+        $params = ['from' => $from, 'to' => $to];
+        $usage = $this->db->get_records_sql(
+            'SELECT keyid, COUNT(DISTINCT requestid) AS requests
                FROM {' . usage_recorder::ATTEMPT_TABLE . '}
-              WHERE keyid IS NOT NULL AND timeended IS NOT NULL AND timeended >= :from AND timeended < :to
+              WHERE ' . $where . '
            GROUP BY keyid',
-            ['from' => $from, 'to' => $to],
+            $params,
         );
+        foreach ($usage as $row) {
+            $row->requests = (int) $row->requests;
+            $row->costs = [];
+        }
+        // A recordset, because the first column of a grouped query is not unique.
+        $money = $this->db->get_recordset_sql(
+            'SELECT keyid, targetprovider, currency, SUM(cost) AS cost
+               FROM {' . usage_recorder::ATTEMPT_TABLE . '}
+              WHERE ' . $where . ' AND cost IS NOT NULL
+           GROUP BY keyid, targetprovider, currency',
+            $params,
+        );
+        foreach ($money as $row) {
+            if (isset($usage[$row->keyid])) {
+                $usage[$row->keyid]->costs = self::add_costs(
+                    $usage[$row->keyid]->costs,
+                    self::money((string) ($row->targetprovider ?? '-'), (string) ($row->currency ?? '-'), (float) $row->cost),
+                );
+            }
+        }
+        $money->close();
+        foreach ($usage as $row) {
+            self::settle($row);
+        }
+
+        return $usage;
     }
 
     /**

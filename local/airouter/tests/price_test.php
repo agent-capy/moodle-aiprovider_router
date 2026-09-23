@@ -213,7 +213,7 @@ final class price_test extends \advanced_testcase {
         $this->assertSame('JPY', $found->get('currency'));
     }
 
-    public function test_changing_a_providers_currency_changes_all_of_its_rates_and_no_others(): void {
+    public function test_correcting_a_providers_currency_changes_all_of_its_rates_and_no_others(): void {
         global $DB;
         $book = new price_book($DB);
         $this->add('aiprovider_openai', '', 1.0, 2.0);
@@ -221,12 +221,12 @@ final class price_test extends \advanced_testcase {
         $this->add('aiprovider_sakuraaiengine', '', 100.0, 200.0, currency: 'JPY');
 
         // A provider bills in one currency, so the currency is changed for the provider.
-        $this->assertSame(2, $book->set_provider_currency('aiprovider_openai', 'EUR'));
+        $changed = $book->recost_provider('aiprovider_openai', 'EUR');
 
+        $this->assertSame(['rates' => 2, 'attempts' => 0, 'logs' => 0, 'summaries' => 0], $changed);
         $this->assertSame('EUR', $book->currency_of('aiprovider_openai'));
         $this->assertSame(2, $DB->count_records(price::TABLE, ['provider' => 'aiprovider_openai', 'currency' => 'EUR']));
         $this->assertSame('JPY', $book->currency_of('aiprovider_sakuraaiengine'), 'The other provider is untouched.');
-        $this->assertSame(0, $book->set_provider_currency('aiprovider_openai', 'EUR'), 'Nothing left to change.');
     }
 
     public function test_what_still_needs_one_currency_is_given_the_one_in_use_or_the_default(): void {
@@ -244,5 +244,93 @@ final class price_test extends \advanced_testcase {
 
     public function test_a_currency_is_stored_the_way_codes_are_written(): void {
         $this->assertSame('JPY', price::normalise_currency(' jpy '));
+    }
+
+    public function test_correcting_a_providers_currency_works_its_recorded_costs_out_again(): void {
+        global $DB;
+        $book = new price_book($DB);
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $now = time();
+
+        // A provisional entry: the yen provider's rates typed in as dollars, at a
+        // number that was a guess, and a request already costed under it. Another
+        // provider, entered right, with a request of its own.
+        $provisional = $this->add('aiprovider_sakuraaiengine', '', 1.0, 2.0);
+        $this->add('aiprovider_openai', '', 5.0, 10.0);
+        $request = $generator->create_request(['timestarted' => $now - 100, 'timeended' => $now - 90]);
+        $generator->create_attempt([
+            'requestid' => $request->id, 'targetprovider' => 'aiprovider_sakuraaiengine', 'model' => 'm',
+            'prompttokens' => 1000000, 'completiontokens' => 1000000, 'cost' => 3.0, 'currency' => 'USD',
+            'timestarted' => $now - 99, 'timeended' => $now - 90,
+        ]);
+        $generator->create_attempt([
+            'requestid' => $request->id, 'seq' => 2, 'targetprovider' => 'aiprovider_openai', 'model' => 'm',
+            'prompttokens' => 1000000, 'completiontokens' => 0, 'cost' => 5.0, 'currency' => 'USD',
+            'timestarted' => $now - 89, 'timeended' => $now - 80,
+        ]);
+        // A day already summarised under the provisional entry, and a day of the same
+        // key that was somehow already in yen, which the correction has to fold together.
+        $day = \local_airouter\record\summariser::day_of($now - 5 * DAYSECS);
+        $summary = ['daystart' => $day, 'userid' => 5, 'courseid' => 0, 'actionname' => 'generate_text',
+            'targetprovider' => 'aiprovider_sakuraaiengine', 'targetid' => 1, 'model' => '-', 'keysource' => 'site',
+            'calls' => 1, 'knowncalls' => 1, 'prompttokens' => 1000000, 'completiontokens' => 0, 'images' => 0,
+            'costedcalls' => 1];
+        $DB->insert_record(\local_airouter\record\summariser::TABLE, (object) ($summary + ['currency' => 'USD', 'cost' => 1.0]));
+        $DB->insert_record(\local_airouter\record\summariser::TABLE, (object) ($summary + ['currency' => 'JPY', 'cost' => 100.0]));
+        $DB->insert_record(\local_airouter\record\summariser::TABLE, (object) ([
+            'targetprovider' => 'aiprovider_openai', 'currency' => 'USD', 'cost' => 5.0,
+        ] + $summary));
+
+        // The correction: the rates are really yen, and a hundred times the guess.
+        $provisional->set('currency', 'JPY');
+        $provisional->set('promptrate', 100.0);
+        $provisional->set('completionrate', 200.0);
+        $provisional->update();
+        $changed = $book->recost_provider('aiprovider_sakuraaiengine', 'JPY');
+
+        $this->assertSame(1, $changed['rates']);
+        $this->assertSame(1, $changed['attempts']);
+        $this->assertSame(2, $changed['summaries']);
+        // The attempt: worked out again from what it used, at the corrected rate, in yen.
+        $attempts = array_values($DB->get_records(\local_airouter\record\usage_recorder::ATTEMPT_TABLE, null, 'seq ASC'));
+        $this->assertEqualsWithDelta(300.0, (float) $attempts[0]->cost, 0.000001);
+        $this->assertSame('JPY', $attempts[0]->currency);
+        // The other provider's attempt: exactly as it was.
+        $this->assertEqualsWithDelta(5.0, (float) $attempts[1]->cost, 0.000001);
+        $this->assertSame('USD', $attempts[1]->currency);
+        // The summary: one yen row for the day, the two folded together and priced
+        // from the day's tokens; the other provider's row untouched.
+        $rows = $DB->get_records(\local_airouter\record\summariser::TABLE, ['targetprovider' => 'aiprovider_sakuraaiengine']);
+        $this->assertCount(1, $rows);
+        $row = reset($rows);
+        $this->assertSame('JPY', $row->currency);
+        $this->assertSame(2, (int) $row->calls);
+        $this->assertSame(2, (int) $row->costedcalls);
+        $this->assertEqualsWithDelta(200.0, (float) $row->cost, 0.000001, 'Two million prompt tokens at 100 per million.');
+        $other = $DB->get_record(\local_airouter\record\summariser::TABLE, ['targetprovider' => 'aiprovider_openai']);
+        $this->assertEqualsWithDelta(5.0, (float) $other->cost, 0.000001);
+        $this->assertSame('USD', $other->currency);
+    }
+
+    public function test_a_provider_whose_rates_do_not_cover_a_call_leaves_it_unpriced_when_corrected(): void {
+        global $DB;
+        $book = new price_book($DB);
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $now = time();
+        // The rate covers one model only; the call was to another.
+        $this->add('aiprovider_sakuraaiengine', 'covered', 1.0, 2.0);
+        $request = $generator->create_request(['timestarted' => $now - 100, 'timeended' => $now - 90]);
+        $generator->create_attempt([
+            'requestid' => $request->id, 'targetprovider' => 'aiprovider_sakuraaiengine', 'model' => 'other',
+            'prompttokens' => 10, 'completiontokens' => 10, 'cost' => 3.0, 'currency' => 'USD',
+            'timestarted' => $now - 99, 'timeended' => $now - 90,
+        ]);
+
+        $book->recost_provider('aiprovider_sakuraaiengine', 'JPY');
+
+        // Not zero, and not the old figure either: nothing prices it now, so it is not priced.
+        $attempt = $DB->get_record(\local_airouter\record\usage_recorder::ATTEMPT_TABLE, ['model' => 'other']);
+        $this->assertNull($attempt->cost);
+        $this->assertNull($attempt->currency);
     }
 }
