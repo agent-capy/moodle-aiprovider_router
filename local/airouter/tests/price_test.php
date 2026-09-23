@@ -524,4 +524,103 @@ final class price_test extends \advanced_testcase {
         $this->assertSame('JPY', $row->currency, 'Priced by the correction, in the corrected currency.');
         $this->assertEqualsWithDelta(1.0, (float) $row->cost, 0.000001);
     }
+
+    public function test_a_rate_save_decides_and_saves_under_the_lock_a_correction_needs(): void {
+        // R9-02. A rate saved as it was, because no correction was due, was decided
+        // on and saved outside the lock. A correction that finished in between was
+        // then half undone: this rate back in the old currency, the provider's other
+        // rates and its recorded costs in the new one. Now the decision and the save
+        // hold the lock a correction has to take, so no correction lands in between.
+        global $DB;
+        $this->preventResetByRollback();
+        $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
+        $now = time();
+        $rate = $this->add('aiprovider_openai', '', 1.0, 0.0);
+        $this->add('aiprovider_openai', 'other-model', 1.0, 0.0);
+        $request = $generator->create_request(['timestarted' => $now - 100, 'timeended' => $now - 90]);
+        $attempt = $generator->create_attempt([
+            'requestid' => $request->id, 'targetprovider' => 'aiprovider_openai', 'model' => '',
+            'prompttokens' => 9000000, 'completiontokens' => 0, 'cost' => 9.0, 'currency' => 'USD',
+            'timestarted' => $now - 99, 'timeended' => $now - 90,
+        ]);
+        $book = new class ($DB) extends price_book {
+            /** @var \Closure|null What to do once, while deciding. */
+            public ?\Closure $pause = null;
+
+            #[\Override]
+            public function has_costs_in_another_currency(string $provider, string $currency): bool {
+                $other = parent::has_costs_in_another_currency($provider, $currency);
+                if ($this->pause !== null) {
+                    $pause = $this->pause;
+                    $this->pause = null;
+                    $pause();
+                }
+
+                return $other;
+            }
+        };
+        $free = null;
+        $book->pause = function () use (&$free): void {
+            $free = $this->separately(function (): bool {
+                $lock = usage_recorder::lock_factory()->get_lock(usage_recorder::LOCK, 0);
+                if ($lock === false) {
+                    return false;
+                }
+                $lock->release();
+
+                return true;
+            });
+        };
+        $rate->set('promptrate', 2.0);
+
+        $this->assertFalse($book->save_rate($rate, false)['recosted']);
+        $this->assertFalse($free, 'A correction cannot begin while the save is deciding.');
+
+        // The correction then runs, and a screen that still shows dollars saves after
+        // it. That save is a correction back, and everything follows it.
+        $this->separately(fn($db) => (new price_book($db))->recost_provider('aiprovider_openai', 'JPY'));
+        $this->assertTrue($book->save_rate($rate, false)['recosted']);
+
+        $currencies = $DB->get_fieldset_select(price::TABLE, 'DISTINCT currency', 'provider = ?', ['aiprovider_openai']);
+        $this->assertSame(['USD'], array_values($currencies));
+        $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $attempt->id], '*', MUST_EXIST);
+        $this->assertSame('USD', $row->currency);
+        $this->assertEqualsWithDelta(18.0, (float) $row->cost, 0.000001);
+    }
+
+    public function test_a_rate_save_that_cannot_take_the_lock_saves_nothing(): void {
+        // The other side of R9-02: a save that finds the record busy is told so, as a
+        // correction is, and leaves the rate as it was for the administrator to send
+        // again.
+        global $DB, $CFG;
+        $this->preventResetByRollback();
+        $rate = $this->add('aiprovider_openai', '', 1.0, 0.0);
+        $original = $DB;
+        $other = \moodle_database::get_driver_instance($CFG->dbtype, $CFG->dblibrary);
+        $other->connect($CFG->dbhost, $CFG->dbuser, $CFG->dbpass, $CFG->dbname, $CFG->prefix, $CFG->dboptions);
+        $held = false;
+        try {
+            // The lock factory binds to the connection that is $DB when it is made.
+            $DB = $other;
+            $held = usage_recorder::lock_factory()->get_lock(usage_recorder::LOCK, 0);
+            $DB = $original;
+            $this->assertNotFalse($held);
+            $rate->set('promptrate', 2.0);
+            try {
+                (new price_book($DB))->save_rate($rate, false);
+                $this->fail('A busy record should have been said.');
+            } catch (\moodle_exception $e) {
+                $this->assertSame('rates:error:busy', $e->errorcode);
+            }
+        } finally {
+            // Released on its own connection, before that connection goes.
+            if ($held !== false) {
+                $held->release();
+            }
+            $DB = $original;
+            $other->dispose();
+        }
+
+        $this->assertEqualsWithDelta(1.0, (float) $DB->get_field(price::TABLE, 'promptrate', ['id' => $rate->get('id')]), 0.000001);
+    }
 }

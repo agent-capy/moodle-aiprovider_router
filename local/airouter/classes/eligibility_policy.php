@@ -69,6 +69,9 @@ class eligibility_policy {
     /** @var string The cache area holding what was decided about each person. */
     public const CACHE_AREA = 'eligibility';
 
+    /** @var string The setting holding a number that changes whenever the policy does. */
+    public const VERSION_SETTING = 'byokversion';
+
     /**
      * Which of the three answers the site has chosen.
      *
@@ -171,15 +174,21 @@ class eligibility_policy {
             return false;
         }
 
+        // Kept under the version of the policy it was decided under, read before the
+        // policy is: an answer worked out under a policy that has since been changed
+        // is filed under the old version, however late it is stored, and never found.
+        // Emptying the cache when the policy changes cannot stop a slow answer from
+        // being stored after it.
+        $cachekey = $userid . '_' . self::get_version();
         $cache = $this->get_cache();
-        $cached = $cache->get($userid);
+        $cached = $cache->get($cachekey);
         if ($cached !== false) {
             return (bool) $cached['eligible'];
         }
 
         $eligible = $this->evaluate($userid);
         // Wrapped in an array because a cached false is indistinguishable from a miss.
-        $cache->set($userid, ['eligible' => $eligible]);
+        $cache->set($cachekey, ['eligible' => $eligible]);
 
         return $eligible;
     }
@@ -242,10 +251,26 @@ class eligibility_policy {
      * Throw away what was decided about everybody.
      *
      * Called whenever the policy changes, so that tightening it takes effect at once
-     * rather than at the end of the cache's lifetime.
+     * rather than at the end of the cache's lifetime. The version moves first, after
+     * the policy is written, so that an answer being worked out meanwhile is stored
+     * under the old one; the purge then frees what was held.
      */
     public static function purge(): void {
+        set_config(self::VERSION_SETTING, self::get_version() + 1, 'local_airouter');
         \core_cache\helper::purge_by_definition('local_airouter', self::CACHE_AREA);
+    }
+
+    /**
+     * The version of the policy.
+     *
+     * Read the way the policy itself is read, through the plugin's configuration, so
+     * that a process holding an older copy of the policy also holds the older version
+     * and files what it decides where nobody else looks.
+     *
+     * @return int The version, zero until the policy has first been changed.
+     */
+    protected static function get_version(): int {
+        return (int) get_config('local_airouter', self::VERSION_SETTING);
     }
 
     /**

@@ -104,6 +104,33 @@ $keys = $repository->get_all($scope, $scopeid);
 // its own row, where the questions a change raises can be asked.
 $form = new key_form($url, ['targets' => array_diff_key($names, $keys)]);
 
+// A change to a key waits for any other change to the same person's or course's keys,
+// so that two of them never decide on the same rows at once. One that is still waiting
+// when its time runs out is said, and nothing of it is stored.
+$unlessbusy = function (\Closure $change) use ($url): mixed {
+    try {
+        return $change();
+    } catch (\moodle_exception $e) {
+        if ($e->errorcode !== 'keys:error:busy') {
+            throw $e;
+        }
+        redirect($url, get_string('keys:error:busy', 'local_airouter'), null, \core\output\notification::NOTIFY_ERROR);
+    }
+};
+
+// A key registered by somebody else while this one was being typed. The key just typed
+// is not kept: whether it is for the account of the key now held is a question this
+// form did not ask, and the replacement screen does.
+$heldmeanwhile = function (int $targetid) use ($repository, $scope, $scopeid, $url): void {
+    $held = $repository->find($scope, $scopeid, $targetid);
+    redirect(
+        new moodle_url($url, ['action' => 'replace', 'keyid' => $held === null ? 0 : (int) $held->get('id')]),
+        get_string('keys:replace:held', 'local_airouter'),
+        null,
+        \core\output\notification::NOTIFY_INFO,
+    );
+};
+
 // Removing a key is not gated on the policy. The key is a secret its owner handed over,
 // and a site that tightens who may bring one must not thereby leave somebody holding a
 // key they can no longer take back. The profile link is offered to anybody who has one
@@ -112,7 +139,7 @@ if ($action === 'delete' && $confirm) {
     require_sesskey();
     $key = $repository->get_for($keyid, $scope, $scopeid);
     if ($key !== null) {
-        $repository->delete((int) $key->get('id'));
+        $unlessbusy(fn() => $repository->delete((int) $key->get('id')));
     }
     redirect($url, get_string('keys:deleted', 'local_airouter'), null, \core\output\notification::NOTIFY_SUCCESS);
 }
@@ -161,7 +188,9 @@ if ($allowed && $action === 'cap') {
     }
     if ($capdata = $capform->get_data()) {
         // Refused when the key was replaced by one for another account meanwhile:
-        // the limit was decided about the key that was on the screen.
+        // the limit was decided about the key that was on the screen, whose wallet
+        // the form carried.
+        $capkey->set('walletid', max(0, (int) ($capdata->walletid ?? 0)));
         $capperiod = (string) ($capdata->capperiod ?? ledger::PERIOD_MONTH);
         $capdays = (int) ($capdata->capdays ?? 30);
         $applied = $repository->set_cap($capkey, key_cap_form::read_amount($capdata), $capperiod, $capdays);
@@ -189,6 +218,7 @@ if ($allowed && $action === 'cap') {
     }
     $capform->set_data([
         'keyid' => $keyid,
+        'walletid' => $capkey->get_wallet(),
         'courseid' => $courseid,
         'capamount' => $capkey->has_cap() ? (string) $capkey->get_cap_amount() : '',
         'capperiod' => $capkey->get_cap_period(),
@@ -211,6 +241,7 @@ if ($allowed && $action === 'replace') {
     $walletform = new key_wallet_form($url, [
         'mode' => key_wallet_form::MODE_REPLACE,
         'keyid' => (int) $current->get('id'),
+        'walletid' => $current->get_wallet(),
         'courseid' => $courseid,
         'target' => $names[$currenttarget],
         'cap' => $current->has_cap() ? key_formatter::limit($current, $currencies[$currenttarget] ?? null) : null,
@@ -223,12 +254,19 @@ if ($allowed && $action === 'replace') {
         redirect($url);
     }
     if ($walletdata = $walletform->get_data()) {
-        $repository->replace(
+        // The answers are about the key the owner was shown, which was in the wallet
+        // the form carried. A key that has moved since is not the one they answered
+        // about, and the repository stores nothing for it.
+        $current->set('walletid', key_wallet_form::read_shown_wallet($walletdata));
+        $replaced = $unlessbusy(fn() => $repository->replace(
             $current,
             (string) $walletdata->secret,
             key_wallet_form::read_sameaccount($walletdata),
             key_wallet_form::read_keepcap($walletdata),
-        );
+        ));
+        if ($replaced === null) {
+            redirect($url, get_string('keys:replace:changed', 'local_airouter'), null, \core\output\notification::NOTIFY_WARNING);
+        }
         redirect($url, get_string('keys:replaced', 'local_airouter'), null, \core\output\notification::NOTIFY_SUCCESS);
     }
     $walletheading = get_string('keys:replace:heading', 'local_airouter', $names[$currenttarget]);
@@ -260,7 +298,16 @@ if ($allowed && $action === 'register') {
         redirect($url);
     }
     if ($walletdata = $walletform->get_data()) {
-        $repository->save($scope, $scopeid, $targetid, (string) $walletdata->secret, key_wallet_form::read_wallet($walletdata));
+        $saved = $unlessbusy(fn() => $repository->save(
+            $scope,
+            $scopeid,
+            $targetid,
+            (string) $walletdata->secret,
+            key_wallet_form::read_wallet($walletdata),
+        ));
+        if ($saved === null) {
+            $heldmeanwhile($targetid);
+        }
         redirect($url, get_string('keys:saved', 'local_airouter'), null, \core\output\notification::NOTIFY_SUCCESS);
     }
     $walletheading = get_string('keys:register:heading', 'local_airouter', $names[$targetid]);
@@ -272,14 +319,8 @@ if ($allowed && $data = $form->get_data()) {
         redirect($url);
     }
     if (isset($keys[$chosen])) {
-        // Registered meanwhile, on another screen. The key just typed is not kept:
-        // changing a held key raises questions this form did not ask.
-        redirect(
-            new moodle_url($url, ['action' => 'replace', 'keyid' => (int) $keys[$chosen]->get('id')]),
-            get_string('keys:replace:held', 'local_airouter'),
-            null,
-            \core\output\notification::NOTIFY_INFO,
-        );
+        // Registered meanwhile, on another screen.
+        $heldmeanwhile($chosen);
     }
     if (
         !$repository->is_known_secret($scope, $scopeid, $chosen, (string) $data->secret)
@@ -294,7 +335,10 @@ if ($allowed && $data = $form->get_data()) {
             \core\output\notification::NOTIFY_INFO,
         );
     }
-    $repository->save($scope, $scopeid, $chosen, (string) $data->secret);
+    if ($unlessbusy(fn() => $repository->save($scope, $scopeid, $chosen, (string) $data->secret)) === null) {
+        // Registered in the instant since the list above was read.
+        $heldmeanwhile($chosen);
+    }
     redirect($url, get_string('keys:saved', 'local_airouter'), null, \core\output\notification::NOTIFY_SUCCESS);
 }
 

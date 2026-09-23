@@ -104,6 +104,9 @@ class reader {
     /** @var bool Whether the last paired read came back the same way twice, and so can be kept. */
     protected bool $consistent = true;
 
+    /** @var int|null The generation the last paired read belongs to, or null when it belongs to none. */
+    protected ?int $generation = null;
+
     /**
      * Constructor.
      *
@@ -134,6 +137,20 @@ class reader {
     }
 
     /**
+     * Which state of the record the last paired read is of.
+     *
+     * Whatever is kept of the read beyond the moment -- a cache entry -- is to be kept
+     * under this, so that it is not taken for the record once the record has moved on,
+     * however late it is stored.
+     *
+     * @return int|null The generation the read began and ended in, or null when it did
+     *                  not end in the one it began in.
+     */
+    public function get_read_generation(): ?int {
+        return $this->generation;
+    }
+
+    /**
      * Read the summary and the detail as one.
      *
      * The generation is read from the database before and after, and the two reads
@@ -150,10 +167,13 @@ class reader {
             $before = generation::get($this->db);
             $result = $read();
             if (generation::get($this->db) === $before) {
+                $this->generation = $before;
+
                 return $result;
             }
         }
         $this->consistent = false;
+        $this->generation = null;
 
         return $result;
     }

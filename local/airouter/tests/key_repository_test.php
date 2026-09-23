@@ -72,21 +72,44 @@ final class key_repository_test extends \advanced_testcase {
         $this->assertStringNotContainsString('sk-', $saved->get('hint'));
     }
 
-    public function test_registering_again_replaces_the_key_and_forgets_the_last_test(): void {
+    public function test_replacing_a_key_keeps_its_row_and_forgets_the_last_test(): void {
         global $DB;
 
         $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'first-key-aaaa');
         $this->repository->record_verification($first, key::VERIFY_OK, 1000);
+        $wallet = $first->get_wallet();
 
-        $second = $this->repository->save(key::SCOPE_USER, 7, 3, 'second-key-bbbb');
+        $second = $this->repository->replace($this->repository->get((int) $first->get('id')), 'second-key-bbbb', true);
 
         $this->assertSame((int) $first->get('id'), (int) $second->get('id'));
-        $this->assertSame($first->get_wallet(), $second->get_wallet(), 'Registered again is renewed, not moved.');
+        $this->assertSame($wallet, $second->get_wallet(), 'Renewed within its account, not moved.');
         $this->assertSame(1, $DB->count_records(key::TABLE));
         $this->assertSame('second-key-bbbb', $this->repository->reveal($second));
         // Whatever the old key managed says nothing about the new one.
         $this->assertSame(0, (int) $second->get('timeverified'));
         $this->assertNull($second->get('verifystatus'));
+    }
+
+    public function test_registering_where_a_key_is_held_stores_nothing_unless_it_is_a_key_the_wallets_know(): void {
+        // R9-01. Somebody else registered a key while this one was being typed.
+        // Whether the new key is for the same account as theirs is a question nobody
+        // was asked, so it is not stored; the same key again settles it by itself.
+        global $DB;
+        $held = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $wallet = $held->get_wallet();
+
+        $this->assertNull($this->repository->save(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb'));
+        $this->assertNull($this->repository->save(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb', $wallet));
+        $this->assertSame('sk-first-key-aaaa', $this->repository->reveal($this->repository->find(key::SCOPE_USER, 7, 3)));
+        $this->assertSame(1, $DB->count_records(key_repository::WALLET_TABLE));
+        $this->assertSame(0, $DB->count_records(key_repository::WALLET_KEY_TABLE, [
+            'keyhash' => $this->repository->hash_secret('sk-second-key-bbbb'),
+        ]));
+
+        $again = $this->repository->save(key::SCOPE_USER, 7, 3, ' sk-first-key-aaaa ');
+        $this->assertSame((int) $held->get('id'), (int) $again->get('id'));
+        $this->assertSame($wallet, $again->get_wallet());
+        $this->assertSame(1, $DB->count_records(key_repository::WALLET_TABLE));
     }
 
     public function test_a_verdict_never_writes_back_the_key_it_was_read_with(): void {
@@ -99,7 +122,12 @@ final class key_repository_test extends \advanced_testcase {
         $tested = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'the-old-key-aaaa');
         $this->repository->set_cap($tested, 100.0, ledger::PERIOD_MONTH, 30);
 
-        $meanwhile = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'the-new-key-bbbb');
+        $meanwhile = $this->repository->replace(
+            $this->repository->get((int) $tested->get('id')),
+            'the-new-key-bbbb',
+            true,
+            true,
+        );
         $this->repository->set_cap($meanwhile, 10.0, ledger::PERIOD_MONTH, 30);
 
         $this->repository->record_verification($tested, key::VERIFY_OK, 1000);
@@ -150,7 +178,7 @@ final class key_repository_test extends \advanced_testcase {
         $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-the-first-aaaa');
         $this->repository->set_cap($saved, 25.0, ledger::PERIOD_MONTH, 30);
 
-        $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-the-second-bbbb');
+        $this->repository->replace($saved, 'sk-the-second-bbbb', true, true);
 
         // Replacing a key is not a new month. The provider carries on billing the same
         // account, and the ledger counts the same spending, so clearing the limit here
@@ -450,11 +478,11 @@ final class key_repository_test extends \advanced_testcase {
         $this->repository->save(key::SCOPE_USER, 8, 3, 'sk-somebody-elses', $theirs->get_wallet());
     }
 
-    public function test_going_on_with_a_wallet_that_is_held_is_a_coding_error(): void {
+    public function test_going_on_with_a_wallet_where_a_key_is_held_stores_nothing(): void {
         $held = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
 
-        $this->expectException(\coding_exception::class);
-        $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb', $held->get_wallet());
+        $this->assertNull($this->repository->save(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb', $held->get_wallet()));
+        $this->assertSame('sk-first-key-aaaa', $this->repository->reveal($this->repository->find(key::SCOPE_USER, 7, 3)));
     }
 
     public function test_previous_wallets_are_listed_newest_first_and_held_ones_not_at_all(): void {
@@ -615,5 +643,149 @@ final class key_repository_test extends \advanced_testcase {
 
         $this->assertEquals($before, $DB->get_records(key_repository::WALLET_TABLE));
         $this->assertSame('sk-first-key-aaaa', $this->repository->reveal($this->repository->get((int) $key->get('id'))));
+    }
+
+    public function test_a_second_change_while_one_is_deciding_is_refused_rather_than_deciding_too(): void {
+        // R9-01, in the order the review found it. The first replacement looked for a
+        // wallet holding the new key and found none; before it opened one, a second
+        // replacement with the same key did the same and committed. Both opened a
+        // wallet, and what was recorded against the first was not counted against the
+        // key. A transaction does not stop that; the subject's lock does. The second
+        // change now waits for the first, and one that cannot wait says so.
+        global $DB;
+        $this->preventResetByRollback();
+        $key = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'sk-first-key-aaaa');
+        $this->repository->save(key::SCOPE_COURSE, 43, 3, 'sk-other-course-dddd');
+        $refused = null;
+        $elsewhere = null;
+        $first = new class ($DB) extends key_repository {
+            /** @var \Closure|null What to do once, in the middle of deciding. */
+            public ?\Closure $pause = null;
+
+            #[\Override]
+            protected function find_wallet_of(string $scope, int $scopeid, int $targetid, string $secret): ?\stdClass {
+                $wallet = parent::find_wallet_of($scope, $scopeid, $targetid, $secret);
+                if ($this->pause !== null) {
+                    $pause = $this->pause;
+                    $this->pause = null;
+                    $pause();
+                }
+
+                return $wallet;
+            }
+        };
+        $first->pause = function () use ($key, &$refused, &$elsewhere): void {
+            $this->elsewhere(function (\moodle_database $db) use ($key, &$refused, &$elsewhere): void {
+                $impatient = new class ($db) extends key_repository {
+                    /** @var int Not waiting, so that the test does not. */
+                    public const LOCK_TIMEOUT = 0;
+                };
+                try {
+                    $impatient->replace($impatient->get((int) $key->get('id')), 'sk-second-key-bbbb', false);
+                } catch (\moodle_exception $e) {
+                    $refused = $e->errorcode;
+                }
+                // Another course's keys are not held up by this one's.
+                $elsewhere = $impatient->replace(
+                    $impatient->find(key::SCOPE_COURSE, 43, 3),
+                    'sk-other-course-eeee',
+                    true,
+                );
+            });
+        };
+
+        $result = $first->replace($first->get((int) $key->get('id')), 'sk-second-key-bbbb', false);
+
+        $this->assertSame('keys:error:busy', $refused);
+        $this->assertNotNull($elsewhere);
+        $this->assertSame(1, $DB->count_records(key_repository::WALLET_KEY_TABLE, [
+            'keyhash' => $this->repository->hash_secret('sk-second-key-bbbb'),
+        ]));
+        $this->assertSame($result->get_wallet(), $this->repository->get((int) $key->get('id'))->get_wallet());
+        // The old key's, the new key's, and the other course's.
+        $this->assertSame(3, $DB->count_records(key_repository::WALLET_TABLE));
+        $this->assertSame(0, $DB->count_records_select(
+            key_repository::WALLET_TABLE,
+            'timereleased = 0 AND id NOT IN (SELECT walletid FROM {' . key::TABLE . '})',
+        ), 'No wallet is held without a key in it.');
+    }
+
+    public function test_a_replacement_of_a_key_moved_since_it_was_shown_stores_nothing(): void {
+        // R9-01. The owner was shown the first key and said the new one is for the
+        // same account -- or for another. Meanwhile somebody replaced the first key
+        // with one for another account. Either answer was about a key that is no
+        // longer held: the same account would have put the new key in the released
+        // wallet, and either answer left the new wallet held with no key in it.
+        global $DB;
+        foreach ([true, false] as $answer) {
+            $DB->delete_records(key::TABLE);
+            $DB->delete_records(key_repository::WALLET_KEY_TABLE);
+            $DB->delete_records(key_repository::WALLET_TABLE);
+            $shown = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+            $meanwhile = $this->repository->replace(
+                $this->repository->get((int) $shown->get('id')),
+                'sk-other-key-cccc',
+                false,
+            );
+
+            $this->assertNull($this->repository->replace($shown, 'sk-second-key-bbbb', $answer), json_encode($answer));
+
+            $now = $this->repository->get((int) $shown->get('id'));
+            $this->assertSame('sk-other-key-cccc', $this->repository->reveal($now));
+            $this->assertSame($meanwhile->get_wallet(), $now->get_wallet());
+            $this->assertSame(2, $DB->count_records(key_repository::WALLET_TABLE));
+            $this->assertSame(0, (int) $DB->get_field(key_repository::WALLET_TABLE, 'timereleased', [
+                'id' => $meanwhile->get_wallet(),
+            ]));
+        }
+    }
+
+    public function test_a_replacement_of_a_key_removed_since_it_was_shown_stores_nothing(): void {
+        // R9-01. Removed while the owner was answering: nothing to replace, and no
+        // wallet opened or taken back for a key that is not there.
+        global $DB;
+        $shown = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->delete((int) $shown->get('id'));
+
+        $this->assertNull($this->repository->replace($shown, 'sk-second-key-bbbb', false));
+        $this->assertNull($this->repository->replace($shown, 'sk-first-key-aaaa', null));
+
+        $this->assertSame(0, $DB->count_records(key::TABLE));
+        $this->assertSame(1, $DB->count_records(key_repository::WALLET_TABLE));
+        $this->assertGreaterThan(0, (int) $DB->get_field(key_repository::WALLET_TABLE, 'timereleased', [
+            'id' => $shown->get_wallet(),
+        ]));
+    }
+
+    public function test_a_replacement_of_a_key_given_a_limit_since_it_was_shown_stores_nothing(): void {
+        // Whether the limit stays was not asked, because there was none on the screen.
+        $shown = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->set_cap($this->repository->get((int) $shown->get('id')), 25.0, ledger::PERIOD_MONTH, 30);
+
+        $this->assertNull($this->repository->replace($shown, 'sk-second-key-bbbb', true));
+
+        $now = $this->repository->get((int) $shown->get('id'));
+        $this->assertSame('sk-first-key-aaaa', $this->repository->reveal($now));
+        $this->assertSame(25.0, $now->get_cap_amount());
+    }
+
+    /**
+     * Run something on a second connection to the database, as another request would.
+     *
+     * @param \Closure $operation Given the connection.
+     */
+    private function elsewhere(\Closure $operation): void {
+        global $DB, $CFG;
+        $original = $DB;
+        $other = \moodle_database::get_driver_instance($CFG->dbtype, $CFG->dblibrary);
+        $other->connect($CFG->dbhost, $CFG->dbuser, $CFG->dbpass, $CFG->dbname, $CFG->prefix, $CFG->dboptions);
+        try {
+            // Persistents and the lock factory use whatever $DB is when they run.
+            $DB = $other;
+            $operation($other);
+        } finally {
+            $DB = $original;
+            $other->dispose();
+        }
     }
 }

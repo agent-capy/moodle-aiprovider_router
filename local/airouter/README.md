@@ -401,6 +401,9 @@ claiming whether the usage was discarded or never happened.
 would be too much work for the path a request takes, so the figures are held briefly. A
 burst of requests can therefore carry spending a little past a limit. Making the window
 shorter would not fix it, because the request being weighed has not been paid for yet.
+What changes the history as a whole — a currency correction, the daily summary — takes
+effect on the next request instead: figures are held against the state of the history
+they were read from, and are not used once it has moved on.
 
 ### Being told about a budget
 
@@ -692,6 +695,12 @@ the old figures in force for the old dates, and the recalculation would reproduc
 Editing a rate's numbers without changing the currency recalculates nothing; that is an
 ordinary revision, and last month keeps last month's figures.
 
+Whether a save is a correction is decided at the moment of saving, under the same hold on
+the record a correction takes. A rate page opened before somebody else corrected the
+provider, and saved after, is therefore itself a correction back to the currency it
+shows, and everything follows it; it never leaves one rate in one currency and the rest
+in another. While the record is busy, a rate is not saved and the page says to try again.
+
 A correction holds the record while it runs, and a call that ends while it is held is
 recorded without a price rather than priced beside it: the price is worked out by the
 next thing to hold the record, at the rates by then in force, which is the correction
@@ -803,7 +812,10 @@ of them, and "teachers who are also in that cohort" needs all of them.
 
 The policy is checked when a key is registered **and again on every request that would use
 one**, so tightening it stops the keys it no longer allows from being used. Those keys are
-not deleted; they stop being used and remain their owners' to remove.
+not deleted; they stop being used and remain their owners' to remove. The answer for each
+person is held for a few minutes, because working it out means looking through role
+assignments; a change to the policy itself is not held up by that and applies to the next
+request, while a change in who holds which role is followed within those few minutes.
 
 **A policy is only as good as the field it rests on.** Where a profile field is one the
 person it describes can fill in — editable on their own profile, or asked for on the
@@ -915,6 +927,16 @@ one-way hash of every key it has held, which is how a key is recognised as the w
 after the key itself has gone, and which cannot be turned back into the key. A key the
 wallets recognise goes back to its wallet whichever way it is entered and whatever is
 answered.
+
+The answers are about the key that was on the screen. A course key can be looked after by
+more than one teacher, and when somebody else replaces or removes the key while the page
+is open, the answers no longer describe the key that is there, so **the new key is not
+saved**: the page says the key changed and asks for it to be replaced again. The one
+exception is a key the wallets recognise, which needs no answers. In the same way,
+registering a key for a provider that somebody else has just given a key sends the
+person to **Replace** instead. Changes to one person's or one course's keys are made one
+at a time; one that finds another still being saved after a few seconds says so and saves
+nothing.
 
 ### What happens when a brought key is used
 

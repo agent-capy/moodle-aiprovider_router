@@ -70,6 +70,10 @@ class key_wallet_form extends \moodleform {
         if ($mode === self::MODE_REPLACE) {
             $mform->addElement('hidden', 'keyid', (int) ($this->_customdata['keyid'] ?? 0));
             $mform->setType('keyid', PARAM_INT);
+            // The wallet of the key the questions are about, so that a key moved to
+            // another wallet before the answers arrive is not taken to be that key.
+            $mform->addElement('hidden', 'walletid', (int) ($this->_customdata['walletid'] ?? 0));
+            $mform->setType('walletid', PARAM_INT);
         } else {
             $mform->addElement('hidden', 'targetid', (int) ($this->_customdata['targetid'] ?? 0));
             $mform->setType('targetid', PARAM_INT);
@@ -198,6 +202,16 @@ class key_wallet_form extends \moodleform {
             self::DROP => false,
             default => null,
         };
+    }
+
+    /**
+     * The wallet the key was in when the questions were put.
+     *
+     * @param \stdClass $data The submitted data.
+     * @return int The wallet id, or zero when the form did not carry one.
+     */
+    public static function read_shown_wallet(\stdClass $data): int {
+        return max(0, (int) ($data->walletid ?? 0));
     }
 
     /**

@@ -80,6 +80,32 @@ Feature: Registering a key of my own
     And I should see "bbbb"
     And I should not see "aaaa"
 
+  # The answers are about the key that was on the screen. Somebody else replacing it
+  # with a key for another account before they arrive makes them answers about a key
+  # that is no longer there, and the new key is not stored on the strength of them.
+  Scenario: A key replaced by somebody else while I was answering is not replaced again on my answers
+    Given the following "core_ai > ai providers" exist:
+      | provider          | name        | enabled | apikey |
+      | aiprovider_openai | Test OpenAI | 1       | abc123 |
+    And the following "local_airouter > target settings" exist:
+      | target      | keyfield |
+      | Test OpenAI | apikey   |
+    And the following "local_airouter > keys" exist:
+      | user     | target      | secret            |
+      | teacher1 | Test OpenAI | sk-first-key-aaaa |
+    And I log in as "teacher1"
+    And I visit "/local/airouter/keys.php"
+    And I click on "Replace" "link"
+    And the following "local_airouter > key replacements" exist:
+      | user     | target      | secret            | account |
+      | teacher1 | Test OpenAI | sk-other-key-cccc | another |
+    When I set the field "Key" to "sk-second-key-bbbb"
+    And I set the field "Yes, the same account" to "1"
+    And I click on "Save key" "button"
+    Then I should see "The key was changed or removed by someone else while you were answering"
+    And I should see "cccc"
+    And I should not see "bbbb"
+
   Scenario: The same key registered again after being removed is recognised and asked nothing
     Given the following "core_ai > ai providers" exist:
       | provider          | name        | enabled | apikey |

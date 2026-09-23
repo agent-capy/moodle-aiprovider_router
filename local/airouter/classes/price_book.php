@@ -178,6 +178,12 @@ class price_book {
      * when it disagrees with the rates already, however that came about, so that
      * saving the rate again is the way to put it right.
      *
+     * Whether a correction is due is decided under the same locks, in the same
+     * transaction, as the save and any correction. A rate saved as it is, because
+     * nothing was due, would otherwise land after a correction that finished in
+     * between, and put the currency of this one rate back: the provider's other rates
+     * and its recorded costs in one currency, this rate in the other.
+     *
      * @param price $rate The rate, with what it is to become already set on it.
      * @param bool $isnew Whether it is being created rather than updated.
      * @return array recosted, and when true the counts recost_provider() gives.
@@ -186,17 +192,16 @@ class price_book {
     public function save_rate(price $rate, bool $isnew): array {
         $provider = (string) $rate->get('provider');
         $currency = (string) $rate->get('currency');
-        $before = $this->currency_of($provider);
-        $save = function () use ($rate, $isnew): void {
+
+        return $this->under_record_locks(function () use ($rate, $isnew, $provider, $currency): array {
+            $before = $this->currency_of($provider);
             $isnew ? $rate->create() : $rate->update();
-        };
-        if (($before === null || $before === $currency) && !$this->has_costs_in_another_currency($provider, $currency)) {
-            $save();
+            if (($before === null || $before === $currency) && !$this->has_costs_in_another_currency($provider, $currency)) {
+                return ['recosted' => false];
+            }
 
-            return ['recosted' => false];
-        }
-
-        return ['recosted' => true] + $this->recost_provider($provider, $currency, $save);
+            return ['recosted' => true] + $this->correct($provider, $currency);
+        });
     }
 
     /**
@@ -238,8 +243,8 @@ class price_book {
      * rather than for a rate at a time. The change is the correction of a provisional
      * entry, and the costs recorded under the provisional entry are as provisional as
      * it was, so every one of them is worked out again from what the call used, at the
-     * rate now in force for its time, and in the new currency: attempts and the older
-     * log by call, summary rows by day. A summary row is priced as one call of its
+     * rate now in force for its time, and in the new currency: attempts by call,
+     * summary rows by day. A summary row is priced as one call of its
      * size at the rate in force at the start of its day, images included, which is as
      * near as a day whose detail has been purged can be brought.
      *
@@ -251,10 +256,53 @@ class price_book {
      * @param \Closure|null $first Something to do first, inside the same transaction and
      *                             under the same locks, such as saving the rate that
      *                             brought the change; it is undone with the rest.
-     * @return int[] How many rates, attempts, log rows and summary rows were touched.
+     * @return int[] How many rates, attempts and summary rows were touched.
      * @throws \moodle_exception When the record is busy.
      */
     public function recost_provider(string $provider, string $currency, ?\Closure $first = null): array {
+        return $this->under_record_locks(function () use ($provider, $currency, $first): array {
+            if ($first !== null) {
+                $first();
+            }
+
+            return $this->correct($provider, $currency);
+        });
+    }
+
+    /**
+     * Put a provider's rates in one currency and work its record out again, inside a transaction under the record locks.
+     *
+     * @param string $provider The provider component.
+     * @param string $currency The currency, already normalised.
+     * @return int[] How many rates, attempts and summary rows were touched.
+     */
+    protected function correct(string $provider, string $currency): array {
+        $this->db->set_field(price::TABLE, 'currency', $currency, ['provider' => $provider]);
+        $counts = [
+            'rates' => $this->db->count_records(price::TABLE, ['provider' => $provider]),
+            'attempts' => $this->recost_attempts($provider),
+            'summaries' => $this->recost_summaries($provider),
+        ];
+        // The record has changed underneath any reader in the middle of reading it.
+        // Moved inside the transaction, so that a reader sees the new number exactly
+        // when it sees the new figures. The figures held for the routing path carry
+        // the number they were read at, and are not found again once it has moved.
+        generation::bump();
+
+        return $counts;
+    }
+
+    /**
+     * Change the rates in one transaction, under the record lock and the summariser's lock.
+     *
+     * So that a request being recorded, a run of the summariser, a correction and a
+     * rate being saved cannot interleave with each other.
+     *
+     * @param \Closure $change The change, run inside the transaction; what it returns is returned.
+     * @return mixed What the change returned.
+     * @throws \moodle_exception When the record is busy.
+     */
+    protected function under_record_locks(\Closure $change): mixed {
         $factory = \core\lock\lock_config::get_lock_factory('local_airouter');
         $recordlock = $factory->get_lock(usage_recorder::LOCK, usage_recorder::LOCK_TIMEOUT);
         if (!$recordlock) {
@@ -268,19 +316,7 @@ class price_book {
         try {
             $transaction = $this->db->start_delegated_transaction();
             try {
-                if ($first !== null) {
-                    $first();
-                }
-                $this->db->set_field(price::TABLE, 'currency', $currency, ['provider' => $provider]);
-                $counts = [
-                    'rates' => $this->db->count_records(price::TABLE, ['provider' => $provider]),
-                    'attempts' => $this->recost_attempts($provider),
-                    'summaries' => $this->recost_summaries($provider),
-                ];
-                // The record has changed underneath any reader in the middle of
-                // reading it. Moved inside the transaction, so that a reader sees
-                // the new number exactly when it sees the new figures.
-                generation::bump();
+                $result = $change();
                 $transaction->allow_commit();
             } catch (\Throwable $e) {
                 $transaction->rollback($e);
@@ -294,10 +330,12 @@ class price_book {
             $summarylock->release();
             $recordlock->release();
         }
-        // Figures held for the routing path were worked out in the old currency.
+        // Figures held for the routing path may have been worked out in the old
+        // currency. They would not be found again under the new generation; the
+        // purge frees the space they take.
         \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
 
-        return $counts;
+        return $result;
     }
 
     /**

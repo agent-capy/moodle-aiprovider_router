@@ -324,6 +324,7 @@ final class reader_test extends \advanced_testcase {
         $this->assertSame(1, $total->requests);
         $this->assertSame(2, $total->calls);
         $this->assertTrue($reader->was_consistent());
+        $this->assertSame(generation::get($DB), $reader->get_read_generation(), 'A read of the record as the run left it.');
         $this->assertSame(2, $DB->count_records(summariser::TABLE, ['currency' => 'USD']), 'It was applied: a row per call.');
     }
 }

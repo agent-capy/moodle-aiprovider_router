@@ -134,19 +134,60 @@ class local_airouter_generator extends component_generator_base {
     public function create_key(array $record): key {
         global $DB;
 
+        [$scope, $scopeid, $targetid] = $this->key_subject($record);
+        $key = (new key_repository($DB))->save($scope, $scopeid, $targetid, (string) $record['secret']);
+        if ($key === null) {
+            throw new coding_exception('A key is registered for that target already; replace it instead.');
+        }
+
+        return $key;
+    }
+
+    /**
+     * Replace the key a person or a course holds, as somebody on another screen would.
+     *
+     * @param array $record targetid, secret, account ('same' or 'another'), and userid or courseid.
+     * @return key The key as replaced.
+     */
+    public function create_key_replacement(array $record): key {
+        global $DB;
+
+        [$scope, $scopeid, $targetid] = $this->key_subject($record);
+        $repository = new key_repository($DB);
+        $held = $repository->find($scope, $scopeid, $targetid);
+        if ($held === null) {
+            throw new coding_exception('There is no key there to replace.');
+        }
+        $replaced = $repository->replace(
+            $held,
+            (string) $record['secret'],
+            ($record['account'] ?? '') === 'same',
+            $held->has_cap() ? true : null,
+        );
+        if ($replaced === null) {
+            throw new coding_exception('The key could not be replaced.');
+        }
+
+        return $replaced;
+    }
+
+    /**
+     * Whose key a generator record is about, and for which target.
+     *
+     * @param array $record targetid, secret, and userid or courseid.
+     * @return array The scope, the subject id and the target id.
+     */
+    protected function key_subject(array $record): array {
         if (empty($record['targetid']) || empty($record['secret'])) {
             throw new coding_exception('A key needs a targetid and a secret.');
         }
         if (!empty($record['courseid'])) {
-            $scope = key::SCOPE_COURSE;
-            $scopeid = (int) $record['courseid'];
-        } else if (!empty($record['userid'])) {
-            $scope = key::SCOPE_USER;
-            $scopeid = (int) $record['userid'];
-        } else {
-            throw new coding_exception('A key needs a userid or a courseid.');
+            return [key::SCOPE_COURSE, (int) $record['courseid'], (int) $record['targetid']];
+        }
+        if (!empty($record['userid'])) {
+            return [key::SCOPE_USER, (int) $record['userid'], (int) $record['targetid']];
         }
 
-        return (new key_repository($DB))->save($scope, $scopeid, (int) $record['targetid'], (string) $record['secret']);
+        throw new coding_exception('A key needs a userid or a courseid.');
     }
 }

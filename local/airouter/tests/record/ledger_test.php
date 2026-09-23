@@ -562,4 +562,39 @@ final class ledger_test extends \advanced_testcase {
 
         $this->assertEqualsWithDelta(3.0, $each[7]->get_amount('aiprovider_mock'), 0.000001);
     }
+
+    public function test_figures_read_before_a_correction_are_not_found_after_it_however_late_they_are_stored(): void {
+        // R9-03. The read was consistent: the generation did not move while it ran.
+        // Storing what it found came after the correction and the correction's purge,
+        // and the figure stored -- in dollars, known, under a limit written in yen --
+        // was found by the requests that came next. Figures are now filed under the
+        // generation they were read in and looked up under the one there is now.
+        global $DB;
+        $this->preventResetByRollback();
+        $this->spend(9.0);
+        $slow = new class ($DB, true) extends ledger {
+            /** @var \Closure|null What to do once, between reading and storing. */
+            public ?\Closure $pause = null;
+
+            #[\Override]
+            protected function read(array $filters, int $from, int $to): spend {
+                $spend = parent::read($filters, $from, $to);
+                if ($this->pause !== null) {
+                    $pause = $this->pause;
+                    $this->pause = null;
+                    $pause();
+                }
+
+                return $spend;
+            }
+        };
+        $slow->pause = fn() => $this->separately(fn($db) => (new price_book($db))->recost_provider('aiprovider_mock', 'JPY'));
+
+        $stale = $slow->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now);
+        $this->assertSame('USD', $stale->get_currency('aiprovider_mock'), 'The read was of the record before the correction.');
+
+        $held = (new ledger($DB, true))->get_spend(ledger::SCOPE_SITE, 0, ledger::PERIOD_ROLLING, 7, $this->now + 1);
+        $this->assertSame('JPY', $held->get_currency('aiprovider_mock'));
+        $this->assertTrue($held->is_known(ledger::METRIC_COST, 'aiprovider_mock'));
+    }
 }

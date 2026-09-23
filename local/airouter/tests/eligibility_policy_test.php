@@ -298,6 +298,36 @@ final class eligibility_policy_test extends \advanced_testcase {
         $this->assertFalse($this->policy->is_eligible((int) $user->id));
     }
 
+    public function test_an_answer_worked_out_before_the_policy_changed_is_not_found_after_it(): void {
+        // The same shape as R9-03, on this cache. The answer was worked out under the
+        // old policy, and stored after the new policy had been saved and the cache
+        // emptied; emptying it cannot stop that. Answers are filed under the version of
+        // the policy they were worked out under, and looked up under the one there is now.
+        $user = $this->getDataGenerator()->create_user();
+        $this->policy->save(eligibility_policy::ACCESS_EVERYBODY, []);
+        $slow = new class () extends eligibility_policy {
+            /** @var \Closure|null What to do once, between working the answer out and storing it. */
+            public ?\Closure $pause = null;
+
+            #[\Override]
+            public function evaluate(int $userid): bool {
+                $eligible = parent::evaluate($userid);
+                if ($this->pause !== null) {
+                    $pause = $this->pause;
+                    $this->pause = null;
+                    $pause();
+                }
+
+                return $eligible;
+            }
+        };
+        $slow->pause = fn() => (new eligibility_policy())->save(eligibility_policy::ACCESS_NOBODY, []);
+
+        $this->assertTrue($slow->is_eligible((int) $user->id), 'Worked out under the policy that was in force.');
+
+        $this->assertFalse((new eligibility_policy())->is_eligible((int) $user->id));
+    }
+
     public function test_a_condition_this_version_does_not_understand_is_reported_and_ignored(): void {
         $user = $this->getDataGenerator()->create_user();
         set_config(eligibility_policy::ACCESS_SETTING, eligibility_policy::ACCESS_CONDITIONS, 'local_airouter');

@@ -37,6 +37,12 @@ class behat_local_airouter_generator extends behat_generator_base {
                 'required' => ['target', 'secret'],
                 'switchids' => ['user' => 'userid', 'course' => 'courseid', 'target' => 'targetid'],
             ],
+            'key replacements' => [
+                'singular' => 'key replacement',
+                'datagenerator' => 'key_replacement',
+                'required' => ['target', 'secret', 'account'],
+                'switchids' => ['user' => 'userid', 'course' => 'courseid', 'target' => 'targetid'],
+            ],
         ];
     }
 

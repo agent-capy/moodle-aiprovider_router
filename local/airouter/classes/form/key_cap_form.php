@@ -41,6 +41,10 @@ class key_cap_form extends \moodleform {
 
         $mform->addElement('hidden', 'keyid');
         $mform->setType('keyid', PARAM_INT);
+        // The wallet of the key the limit is being set on, so that a limit meant for
+        // one account does not land on a key that has moved to another meanwhile.
+        $mform->addElement('hidden', 'walletid');
+        $mform->setType('walletid', PARAM_INT);
         $mform->addElement('hidden', 'action', 'cap');
         $mform->setType('action', PARAM_ALPHA);
         if (isset($this->_customdata['courseid'])) {

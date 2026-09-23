@@ -380,6 +380,13 @@ class ledger extends reader {
      * just rolled over a day, or a month that has just begun, is measured again at once
      * rather than waiting for the entry to expire.
      *
+     * The generation of the record is in the key too: figures are looked up under the
+     * generation the record is in now, and kept under the one they were read in. A
+     * correction or a summariser run moves it, and figures read before that are then
+     * never found again -- even figures put in the cache after the correction emptied
+     * it, by a read that had finished before the correction and was slow to store what
+     * it found. Emptying the cache alone cannot stop that.
+     *
      * @param array $filters Filters the reader understands.
      * @param string $subject What is being measured, for the cache key.
      * @param int $from The first moment counted.
@@ -392,8 +399,8 @@ class ledger extends reader {
         }
 
         $cache = \core_cache\cache::make('local_airouter', self::CACHE_AREA);
-        $cachekey = $subject . '_' . $from;
-        $held = $cache->get($cachekey);
+        $cachekey = $subject . '_' . $from . '_';
+        $held = $cache->get($cachekey . generation::get($this->db));
         if (is_array($held)) {
             $providers = [];
             foreach ($held['providers'] as $provider => $entry) {
@@ -404,7 +411,8 @@ class ledger extends reader {
         }
 
         $spend = $this->read($filters, $from, $to);
-        if (!$this->was_consistent()) {
+        $generation = $this->get_read_generation();
+        if ($generation === null) {
             // Read while the summary kept moving. Good enough to answer with once,
             // not good enough to hold for a minute.
             return $spend;
@@ -413,7 +421,7 @@ class ledger extends reader {
         foreach ($spend->providers as $provider => $entry) {
             $providers[$provider] = (array) $entry;
         }
-        $cache->set($cachekey, [
+        $cache->set($cachekey . $generation, [
             'requests' => $spend->requests,
             'calls' => $spend->calls,
             'providers' => $providers,
