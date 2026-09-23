@@ -233,7 +233,9 @@ class ledger extends reader {
     public function get_key_spend(key $key, string $period, int $length, int $now): spend {
         [$from, $to] = self::get_window($period, $length, $now);
 
-        return $this->remembered($this->filters_for_key($key), 'key_' . $key->get('id'), $from, $to);
+        // Held by wallet rather than by key: a key that has just been moved to a new
+        // wallet must not be answered for with the old wallet's figure.
+        return $this->remembered($this->filters_for_key($key), 'wallet_' . $key->get_wallet(), $from, $to);
     }
 
     /**
@@ -346,17 +348,25 @@ class ledger extends reader {
     /**
      * Which rows belong to one brought key.
      *
+     * The key's wallet, which is what the provider bills: a key rotated within one
+     * account goes on with its wallet, and a key for another account has a new one,
+     * as its owner said when they replaced it. The owner and target are not part of
+     * it, because a wallet is theirs already and is never anybody else's.
+     *
      * @param key $key The key.
      * @return array Filters the reader understands.
      */
     protected function filters_for_key(key $key): array {
-        $scope = (string) $key->get('scope');
-        $subject = $scope === key::SCOPE_COURSE ? 'courseid' : 'userid';
+        if ($key->get_wallet() <= 0) {
+            // A key is given its wallet when it is stored, and a key without one has
+            // not been through that. Measuring nothing would let it spend without
+            // limit; measuring by wallet zero would count the site's own spending.
+            throw new \coding_exception('A key without a wallet cannot be measured');
+        }
 
         return [
-            'keysource' => $scope,
-            $subject => (int) $key->get('scopeid'),
-            'targetid' => (int) $key->get('targetid'),
+            'keysource' => (string) $key->get('scope'),
+            'walletid' => $key->get_wallet(),
         ];
     }
 
@@ -419,11 +429,12 @@ class ledger extends reader {
         $courseid = $filters['courseid'] ?? null;
         $userid = $filters['userid'] ?? null;
         $targetid = $filters['targetid'] ?? null;
+        $walletid = $filters['walletid'] ?? null;
         $keysource = (string) $filters['keysource'];
         $fields = ['targetprovider'];
         [$summary, $detail] = $this->consistently(fn() => [
-            $this->summarised($fields, $from, $to, $courseid, $keysource, $userid, $targetid),
-            $this->detailed($fields, $from, $to, $courseid, $keysource, $userid, $targetid),
+            $this->summarised($fields, $from, $to, $courseid, $keysource, $userid, $targetid, $walletid),
+            $this->detailed($fields, $from, $to, $courseid, $keysource, $userid, $targetid, $walletid),
         ]);
         $rows = [];
         $this->collect($rows, $fields, $summary);

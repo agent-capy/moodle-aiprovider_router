@@ -14,9 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+use local_airouter\key;
+use local_airouter\key_repository;
 use local_airouter\record\attempt_state;
 use local_airouter\record\request_state;
 use local_airouter\record\usage_recorder;
+use local_airouter\target_settings;
 
 /**
  * Makes recorded requests and attempts for tests, without a provider being asked.
@@ -89,6 +92,7 @@ class local_airouter_generator extends component_generator_base {
             'model' => null,
             'keysource' => 'site',
             'keyid' => null,
+            'walletid' => 0,
             'state' => attempt_state::SUCCEEDED,
             'errorcode' => null,
             'prompttokens' => 10,
@@ -105,5 +109,43 @@ class local_airouter_generator extends component_generator_base {
         $DB->set_field(usage_recorder::REQUEST_TABLE, 'attempts', $seq, ['id' => $record['requestid']]);
 
         return $row;
+    }
+    /**
+     * Say which configuration field a target's key goes in, which lets it take one.
+     *
+     * @param array $record targetid and keyfield.
+     */
+    public function create_target_setting(array $record): void {
+        global $DB;
+
+        if (empty($record['targetid'])) {
+            throw new coding_exception('A target setting needs a targetid.');
+        }
+        (new target_settings($DB))->set_key_field((int) $record['targetid'], (string) ($record['keyfield'] ?? ''));
+    }
+
+    /**
+     * Register a key for a person or a course, as the key page would.
+     *
+     * @param array $record targetid, secret, and userid or courseid.
+     * @return key The key.
+     */
+    public function create_key(array $record): key {
+        global $DB;
+
+        if (empty($record['targetid']) || empty($record['secret'])) {
+            throw new coding_exception('A key needs a targetid and a secret.');
+        }
+        if (!empty($record['courseid'])) {
+            $scope = key::SCOPE_COURSE;
+            $scopeid = (int) $record['courseid'];
+        } else if (!empty($record['userid'])) {
+            $scope = key::SCOPE_USER;
+            $scopeid = (int) $record['userid'];
+        } else {
+            throw new coding_exception('A key needs a userid or a courseid.');
+        }
+
+        return (new key_repository($DB))->save($scope, $scopeid, (int) $record['targetid'], (string) $record['secret']);
     }
 }

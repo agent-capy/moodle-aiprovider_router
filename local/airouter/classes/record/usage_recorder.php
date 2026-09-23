@@ -127,6 +127,7 @@ class usage_recorder {
      * @param string $component The target's component, which is what it is priced by.
      * @param string $keysource Whose key it is being asked with.
      * @param int|null $keyid Which brought key, when one is used.
+     * @param int $walletid The wallet that key charges, or zero for the site's own key.
      * @return int|null The attempt id, or null when it could not be written.
      */
     public function begin_attempt(
@@ -136,6 +137,7 @@ class usage_recorder {
         string $component,
         string $keysource,
         ?int $keyid,
+        int $walletid = 0,
     ): ?int {
         if ($requestid === null) {
             return null;
@@ -163,6 +165,7 @@ class usage_recorder {
                     'targetprovider' => $component,
                     'keysource' => $keysource,
                     'keyid' => $keyid,
+                    'walletid' => $walletid,
                     'state' => attempt_state::STARTED,
                     'timestarted' => $this->now(),
                 ]);

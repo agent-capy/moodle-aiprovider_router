@@ -71,7 +71,8 @@ class summariser {
 
     /** @var string[] The columns that make a summary row's natural key. */
     public const KEY = [
-        'daystart', 'userid', 'courseid', 'actionname', 'targetprovider', 'targetid', 'model', 'keysource', 'currency',
+        'daystart', 'userid', 'courseid', 'actionname', 'targetprovider', 'targetid', 'model', 'keysource', 'walletid',
+        'currency',
     ];
 
     /** @var string[] The columns a fact can add to. */
@@ -195,7 +196,7 @@ class summariser {
         try {
             $requests = $this->db->get_records_sql(
                 'SELECT r.*, a.model AS answeredmodel, a.targetname AS answeredname,
-                        a.targetprovider AS answeredprovider
+                        a.targetprovider AS answeredprovider, a.walletid AS answeredwallet
                    FROM {' . usage_recorder::REQUEST_TABLE . '} r
               LEFT JOIN {' . usage_recorder::ATTEMPT_TABLE . '} a
                      ON a.requestid = r.id AND a.state = :succeeded
@@ -436,6 +437,7 @@ class summariser {
             'targetid' => (int) ($request->answeredby ?? 0),
             'model' => $request->answeredmodel ?? '-',
             'keysource' => $request->keysource,
+            'walletid' => (int) ($request->answeredwallet ?? 0),
             'currency' => '-',
         ], [
             'requests' => 1,
@@ -460,6 +462,7 @@ class summariser {
             'targetid' => (int) $attempt->targetid,
             'model' => $attempt->model ?? '-',
             'keysource' => $attempt->keysource,
+            'walletid' => (int) ($attempt->walletid ?? 0),
             'currency' => $costed ? ($attempt->currency ?? '-') : '-',
         ], [
             'calls' => 1,

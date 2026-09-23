@@ -154,6 +154,7 @@
         <FIELD NAME="scope" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="Whose key it is: user or course."/>
         <FIELD NAME="scopeid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The user id or the course id, according to the scope."/>
         <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance this key is for. Keys belong to an instance rather than to a provider plugin, because two instances of one plugin can point at different endpoints."/>
+        <FIELD NAME="walletid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The wallet this key's spending is counted against. A key rotated within the same provider account keeps its wallet; a key for another account gets a new one. The owner says which, because the key itself does not."/>
         <FIELD NAME="secret" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="The key, encrypted with core\encryption. Never logged, never exported and never shown again."/>
         <FIELD NAME="hint" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="The last few characters, so that the owner can recognise which key this is without anything being decrypted. Deliberately the end of the key: the beginning is often a fixed prefix. Declared without a default, because XMLDB refuses an empty string as one."/>
         <FIELD NAME="timeverified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the key was last tested against the provider. Zero means never."/>
@@ -168,9 +169,28 @@
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
         <KEY NAME="usermodified" TYPE="foreign" FIELDS="usermodified" REFTABLE="user" REFFIELDS="id"/>
+        <KEY NAME="walletid" TYPE="foreign" FIELDS="walletid" REFTABLE="local_airouter_wallet" REFFIELDS="id"/>
       </KEYS>
       <INDEXES>
         <INDEX NAME="scope-scopeid-targetid" UNIQUE="true" FIELDS="scope, scopeid, targetid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="local_airouter_wallet" COMMENT="What a brought key's spending is counted against. A provider bills an account, and the key is only the way in: rotating the key does not start a new bill, while a key for another account does. Nothing in a key says which, so the owner is asked, and the answer is kept here as which wallet a key belongs to. A wallet outlives its key, so that a key registered again after being removed can go on with the record it had.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="scope" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="Whose it is: user or course, as on the key."/>
+        <FIELD NAME="scopeid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance, as on the key. A wallet is for one account at one provider."/>
+        <FIELD NAME="keyhash" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="A keyed hash of the key this wallet holds, or held last. It is how the same key entered again is known to be the same, after the key itself has been removed. It cannot be turned back into the key. Empty for a wallet made for a key that was registered before wallets existed, until that key is replaced or removed. Declared without a default, because XMLDB refuses an empty string as one."/>
+        <FIELD NAME="hint" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="The last few characters of the key held last, so that the owner can be told which record they would be going on with. Declared without a default, because XMLDB refuses an empty string as one."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timereleased" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the key holding this wallet was removed or replaced by one for another account. Zero while a key holds it."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="scope-scopeid-targetid" UNIQUE="false" FIELDS="scope, scopeid, targetid"/>
       </INDEXES>
     </TABLE>
     <TABLE NAME="local_airouter_notice" COMMENT="What has already been said about a budget or a key limit, so that a daily task does not say it again every day. A row exists while a threshold is over; it is removed once the spending falls back under it, which is what makes a new month start the count again without anything having to know about months.">
@@ -237,6 +257,7 @@
         <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Whose key this attempt was made with."/>
         <FIELD NAME="keyid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Which brought key, when one was used. Never the key itself."/>
+        <FIELD NAME="walletid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The wallet the brought key charged, which is what a limit on the key is measured by. Zero when the site's own key paid."/>
         <FIELD NAME="state" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="started" SEQUENCE="false" COMMENT="started until the target comes back; then succeeded, empty, failed, threw, or lost when nothing ever came back."/>
         <FIELD NAME="errorcode" TYPE="int" LENGTH="4" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="prompttokens" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Null when the target did not say, which is not the same as none."/>
@@ -271,6 +292,7 @@
         <FIELD NAME="targetprovider" TYPE="char" LENGTH="60" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="The provider plugin behind the target. Part of the key, because money is added up by provider: a provider bills in one currency, and money is never added across providers. Kept here rather than looked up, since a target can be deleted. A dash for rows with no target. Shorter than the attempt table gives the same name, because a composed index has a length limit and no component name approaches sixty characters."/>
         <FIELD NAME="model" TYPE="char" LENGTH="100" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="The model that answered, or a dash where none did or none was named."/>
         <FIELD NAME="keysource" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="site" SEQUENCE="false" COMMENT="Who paid. Part of the key, so that what people spent out of their own pocket is never added into what the site spent."/>
+        <FIELD NAME="walletid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The wallet a brought key charged, carried from the attempt; for a request, the wallet of the attempt that answered. Part of the key, so that a limit on a key can be measured from the summary after the detail is gone. Zero when the site paid or nothing answered."/>
         <FIELD NAME="currency" TYPE="char" LENGTH="10" NOTNULL="true" DEFAULT="-" SEQUENCE="false" COMMENT="The currency the money on the row is in, which is the provider's. Part of the key so that unlike figures are never added. A dash for rows carrying no money."/>
         <FIELD NAME="requests" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Requests that ended that day, whatever the outcome."/>
         <FIELD NAME="failures" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Of those, the ones that did not succeed: declined or failed."/>
@@ -286,9 +308,10 @@
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
       </KEYS>
       <INDEXES>
-        <INDEX NAME="key" UNIQUE="true" FIELDS="daystart, userid, courseid, actionname, targetprovider, targetid, model, keysource, currency"/>
+        <INDEX NAME="key" UNIQUE="true" FIELDS="daystart, userid, courseid, actionname, targetprovider, targetid, model, keysource, walletid, currency"/>
         <INDEX NAME="userid-daystart" UNIQUE="false" FIELDS="userid, daystart"/>
         <INDEX NAME="courseid-daystart" UNIQUE="false" FIELDS="courseid, daystart"/>
+        <INDEX NAME="walletid-daystart" UNIQUE="false" FIELDS="walletid, daystart"/>
       </INDEXES>
     </TABLE>
   </TABLES>

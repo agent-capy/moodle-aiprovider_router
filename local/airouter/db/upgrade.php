@@ -236,5 +236,99 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092304, 'local', 'airouter');
     }
 
+    if ($oldversion < 2026092305) {
+        // A wallet is what a brought key's spending is counted against. A key rotated
+        // within one provider account keeps its wallet; a key for another account gets
+        // a new one; and a wallet outlives its key, so that the same key registered
+        // again can go on with the record it had.
+        $table = new xmldb_table('local_airouter_wallet');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('scope', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('scopeid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('targetid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('keyhash', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('hint', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('timereleased', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('scope-scopeid-targetid', XMLDB_INDEX_NOTUNIQUE, ['scope', 'scopeid', 'targetid']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        $table = new xmldb_table('local_airouter_key');
+        $field = new xmldb_field('walletid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'targetid');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+            $dbman->add_key($table, new xmldb_key('walletid', XMLDB_KEY_FOREIGN, ['walletid'], 'local_airouter_wallet', ['id']));
+        }
+        $table = new xmldb_table('local_airouter_attempt');
+        $field = new xmldb_field('walletid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'keyid');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+        $table = new xmldb_table('local_airouter_summary');
+        $field = new xmldb_field('walletid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'keysource');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Every key held now opens a wallet, and everything its owner spent at its
+        // target so far is that wallet's. Until now a key's spending was measured by
+        // owner and target, so this is the same measure carried over, not a new one.
+        // The hash of the key is left empty rather than decrypted here: it is filled
+        // in when the key is next replaced or removed, which is the first moment it
+        // could matter.
+        foreach ($DB->get_records('local_airouter_key', ['walletid' => 0], 'id ASC') as $key) {
+            $walletid = $DB->insert_record('local_airouter_wallet', (object) [
+                'scope' => $key->scope,
+                'scopeid' => $key->scopeid,
+                'targetid' => $key->targetid,
+                'keyhash' => '',
+                'hint' => $key->hint,
+                'timecreated' => $key->timecreated,
+                'timereleased' => 0,
+            ]);
+            $DB->set_field('local_airouter_key', 'walletid', $walletid, ['id' => $key->id]);
+            $DB->set_field('local_airouter_attempt', 'walletid', $walletid, ['keyid' => $key->id]);
+            $DB->set_field('local_airouter_summary', 'walletid', $walletid, [
+                'keysource' => $key->scope,
+                $key->scope === 'course' ? 'courseid' : 'userid' => $key->scopeid,
+                'targetid' => $key->targetid,
+            ]);
+        }
+
+        $index = new xmldb_index(
+            'key',
+            XMLDB_INDEX_UNIQUE,
+            ['daystart', 'userid', 'courseid', 'actionname', 'targetprovider', 'targetid', 'model', 'keysource', 'currency']
+        );
+        if ($dbman->index_exists($table, $index)) {
+            $dbman->drop_index($table, $index);
+        }
+        $index = new xmldb_index(
+            'key',
+            XMLDB_INDEX_UNIQUE,
+            [
+                'daystart', 'userid', 'courseid', 'actionname', 'targetprovider', 'targetid', 'model', 'keysource',
+                'walletid', 'currency',
+            ]
+        );
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+        $index = new xmldb_index('walletid-daystart', XMLDB_INDEX_NOTUNIQUE, ['walletid', 'daystart']);
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        // The secret the hashes are keyed with. One per site, made once.
+        if (empty(get_config('local_airouter', 'walletsecret'))) {
+            set_config('walletsecret', bin2hex(random_bytes(32)), 'local_airouter');
+        }
+
+        upgrade_plugin_savepoint(true, 2026092305, 'local', 'airouter');
+    }
+
     return true;
 }

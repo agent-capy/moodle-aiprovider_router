@@ -72,6 +72,13 @@ class key extends \core\persistent {
             'targetid' => [
                 'type' => PARAM_INT,
             ],
+            // What the key's spending is counted against. Set by the repository, which
+            // is the only thing that knows whether a key goes on with a wallet or
+            // opens one.
+            'walletid' => [
+                'type' => PARAM_INT,
+                'default' => 0,
+            ],
             'secret' => [
                 'type' => PARAM_RAW,
             ],
@@ -105,6 +112,18 @@ class key extends \core\persistent {
                 'default' => 30,
             ],
         ];
+    }
+
+    /**
+     * The wallet this key's spending is counted against.
+     *
+     * Not named after the property, because the persistent reserves that form for a
+     * protected accessor of its own.
+     *
+     * @return int The wallet id.
+     */
+    public function get_wallet(): int {
+        return (int) $this->get('walletid');
     }
 
     /**

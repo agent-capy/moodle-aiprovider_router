@@ -33,6 +33,7 @@ require_once(__DIR__ . '/lib.php');
 use local_airouter\eligibility_policy;
 use local_airouter\form\key_cap_form;
 use local_airouter\form\key_form;
+use local_airouter\form\key_wallet_form;
 use local_airouter\key;
 use local_airouter\key_formatter;
 use local_airouter\key_repository;
@@ -45,6 +46,7 @@ use local_airouter\target_settings;
 $courseid = optional_param('courseid', 0, PARAM_INT);
 $action = optional_param('action', '', PARAM_ALPHA);
 $keyid = optional_param('keyid', 0, PARAM_INT);
+$targetid = optional_param('targetid', 0, PARAM_INT);
 $confirm = optional_param('confirm', 0, PARAM_BOOL);
 
 if ($courseid > 0) {
@@ -95,8 +97,11 @@ foreach (\core\di::get(\core_ai\manager::class)->get_provider_instances() as $in
     $targets[(int) $instance->id] = $instance;
 }
 $names = array_map(fn($instance) => format_string($instance->name), $targets);
+$keys = $repository->get_all($scope, $scopeid);
 
-$form = new key_form($url, ['targets' => $names]);
+// Registering is for a provider that has no key yet. One that has is changed through
+// its own row, where the questions a change raises can be asked.
+$form = new key_form($url, ['targets' => array_diff_key($names, $keys)]);
 
 // Removing a key is not gated on the policy. The key is a secret its owner handed over,
 // and a site that tightens who may bring one must not thereby leave somebody holding a
@@ -176,18 +181,108 @@ if ($allowed && $action === 'cap') {
     ]);
 }
 
-if ($allowed && $data = $form->get_data()) {
-    if (isset($targets[(int) $data->targetid])) {
-        $repository->save($scope, $scopeid, (int) $data->targetid, (string) $data->secret);
+// Replacing a key that is held. The key does not say whether the new one is for the
+// same account, so its owner is asked, and asked whether the limit stays; the same
+// key entered again is recognised and not asked about.
+$walletform = null;
+$walletheading = '';
+$walletintro = '';
+if ($allowed && $action === 'replace') {
+    $current = $repository->get_for($keyid, $scope, $scopeid);
+    if ($current === null || !isset($targets[(int) $current->get('targetid')])) {
+        redirect($url);
     }
+    $currenttarget = (int) $current->get('targetid');
+    $walletform = new key_wallet_form($url, [
+        'mode' => key_wallet_form::MODE_REPLACE,
+        'keyid' => (int) $current->get('id'),
+        'courseid' => $courseid,
+        'target' => $names[$currenttarget],
+        'cap' => $current->has_cap() ? key_formatter::limit($current, $currencies[$currenttarget] ?? null) : null,
+        'issame' => fn(string $secret): bool => $repository->is_same_secret($current, $secret),
+    ]);
+    if ($walletform->is_cancelled()) {
+        redirect($url);
+    }
+    if ($walletdata = $walletform->get_data()) {
+        $repository->replace(
+            $current,
+            (string) $walletdata->secret,
+            key_wallet_form::read_sameaccount($walletdata),
+            key_wallet_form::read_keepcap($walletdata),
+        );
+        redirect($url, get_string('keys:replaced', 'local_airouter'), null, \core\output\notification::NOTIFY_SUCCESS);
+    }
+    $walletheading = get_string('keys:replace:heading', 'local_airouter', $names[$currenttarget]);
+    $hint = (string) $current->get('hint');
+    $walletintro = $hint === ''
+        ? get_string('keys:replace:intro:nohint', 'local_airouter')
+        : get_string('keys:replace:intro', 'local_airouter', s($hint));
+}
+
+// Registering a key where one was held before and removed. What the old key spent is
+// still on record, and whether this key goes on with it is, again, the owner's to say.
+if ($allowed && $action === 'register') {
+    $previous = isset($targets[$targetid]) && !isset($keys[$targetid])
+        ? $repository->get_previous_wallets($scope, $scopeid, $targetid)
+        : [];
+    if (!$previous) {
+        // Nothing to ask: the ordinary form does this.
+        redirect($url);
+    }
+    $walletform = new key_wallet_form($url, [
+        'mode' => key_wallet_form::MODE_REGISTER,
+        'targetid' => $targetid,
+        'courseid' => $courseid,
+        'target' => $names[$targetid],
+        'previous' => $previous,
+        'issame' => fn(string $secret): bool => $repository->is_known_secret($scope, $scopeid, $targetid, $secret),
+    ]);
+    if ($walletform->is_cancelled()) {
+        redirect($url);
+    }
+    if ($walletdata = $walletform->get_data()) {
+        $repository->save($scope, $scopeid, $targetid, (string) $walletdata->secret, key_wallet_form::read_wallet($walletdata));
+        redirect($url, get_string('keys:saved', 'local_airouter'), null, \core\output\notification::NOTIFY_SUCCESS);
+    }
+    $walletheading = get_string('keys:register:heading', 'local_airouter', $names[$targetid]);
+}
+
+if ($allowed && $data = $form->get_data()) {
+    $chosen = (int) $data->targetid;
+    if (!isset($targets[$chosen])) {
+        redirect($url);
+    }
+    if (isset($keys[$chosen])) {
+        // Registered meanwhile, on another screen. The key just typed is not kept:
+        // changing a held key raises questions this form did not ask.
+        redirect(
+            new moodle_url($url, ['action' => 'replace', 'keyid' => (int) $keys[$chosen]->get('id')]),
+            get_string('keys:replace:held', 'local_airouter'),
+            null,
+            \core\output\notification::NOTIFY_INFO,
+        );
+    }
+    if (
+        !$repository->is_known_secret($scope, $scopeid, $chosen, (string) $data->secret)
+        && $repository->get_previous_wallets($scope, $scopeid, $chosen)
+    ) {
+        // A key was held here before and this is not it. Whether it is for the same
+        // account is asked on a screen of its own, and the key is typed again there.
+        redirect(
+            new moodle_url($url, ['action' => 'register', 'targetid' => $chosen]),
+            get_string('keys:register:previous:held', 'local_airouter'),
+            null,
+            \core\output\notification::NOTIFY_INFO,
+        );
+    }
+    $repository->save($scope, $scopeid, $chosen, (string) $data->secret);
     redirect($url, get_string('keys:saved', 'local_airouter'), null, \core\output\notification::NOTIFY_SUCCESS);
 }
 
 echo $OUTPUT->header();
 echo $OUTPUT->heading($heading);
 echo $OUTPUT->box($intro);
-
-$keys = $repository->get_all($scope, $scopeid);
 
 if (!$allowed) {
     // Not an error. The site has simply not said this person may bring one. If they
@@ -211,6 +306,16 @@ if ($action === 'delete' && !$confirm) {
         new moodle_url($url, ['action' => 'delete', 'keyid' => $keyid, 'confirm' => 1, 'sesskey' => sesskey()]),
         $url,
     );
+    echo $OUTPUT->footer();
+    die;
+}
+
+if ($walletform !== null) {
+    echo $OUTPUT->heading($walletheading, 3);
+    if ($walletintro !== '') {
+        echo html_writer::div($walletintro, 'text-muted');
+    }
+    $walletform->display();
     echo $OUTPUT->footer();
     die;
 }
@@ -249,6 +354,10 @@ if (!$targets) {
 }
 
 echo $OUTPUT->heading(get_string('keys:add', 'local_airouter'), 3);
-$form->display();
+if (array_diff_key($names, $keys)) {
+    $form->display();
+} else {
+    echo html_writer::div(get_string('keys:add:allheld', 'local_airouter'), 'text-muted');
+}
 
 echo $OUTPUT->footer();

@@ -100,6 +100,7 @@ class provider implements
                 'targetname' => 'privacy:metadata:attempt:targetname',
                 'model' => 'privacy:metadata:attempt:model',
                 'keyid' => 'privacy:metadata:attempt:keyid',
+                'walletid' => 'privacy:metadata:attempt:walletid',
                 'state' => 'privacy:metadata:attempt:state',
                 'prompttokens' => 'privacy:metadata:attempt:prompttokens',
                 'completiontokens' => 'privacy:metadata:attempt:completiontokens',
@@ -118,6 +119,7 @@ class provider implements
                 'actionname' => 'privacy:metadata:summary:actionname',
                 'targetname' => 'privacy:metadata:summary:targetname',
                 'model' => 'privacy:metadata:summary:model',
+                'walletid' => 'privacy:metadata:summary:walletid',
                 'requests' => 'privacy:metadata:summary:requests',
                 'calls' => 'privacy:metadata:summary:calls',
                 'prompttokens' => 'privacy:metadata:summary:prompttokens',
@@ -157,6 +159,20 @@ class provider implements
                 'timecreated' => 'privacy:metadata:key:timecreated',
             ],
             'privacy:metadata:key',
+        );
+
+        $collection->add_database_table(
+            key_repository::WALLET_TABLE,
+            [
+                'scope' => 'privacy:metadata:wallet:scope',
+                'scopeid' => 'privacy:metadata:wallet:scopeid',
+                'targetid' => 'privacy:metadata:wallet:targetid',
+                'keyhash' => 'privacy:metadata:wallet:keyhash',
+                'hint' => 'privacy:metadata:wallet:hint',
+                'timecreated' => 'privacy:metadata:wallet:timecreated',
+                'timereleased' => 'privacy:metadata:wallet:timereleased',
+            ],
+            'privacy:metadata:wallet',
         );
 
         $collection->add_database_table(
@@ -218,11 +234,19 @@ class provider implements
             ['kind' => budget_notifier::KIND_USER, 'level' => CONTEXT_USER, 'userid' => $userid],
         );
 
-        // A person's own keys are theirs, and belong in their user context.
+        // A person's own keys are theirs, and belong in their user context. So do the
+        // wallets their keys had, which stay after a key is removed.
         $contextlist->add_from_sql(
             'SELECT ctx.id
                FROM {context} ctx
                JOIN {' . key::TABLE . '} k ON k.scopeid = ctx.instanceid AND k.scope = :scope
+              WHERE ctx.contextlevel = :level AND ctx.instanceid = :userid',
+            ['scope' => key::SCOPE_USER, 'level' => CONTEXT_USER, 'userid' => $userid],
+        );
+        $contextlist->add_from_sql(
+            'SELECT ctx.id
+               FROM {context} ctx
+               JOIN {' . key_repository::WALLET_TABLE . '} w ON w.scopeid = ctx.instanceid AND w.scope = :scope
               WHERE ctx.contextlevel = :level AND ctx.instanceid = :userid',
             ['scope' => key::SCOPE_USER, 'level' => CONTEXT_USER, 'userid' => $userid],
         );
@@ -262,6 +286,12 @@ class provider implements
             $userlist->add_from_sql(
                 'scopeid',
                 'SELECT scopeid FROM {' . key::TABLE . '} WHERE scope = :scope AND scopeid = :userid',
+                ['scope' => key::SCOPE_USER, 'userid' => $context->instanceid],
+            );
+            $userlist->add_from_sql(
+                'scopeid',
+                'SELECT DISTINCT scopeid FROM {' . key_repository::WALLET_TABLE . '}
+                  WHERE scope = :scope AND scopeid = :userid',
                 ['scope' => key::SCOPE_USER, 'userid' => $context->instanceid],
             );
             $userlist->add_from_sql(
@@ -309,8 +339,16 @@ class provider implements
         self::export_notices($contextlist, (int) $userid);
 
         foreach ($contextlist->get_contexts() as $context) {
+            $wallets = [];
             if ($context instanceof \context_user && (int) $context->instanceid === (int) $userid) {
                 $keys = $DB->get_records(key::TABLE, ['scope' => key::SCOPE_USER, 'scopeid' => $userid]);
+                // The record of keys they removed, which their keys' wallets keep.
+                $wallets = $DB->get_records_select(
+                    key_repository::WALLET_TABLE,
+                    'scope = :scope AND scopeid = :userid AND timereleased > 0',
+                    ['scope' => key::SCOPE_USER, 'userid' => $userid],
+                    'timereleased ASC, id ASC',
+                );
             } else if ($context instanceof \context_course) {
                 $keys = $DB->get_records(key::TABLE, [
                     'scope' => key::SCOPE_COURSE,
@@ -320,13 +358,16 @@ class provider implements
             } else {
                 continue;
             }
-            if (!$keys) {
+            if (!$keys && !$wallets) {
                 continue;
             }
 
             writer::with_context($context)->export_data(
                 [get_string('privacy:path:keys', 'local_airouter')],
-                (object) ['keys' => array_values(array_map(self::describe_key(...), $keys))],
+                (object) [
+                    'keys' => array_values(array_map(self::describe_key(...), $keys)),
+                    'removedkeys' => array_values(array_map(self::describe_wallet(...), $wallets)),
+                ],
             );
         }
     }
@@ -595,6 +636,24 @@ class provider implements
             'timemodified' => transform::datetime($record->timemodified),
             'lasttested' => $record->timeverified ? transform::datetime($record->timeverified) : null,
             'lastresult' => $record->verifystatus,
+        ];
+    }
+
+    /**
+     * What is said about a key that was removed, which is what its wallet remembers.
+     *
+     * The hash the wallet keeps is left out. It reveals nothing on its own, but it is
+     * about the key, and nothing about the key is exported.
+     *
+     * @param \stdClass $record The wallet record.
+     * @return \stdClass The exportable description.
+     */
+    protected static function describe_wallet(\stdClass $record): \stdClass {
+        return (object) [
+            'target' => $record->targetid,
+            'endsWith' => $record->hint,
+            'timecreated' => transform::datetime($record->timecreated),
+            'timeremoved' => transform::datetime($record->timereleased),
         ];
     }
 

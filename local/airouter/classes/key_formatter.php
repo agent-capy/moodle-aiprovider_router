@@ -93,15 +93,7 @@ class key_formatter {
             return \html_writer::span(get_string('keys:cap:none', 'local_airouter'), 'text-muted');
         }
 
-        $limit = format_float($key->get_cap_amount(), 2, true) . ($currency === null ? '' : ' ' . $currency);
-        $period = $key->get_cap_period() === ledger::PERIOD_MONTH
-            ? get_string('keys:cap:month', 'local_airouter')
-            : get_string('keys:cap:rolling:days', 'local_airouter', $key->get_cap_days());
-        $output = \html_writer::div(get_string(
-            'keys:cap:limit',
-            'local_airouter',
-            ['amount' => $limit, 'period' => $period],
-        ));
+        $output = \html_writer::div(self::limit($key, $currency));
 
         if ($ledger === null) {
             return $output;
@@ -154,6 +146,23 @@ class key_formatter {
     }
 
     /**
+     * The limit the owner set, as a sentence.
+     *
+     * @param key $key The key, which has a limit.
+     * @param string|null $currency The currency the limit is in, or null where the
+     *                              provider has no rates yet and so no currency.
+     * @return string Plain text.
+     */
+    public static function limit(key $key, ?string $currency): string {
+        $limit = format_float($key->get_cap_amount(), 2, true) . ($currency === null ? '' : ' ' . $currency);
+        $period = $key->get_cap_period() === ledger::PERIOD_MONTH
+            ? get_string('keys:cap:month', 'local_airouter')
+            : get_string('keys:cap:rolling:days', 'local_airouter', $key->get_cap_days());
+
+        return get_string('keys:cap:limit', 'local_airouter', ['amount' => $limit, 'period' => $period]);
+    }
+
+    /**
      * The only part of a key anybody is ever shown again.
      *
      * @param key $key The key.
@@ -195,8 +204,7 @@ class key_formatter {
     /**
      * What can be done with a key once it is stored.
      *
-     * Replacing one is done by registering it again for the same provider, so what is
-     * left is testing it, setting a limit on it, and removing it.
+     * Replacing it, testing it, setting a limit on it, and removing it.
      *
      * @param \moodle_url $url The page the actions return to.
      * @param key $key The key.
@@ -210,9 +218,12 @@ class key_formatter {
         $id = (int) $key->get('id');
         $links = [];
         if ($mayuse) {
-            // Testing a key spends money on it and capping it says how much more it
-            // may spend. Neither makes sense for somebody the site no longer allows
-            // to bring one.
+            // Replacing a key, testing it and capping it all mean going on using it.
+            // None makes sense for somebody the site no longer allows to bring one.
+            $links[] = \html_writer::link(
+                new \moodle_url($url, ['action' => 'replace', 'keyid' => $id]),
+                get_string('keys:replace', 'local_airouter'),
+            );
             $links[] = \html_writer::link(
                 new \moodle_url($url, ['action' => 'test', 'keyid' => $id, 'sesskey' => sesskey()]),
                 get_string('keys:test', 'local_airouter'),

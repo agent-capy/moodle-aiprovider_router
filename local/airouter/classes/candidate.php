@@ -65,4 +65,13 @@ class candidate {
     public function get_keyid(): ?int {
         return $this->key === null ? null : (int) $this->key->get('id');
     }
+
+    /**
+     * Which wallet paid, which is what a limit on the key is measured by.
+     *
+     * @return int The wallet id, or zero when the site's own key paid.
+     */
+    public function get_wallet(): int {
+        return $this->key === null ? 0 : $this->key->get_wallet();
+    }
 }

@@ -859,12 +859,44 @@ reach it at all.
 
 The key, encrypted with `\core\encryption`, and its last few characters in readable form
 so that its owner can tell their keys apart. Nothing shows a key again, to anybody, and
-nothing exports one. Registering a key for the same provider replaces it.
+nothing exports one. A key that is registered is changed through *Replace* beside it,
+which is described next.
+
+Beside the key's spending record is a keyed, one-way hash of the key, so that the same
+key can be recognised if it is entered again after being removed. The hash is made with
+a secret of the site's and cannot be turned back into the key.
 
 The encryption key lives in a file under the site data directory, not in the database.
 **A site restored from a database backup without that file keeps every key and can read
 none of them**, which the site status report says as an error rather than leaving it to be
 discovered one failed request at a time.
+
+### Replacing a key
+
+A key that is registered is changed through **Replace** beside it in the table, not by
+registering another for the same provider. Replacing raises a question the key itself
+cannot answer: is the new key for the same provider account as the old one? A key renewed
+at the provider is; a key from another account, or one somebody else pays for, is not.
+The page asks, with nothing chosen in advance.
+
+| Answer | What happens |
+| --- | --- |
+| The same account | What is counted against the key's limit goes on from where it is. The provider is billing the same account, and the limit is about that bill. |
+| Another account | Counting starts from nothing. What the old key spent is not counted against the new one. |
+
+Where the key carries a limit, the page also asks whether the limit stays. Entering the
+same key again is recognised, and nothing is asked.
+
+Removing a key does not remove what it spent. Register the same key again and the count
+goes on from where it was; register another key and the page asks whether it is for the
+account that was here before, offering the record of each key that was removed, or a
+fresh start.
+
+Behind this is a record the plugin calls a wallet: what a key's spending is counted
+against. Every key has one. A key rotated within an account keeps its wallet, a key for
+another account gets a new one, and a wallet outlives its key. A wallet keeps a keyed,
+one-way hash of the key it holds, which is how the same key is recognised after the key
+itself has gone, and which cannot be turned back into the key.
 
 ### What happens when a brought key is used
 
@@ -904,9 +936,10 @@ has no currency and nothing can be measured against it, and the key goes on bein
 
 Two things behave the way they do on purpose.
 
-**Replacing a key does not start the period again.** The spending is counted by who
-brought the key and what it is for, not by the row in the database, because the provider
-carries on billing the same account either way.
+**Replacing a key asks whether the period goes on.** The spending is counted by the
+account the provider bills, not by the row in the database, and only the owner knows
+whether a new key is for the same account, so the page asks rather than assuming (see
+*Replacing a key* above).
 
 **A limit nobody can measure does not stop anything.** Spending is estimated from the
 rates the site has entered, so a site that has entered none measures nothing; a budget

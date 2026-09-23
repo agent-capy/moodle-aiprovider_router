@@ -105,7 +105,7 @@ final class budget_notifier_test extends \advanced_testcase {
      * Record one request the site paid for, as the request and attempt records hold it.
      *
      * @param float|null $cost What it cost, or null when no rate covered it.
-     * @param array $fields Anything else to record: userid, courseid, keysource, targetid.
+     * @param array $fields Anything else to record: userid, courseid, keysource, targetid, keyid, walletid.
      */
     protected function spent(?float $cost, array $fields = []): void {
         $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
@@ -127,6 +127,7 @@ final class budget_notifier_test extends \advanced_testcase {
             'model' => 'gpt-4o',
             'keysource' => $keysource,
             'keyid' => $fields['keyid'] ?? null,
+            'walletid' => $fields['walletid'] ?? 0,
             'prompttokens' => 100,
             'completiontokens' => 50,
             'cost' => $cost,
@@ -322,6 +323,8 @@ final class budget_notifier_test extends \advanced_testcase {
             'userid' => (int) $user->id,
             'targetid' => 4,
             'keysource' => rule::KEYSOURCE_USER,
+            'keyid' => (int) $saved->get('id'),
+            'walletid' => $saved->get_wallet(),
         ]);
         set_config(budget_notifier::SHARE_SETTING, 0, 'local_airouter');
 
@@ -541,6 +544,7 @@ final class budget_notifier_test extends \advanced_testcase {
             'userid' => (int) $owner->id,
             'keysource' => rule::KEYSOURCE_USER,
             'keyid' => (int) $key->get('id'),
+            'walletid' => $key->get_wallet(),
             'targetid' => 3,
             'timecreated' => make_timestamp(2026, 1, 15, 12, 0, 0),
         ]);
@@ -551,6 +555,7 @@ final class budget_notifier_test extends \advanced_testcase {
             'userid' => (int) $owner->id,
             'keysource' => rule::KEYSOURCE_USER,
             'keyid' => (int) $key->get('id'),
+            'walletid' => $key->get_wallet(),
             'targetid' => 3,
             'timecreated' => make_timestamp(2026, 2, 15, 12, 0, 0),
         ]);
@@ -579,6 +584,7 @@ final class budget_notifier_test extends \advanced_testcase {
                 'userid' => (int) $owner->id,
                 'keysource' => rule::KEYSOURCE_USER,
                 'keyid' => (int) $key->get('id'),
+                'walletid' => $key->get_wallet(),
                 'targetid' => $targetid,
             ]);
         }

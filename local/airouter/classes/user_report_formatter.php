@@ -189,7 +189,7 @@ class user_report_formatter {
      * Who holds a brought key, and what it has been used for.
      *
      * @param \stdClass[] $holders Rows from the report.
-     * @param \stdClass[] $usage Usage keyed by key id.
+     * @param \stdClass[] $usage Usage keyed by wallet id, which each holder carries.
      * @param string[] $names User names keyed by id.
      * @param string[] $courses Course names keyed by id.
      * @param string[] $targets Target names keyed by id.
@@ -214,7 +214,7 @@ class user_report_formatter {
         $table->attributes['class'] = 'admintable generaltable';
 
         foreach ($holders as $holder) {
-            $used = $usage[(int) $holder->id] ?? null;
+            $used = $usage[(int) $holder->walletid] ?? null;
             $table->data[] = [
                 self::holder($holder, $names, $courses),
                 $targets[(int) $holder->targetid]

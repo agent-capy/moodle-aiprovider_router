@@ -458,6 +458,7 @@ class reader {
      * @param string|null $keysource Limit to one payer, or null for all.
      * @param int|null $userid Limit to one person, or null for everybody.
      * @param int|null $targetid Limit to one delegation target, or null for all.
+     * @param int|null $walletid Limit to what one wallet paid for, or null for all.
      * @return \stdClass[] Normalised rows carrying the group fields and the metrics.
      */
     protected function summarised(
@@ -468,6 +469,7 @@ class reader {
         ?string $keysource,
         ?int $userid = null,
         ?int $targetid = null,
+        ?int $walletid = null,
     ): array {
         $where = 'daystart >= :from AND daystart < :to';
         $params = ['from' => $from, 'to' => $to];
@@ -486,6 +488,10 @@ class reader {
         if ($targetid !== null) {
             $where .= ' AND targetid = :targetid';
             $params['targetid'] = $targetid;
+        }
+        if ($walletid !== null) {
+            $where .= ' AND walletid = :walletid';
+            $params['walletid'] = $walletid;
         }
         // The provider and its currency have to be part of every grouping: money is
         // one figure per provider, and a row that mixed two could not be read.
@@ -536,6 +542,9 @@ class reader {
      * @param int|null $userid Limit to one person, or null for everybody.
      * @param int|null $targetid Limit to one delegation target, or null for all. A
      *                           request counts as that target's when it answered.
+     * @param int|null $walletid Limit to what one wallet paid for, or null for all. A
+     *                           request counts as a wallet's when a call it paid for
+     *                           answered, as in the summary.
      * @return \stdClass[] Normalised rows carrying the group fields and the metrics.
      */
     protected function detailed(
@@ -546,6 +555,7 @@ class reader {
         ?string $keysource,
         ?int $userid = null,
         ?int $targetid = null,
+        ?int $walletid = null,
     ): array {
         $params = ['from' => $from, 'to' => $to];
         $rwhere = 'r.applied = 0 AND r.state <> :open AND r.timeended >= :from AND r.timeended < :to';
@@ -554,6 +564,11 @@ class reader {
             $rwhere .= ' AND r.answeredby = :targetid';
             $awhere .= ' AND a.targetid = :targetid';
             $params['targetid'] = $targetid;
+        }
+        if ($walletid !== null) {
+            $rwhere .= ' AND s.walletid = :walletid';
+            $awhere .= ' AND a.walletid = :walletid';
+            $params['walletid'] = $walletid;
         }
         if ($courseid !== null) {
             $rwhere .= ' AND r.courseid = :courseid';
@@ -575,7 +590,7 @@ class reader {
         // A request sits with the target and model that answered it, as in the summary.
         $requests = $this->db->get_records_sql(
             'SELECT r.id, r.userid, r.courseid, r.actionname, r.keysource, r.state, r.timeended,
-                    r.answeredby AS targetid, s.targetname, s.targetprovider, s.model
+                    r.answeredby AS targetid, s.targetname, s.targetprovider, s.model, s.walletid
                FROM {' . usage_recorder::REQUEST_TABLE . '} r
           LEFT JOIN {' . usage_recorder::ATTEMPT_TABLE . '} s ON s.requestid = r.id AND s.state = :succeeded
               WHERE ' . $rwhere,
@@ -594,6 +609,7 @@ class reader {
                 'targetprovider' => $request->targetprovider ?? '-',
                 'model' => $request->model,
                 'keysource' => $request->keysource,
+                'walletid' => (int) ($request->walletid ?? 0),
                 'currency' => '-',
                 'requests' => 1,
                 'failures' => $request->state === request_state::SUCCEEDED ? 0 : 1,
@@ -603,7 +619,8 @@ class reader {
         }
         $attempts = $this->db->get_records_sql(
             'SELECT a.id, r.userid, r.courseid, r.actionname, a.targetid, a.targetname, a.targetprovider, a.model,
-                    a.keysource, a.currency, a.usageknown, a.prompttokens, a.completiontokens, a.cost, a.timeended
+                    a.keysource, a.walletid, a.currency, a.usageknown, a.prompttokens, a.completiontokens, a.cost,
+                    a.timeended
                FROM {' . usage_recorder::ATTEMPT_TABLE . '} a
                JOIN {' . usage_recorder::REQUEST_TABLE . '} r ON r.id = a.requestid
               WHERE ' . $awhere,
@@ -623,6 +640,7 @@ class reader {
                 'targetprovider' => $attempt->targetprovider ?? '-',
                 'model' => $attempt->model,
                 'keysource' => $attempt->keysource,
+                'walletid' => (int) ($attempt->walletid ?? 0),
                 'currency' => $attempt->cost === null ? '-' : ($attempt->currency ?? '-'),
                 'requests' => 0, 'failures' => 0,
                 'calls' => 1,

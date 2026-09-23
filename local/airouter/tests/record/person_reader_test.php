@@ -50,7 +50,7 @@ final class person_reader_test extends \advanced_testcase {
      * @param int $userid Who asked.
      * @param int $ended When it ended.
      * @param string $keysource Whose key.
-     * @param int|null $keyid Which key, for a brought one.
+     * @param int|null $keyid Which key, for a brought one. Its wallet is numbered the same.
      * @return \stdClass The request.
      */
     private function request(int $userid, int $ended, string $keysource = 'site', ?int $keyid = null): \stdClass {
@@ -60,13 +60,13 @@ final class person_reader_test extends \advanced_testcase {
         ]);
         $this->generator->create_attempt([
             'requestid' => $request->id, 'targetid' => 1, 'targetname' => 'One', 'model' => 'm1',
-            'state' => attempt_state::FAILED, 'keysource' => $keysource, 'keyid' => $keyid,
+            'state' => attempt_state::FAILED, 'keysource' => $keysource, 'keyid' => $keyid, 'walletid' => $keyid ?? 0,
             'prompttokens' => 100, 'completiontokens' => 0, 'cost' => 0.001, 'currency' => 'USD',
             'timestarted' => $ended - 8, 'timeended' => $ended - 5,
         ]);
         $this->generator->create_attempt([
             'requestid' => $request->id, 'targetid' => 2, 'targetname' => 'Two', 'model' => 'm2',
-            'keysource' => $keysource, 'keyid' => $keyid,
+            'keysource' => $keysource, 'keyid' => $keyid, 'walletid' => $keyid ?? 0,
             'prompttokens' => 100, 'completiontokens' => 50, 'cost' => 0.003, 'currency' => 'USD',
             'timestarted' => $ended - 4, 'timeended' => $ended,
         ]);
@@ -172,18 +172,25 @@ final class person_reader_test extends \advanced_testcase {
         $this->assertNull($row->cost);
     }
 
-    public function test_what_each_brought_key_was_used_for(): void {
+    public function test_what_each_brought_key_was_used_for_by_wallet_before_and_after_the_summary(): void {
+        global $DB;
         $this->request(5, $this->now - DAYSECS, 'user', 9);
         $this->request(5, $this->now, 'user', 9);
         $this->request(6, $this->now, 'course', 12);
         $this->request(7, $this->now);
         [$from, $to] = $this->week();
 
-        $usage = $this->reader->get_key_usage($from, $to);
-        $this->assertSame([9, 12], array_map('intval', array_keys($usage)));
-        $this->assertSame(2, (int) $usage[9]->requests);
-        $this->assertEqualsWithDelta(0.008, (float) $usage[9]->cost, 0.000001);
-        $this->assertSame(1, (int) $usage[12]->requests);
+        $before = $this->reader->get_key_usage($from, $to);
+        $this->assertSame([9, 12], array_map('intval', array_keys($before)));
+        $this->assertSame(2, (int) $before[9]->requests);
+        // Every call the wallet paid for, the failed ones included, and their money.
+        $this->assertSame(4, (int) $before[9]->calls);
+        $this->assertEqualsWithDelta(0.008, (float) $before[9]->cost, 0.000001);
+        $this->assertSame('USD', $before[9]->currency);
+        $this->assertSame(1, (int) $before[12]->requests);
+
+        (new summariser($DB))->run($this->now);
+        $this->assertEquals($before, $this->reader->get_key_usage($from, $to), 'Applying moves nothing.');
     }
 
     public function test_the_key_holders_carry_nothing_of_the_key_itself(): void {

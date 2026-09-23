@@ -264,6 +264,7 @@ abstract class abstract_processor extends \core_ai\process_base {
                 self::component_of($target),
                 $candidate->keysource,
                 $candidate->get_keyid(),
+                $candidate->get_wallet(),
             );
             try {
                 $response = $delegator->delegate($target, $this->action);

@@ -317,6 +317,9 @@ final class recording_test extends \advanced_testcase {
         $this->assertSame([rule::KEYSOURCE_USER, rule::KEYSOURCE_USER], array_column($attempts, 'keysource'));
         $this->assertSame((int) $first->get('id'), (int) $attempts[0]->keyid);
         $this->assertSame((int) $second->get('id'), (int) $attempts[1]->keyid);
+        // And the wallet each key charges, which is what a limit on it is measured by.
+        $this->assertSame($first->get_wallet(), (int) $attempts[0]->walletid);
+        $this->assertSame($second->get_wallet(), (int) $attempts[1]->walletid);
         // And nothing here was charged to the site.
         $this->assertNotContains(rule::KEYSOURCE_SITE, array_column($attempts, 'keysource'));
     }

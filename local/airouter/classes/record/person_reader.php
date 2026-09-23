@@ -196,56 +196,51 @@ class person_reader extends reader {
             key::TABLE,
             null,
             'scope ASC, scopeid ASC, targetid ASC',
-            'id, scope, scopeid, targetid, timecreated, timeverified, verifystatus',
+            'id, scope, scopeid, targetid, walletid, timecreated, timeverified, verifystatus',
         ));
     }
 
     /**
-     * What each brought key was used for in the period.
+     * What each brought key was used for in the period, by wallet.
      *
-     * A request that tried two of somebody's keys is one request at each, because
-     * each was asked; the money is what each was charged. A key goes to one target
-     * and so to one provider, so its money is normally one entry, but it is added
-     * up by provider here as everywhere else.
+     * By wallet rather than by key, because that is what the key's owner is paying
+     * for: a key rotated within one account goes on with its wallet, and the figure
+     * here goes on with it. Read the way every report reads, from the summary for
+     * what has been counted and the detail for what has not, so the figure outlives
+     * the detail. A request is a wallet's when a call it paid for answered; the calls
+     * and the money are every call it paid for, answered or not.
      *
      * @param int $from The start of the period.
      * @param int $to The end of the period.
-     * @return \stdClass[] Rows of keyid, requests, costs, cost and currency, keyed by key id.
+     * @return \stdClass[] Rows of walletid, requests, calls, costs, cost and currency,
+     *                     keyed by wallet id.
      */
     public function get_key_usage(int $from, int $to): array {
-        $where = 'keyid IS NOT NULL AND timeended IS NOT NULL AND timeended >= :from AND timeended < :to';
-        $params = ['from' => $from, 'to' => $to];
-        $usage = $this->db->get_records_sql(
-            'SELECT keyid, COUNT(DISTINCT requestid) AS requests
-               FROM {' . usage_recorder::ATTEMPT_TABLE . '}
-              WHERE ' . $where . '
-           GROUP BY keyid',
-            $params,
-        );
-        foreach ($usage as $row) {
-            $row->requests = (int) $row->requests;
-            $row->costs = [];
-        }
-        // A recordset, because the first column of a grouped query is not unique.
-        $money = $this->db->get_recordset_sql(
-            'SELECT keyid, targetprovider, currency, SUM(cost) AS cost
-               FROM {' . usage_recorder::ATTEMPT_TABLE . '}
-              WHERE ' . $where . ' AND cost IS NOT NULL
-           GROUP BY keyid, targetprovider, currency',
-            $params,
-        );
-        foreach ($money as $row) {
-            if (isset($usage[$row->keyid])) {
-                $usage[$row->keyid]->costs = self::add_costs(
-                    $usage[$row->keyid]->costs,
-                    self::money((string) ($row->targetprovider ?? '-'), (string) ($row->currency ?? '-'), (float) $row->cost),
-                );
+        $fields = ['walletid'];
+        [$summary, $detail] = $this->consistently(fn() => [
+            $this->summarised($fields, $from, $to, null, null),
+            $this->detailed($fields, $from, $to, null, null),
+        ]);
+        $rows = [];
+        $this->collect($rows, $fields, $summary);
+        $this->collect($rows, $fields, $detail);
+
+        $usage = [];
+        foreach ($rows as $row) {
+            $walletid = (int) $row->walletid;
+            if ($walletid <= 0) {
+                // The site's own key, which is not anybody's brought key.
+                continue;
             }
+            $usage[$walletid] = (object) [
+                'walletid' => $walletid,
+                'requests' => (int) $row->requests,
+                'calls' => (int) $row->calls,
+                'costs' => $row->costs,
+            ];
+            self::settle($usage[$walletid]);
         }
-        $money->close();
-        foreach ($usage as $row) {
-            self::settle($row);
-        }
+        ksort($usage);
 
         return $usage;
     }

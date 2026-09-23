@@ -46,6 +46,7 @@ final class key_formatter_test extends \advanced_testcase {
     public function test_somebody_who_may_still_bring_one_is_offered_everything(): void {
         $actions = key_formatter::actions(new \moodle_url('/local/airouter/keys.php'), $this->key);
 
+        $this->assertStringContainsString('action=replace', $actions);
         $this->assertStringContainsString('action=test', $actions);
         $this->assertStringContainsString('action=cap', $actions);
         $this->assertStringContainsString('action=delete', $actions);
@@ -58,8 +59,9 @@ final class key_formatter_test extends \advanced_testcase {
             false,
         );
 
-        // Testing spends money on the key and capping says how much more it may spend.
-        // Neither means anything for a key that will not be used again.
+        // Replacing, testing and capping a key all mean going on using it, and none
+        // means anything for a key that will not be used again.
+        $this->assertStringNotContainsString('action=replace', $actions);
         $this->assertStringNotContainsString('action=test', $actions);
         $this->assertStringNotContainsString('action=cap', $actions);
         // Taking it back does.
@@ -148,6 +150,7 @@ final class key_formatter_test extends \advanced_testcase {
             'model' => 'gpt-4o',
             'keysource' => 'user',
             'keyid' => (int) $this->key->get('id'),
+            'walletid' => $this->key->get_wallet(),
             'prompttokens' => 100,
             'completiontokens' => 50,
             'cost' => $cost,

@@ -74,7 +74,8 @@ final class ledger_test extends \advanced_testcase {
      * A finished request with one call, as the records hold it.
      *
      * @param float|null $cost What the call cost, or null when no rate covered it.
-     * @param array $fields Anything else: userid, courseid, keysource, keyid, targetid, targetprovider, currency, ended.
+     * @param array $fields Anything else: userid, courseid, keysource, keyid, walletid, targetid, targetprovider,
+     *                      currency, ended.
      * @return \stdClass The request.
      */
     private function spend(?float $cost, array $fields = []): \stdClass {
@@ -95,6 +96,7 @@ final class ledger_test extends \advanced_testcase {
             'targetprovider' => $fields['targetprovider'] ?? 'aiprovider_mock',
             'keysource' => $keysource,
             'keyid' => $fields['keyid'] ?? null,
+            'walletid' => $fields['walletid'] ?? 0,
             'cost' => $cost,
             'currency' => $cost === null ? null : ($fields['currency'] ?? 'USD'),
             'timestarted' => $ended - 4,
@@ -297,33 +299,101 @@ final class ledger_test extends \advanced_testcase {
         );
     }
 
-    public function test_a_keys_spending_follows_its_owner_and_its_target_and_not_the_key_id(): void {
+    /**
+     * Something spent on a key, charged to the key's wallet.
+     *
+     * @param float $cost What it cost.
+     * @param key $key The key.
+     * @param array $fields Anything else, as for spend().
+     */
+    private function spend_on(float $cost, key $key, array $fields = []): void {
+        $this->spend($cost, $fields + [
+            'keysource' => (string) $key->get('scope'),
+            'keyid' => (int) $key->get('id'),
+            'walletid' => $key->get_wallet(),
+            'targetid' => (int) $key->get('targetid'),
+        ]);
+    }
+
+    public function test_a_keys_spending_follows_its_wallet_through_a_renewal_within_the_account(): void {
         global $DB;
         $repository = new key_repository($DB);
         $first = $repository->save(key::SCOPE_USER, 5, 3, 'sk-first');
-        $this->spend(4.0, ['keysource' => rule::KEYSOURCE_USER, 'keyid' => (int) $first->get('id'), 'targetid' => 3]);
-        // Replaced halfway through the period. The provider carries on billing the
-        // same account, so the limit carries on counting.
-        $second = $repository->save(key::SCOPE_USER, 5, 3, 'sk-second');
-        $this->spend(5.0, ['keysource' => rule::KEYSOURCE_USER, 'keyid' => (int) $second->get('id'), 'targetid' => 3]);
+        $wallet = $first->get_wallet();
+        $this->spend_on(4.0, $first);
+        // Renewed at the provider halfway through the period: the same account, as
+        // its owner said, so the same wallet and the limit goes on counting.
+        $second = $repository->replace($first, 'sk-second', true);
+        $this->spend_on(5.0, $second);
         // Somebody else's key at the same target, and this person's at another.
-        $this->spend(100.0, ['keysource' => rule::KEYSOURCE_USER, 'userid' => 6, 'targetid' => 3]);
-        $this->spend(100.0, ['keysource' => rule::KEYSOURCE_USER, 'targetid' => 4]);
+        $this->spend(100.0, ['keysource' => rule::KEYSOURCE_USER, 'userid' => 6, 'targetid' => 3, 'walletid' => 98]);
+        $this->spend(100.0, ['keysource' => rule::KEYSOURCE_USER, 'targetid' => 4, 'walletid' => 99]);
         [$from, $to] = $this->week();
 
         $spend = $this->ledger->measure_key($second, $from, $to);
 
+        $this->assertSame($wallet, $second->get_wallet());
         $this->assertEqualsWithDelta(9.0, $spend->get_amount('aiprovider_mock'), 0.000001);
         $this->assertSame('aiprovider_mock', $spend->sole_provider());
         $this->assertTrue($spend->has_reached(9.0, ledger::METRIC_COST, $spend->sole_provider()));
     }
 
-    public function test_a_course_key_is_measured_by_its_course(): void {
+    public function test_a_key_for_another_account_starts_counting_from_nothing(): void {
+        global $DB;
+        $repository = new key_repository($DB);
+        $first = $repository->save(key::SCOPE_USER, 5, 3, 'sk-first');
+        $wallet = $first->get_wallet();
+        $this->spend_on(4.0, $first);
+        // Another account, as its owner said. What the old key spent is not this
+        // key's to count, though it is the same person at the same target.
+        $second = $repository->replace($first, 'sk-second', false);
+        $this->spend_on(5.0, $second);
+        [$from, $to] = $this->week();
+
+        $spend = $this->ledger->measure_key($second, $from, $to);
+
+        $this->assertNotSame($wallet, $second->get_wallet());
+        $this->assertEqualsWithDelta(5.0, $spend->get_amount('aiprovider_mock'), 0.000001);
+    }
+
+    public function test_a_keys_spending_is_read_from_the_summary_once_its_day_is_over(): void {
+        global $DB;
+        $repository = new key_repository($DB);
+        $key = $repository->save(key::SCOPE_USER, 5, 3, 'sk-mine');
+        $this->spend_on(4.0, $key, ['ended' => $this->now - DAYSECS]);
+        $this->spend(100.0, [
+            'keysource' => rule::KEYSOURCE_USER, 'targetid' => 3, 'walletid' => 98, 'ended' => $this->now - DAYSECS,
+        ]);
+        (new summariser($DB))->run($this->now);
+        $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE, ['applied' => 0]), 'Everything is in the summary.');
+        [$from, $to] = $this->week();
+
+        $spend = $this->ledger->measure_key($key, $from, $to);
+
+        $this->assertEqualsWithDelta(4.0, $spend->get_amount('aiprovider_mock'), 0.000001);
+    }
+
+    public function test_a_key_without_a_wallet_cannot_be_measured(): void {
+        // Every stored key has one. Measuring by wallet zero would count what the
+        // site paid for, and measuring nothing would let the key spend without limit.
+        $key = new key(0, (object) [
+            'id' => 1, 'scope' => key::SCOPE_USER, 'scopeid' => 5, 'targetid' => 3, 'walletid' => 0,
+            'secret' => 'x', 'hint' => '', 'timeverified' => 0, 'verifystatus' => null,
+            'capamount' => null, 'capperiod' => ledger::PERIOD_MONTH, 'capdays' => 30,
+            'usermodified' => 0, 'timecreated' => 0, 'timemodified' => 0,
+        ]);
+        [$from, $to] = $this->week();
+
+        $this->expectException(\coding_exception::class);
+        $this->ledger->measure_key($key, $from, $to);
+    }
+
+    public function test_a_course_key_is_measured_by_its_wallet_whoever_in_the_course_spent_it(): void {
         global $DB;
         $key = (new key_repository($DB))->save(key::SCOPE_COURSE, 7, 3, 'sk-course');
-        $this->spend(4.0, ['keysource' => rule::KEYSOURCE_COURSE, 'courseid' => 7, 'targetid' => 3, 'userid' => 5]);
-        $this->spend(6.0, ['keysource' => rule::KEYSOURCE_COURSE, 'courseid' => 7, 'targetid' => 3, 'userid' => 6]);
-        $this->spend(100.0, ['keysource' => rule::KEYSOURCE_COURSE, 'courseid' => 8, 'targetid' => 3]);
+        $this->spend_on(4.0, $key, ['courseid' => 7, 'userid' => 5]);
+        $this->spend_on(6.0, $key, ['courseid' => 7, 'userid' => 6]);
+        $this->spend(100.0, ['keysource' => rule::KEYSOURCE_COURSE, 'courseid' => 8, 'targetid' => 3, 'walletid' => 98]);
         [$from, $to] = $this->week();
 
         $spend = $this->ledger->measure_key($key, $from, $to);

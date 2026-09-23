@@ -529,6 +529,9 @@ final class target_resolver_test extends \advanced_testcase {
             $rate->set('promptrate', 1.0);
             $rate->create();
         }
+        // Charged to the wallet of the key this person holds there, which is what
+        // the limit on the key is measured by.
+        $key = (new key_repository($DB))->find(key::SCOPE_USER, $userid, $targetid);
         $generator = $this->getDataGenerator()->get_plugin_generator('local_airouter');
         $when = time() - HOURSECS;
         $request = $generator->create_request([
@@ -545,6 +548,8 @@ final class target_resolver_test extends \advanced_testcase {
             'targetprovider' => 'aiprovider_openai',
             'model' => 'gpt-4o',
             'keysource' => rule::KEYSOURCE_USER,
+            'keyid' => $key === null ? null : (int) $key->get('id'),
+            'walletid' => $key === null ? 0 : $key->get_wallet(),
             'cost' => $cost,
             'currency' => $cost === null ? null : 'USD',
             'timestarted' => $when,

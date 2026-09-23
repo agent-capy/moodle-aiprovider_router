@@ -82,7 +82,7 @@ final class usage_recorder_test extends \advanced_testcase {
     public function test_an_attempt_is_on_record_as_started_before_it_ends(): void {
         global $DB;
         $request = $this->recorder->begin_request($this->context());
-        $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_COURSE, 9);
+        $id = $this->recorder->begin_attempt($request, 1, $this->target(), 'aiprovider_openai', rule::KEYSOURCE_COURSE, 9, 21);
 
         $row = $DB->get_record(usage_recorder::ATTEMPT_TABLE, ['id' => $id], '*', MUST_EXIST);
         $this->assertSame(attempt_state::STARTED, $row->state);
@@ -90,6 +90,7 @@ final class usage_recorder_test extends \advanced_testcase {
         $this->assertSame('Named target', $row->targetname);
         $this->assertSame(rule::KEYSOURCE_COURSE, $row->keysource);
         $this->assertSame(9, (int) $row->keyid);
+        $this->assertSame(21, (int) $row->walletid, 'The wallet the key charges, which its limit is measured by.');
         $this->assertNull($row->timeended);
         $this->assertSame(0, (int) $row->usageknown);
     }

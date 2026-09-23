@@ -197,6 +197,35 @@ final class privacy_provider_test extends \core_privacy\tests\provider_testcase 
         $this->assertSame(0, $DB->count_records(key::TABLE));
     }
 
+    public function test_the_record_of_a_removed_key_is_found_exported_and_removed_with_the_person(): void {
+        global $DB;
+
+        $user = $this->getDataGenerator()->create_user();
+        $this->setUser($user);
+        $saved = $this->keys->save(key::SCOPE_USER, (int) $user->id, 3, 'sk-removed-later-qrst');
+        $this->keys->delete((int) $saved->get('id'));
+        $context = \context_user::instance($user->id);
+
+        // The wallet stays after the key, so it is theirs to be shown and to have removed.
+        $this->assertContainsEquals($context->id, provider::get_contexts_for_userid((int) $user->id)->get_contextids());
+
+        $this->export_context_data_for_user((int) $user->id, $context, 'local_airouter');
+        $exported = json_encode(writer::with_context($context)->get_data([
+            get_string('privacy:path:keys', 'local_airouter'),
+        ]));
+        $this->assertStringContainsString('qrst', $exported);
+        $this->assertStringNotContainsString('sk-removed-later-qrst', $exported);
+        // Not the hash either. It reveals nothing, but it is about the key.
+        $this->assertStringNotContainsString(
+            $DB->get_field(key_repository::WALLET_TABLE, 'keyhash', ['id' => $saved->get_wallet()]),
+            $exported,
+        );
+
+        provider::delete_data_for_user(new approved_contextlist($user, 'local_airouter', [$context->id]));
+
+        $this->assertSame(0, $DB->count_records(key_repository::WALLET_TABLE));
+    }
+
     public function test_a_deletion_request_leaves_a_course_key_and_clears_the_name_on_it(): void {
         global $DB;
 

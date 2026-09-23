@@ -16,6 +16,8 @@
 
 namespace local_airouter;
 
+use local_airouter\record\ledger;
+
 /**
  * Tests for the store that holds keys people have brought.
  *
@@ -79,6 +81,7 @@ final class key_repository_test extends \advanced_testcase {
         $second = $this->repository->save(key::SCOPE_USER, 7, 3, 'second-key-bbbb');
 
         $this->assertSame((int) $first->get('id'), (int) $second->get('id'));
+        $this->assertSame($first->get_wallet(), $second->get_wallet(), 'Registered again is renewed, not moved.');
         $this->assertSame(1, $DB->count_records(key::TABLE));
         $this->assertSame('second-key-bbbb', $this->repository->reveal($second));
         // Whatever the old key managed says nothing about the new one.
@@ -272,5 +275,237 @@ final class key_repository_test extends \advanced_testcase {
 
         $this->assertIsArray($errors);
         $this->assertArrayHasKey('secret', $errors);
+    }
+    public function test_a_new_key_opens_a_wallet_that_remembers_it_without_holding_it(): void {
+        global $DB;
+
+        $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+
+        $wallet = $DB->get_record(key_repository::WALLET_TABLE, ['id' => $saved->get_wallet()], '*', MUST_EXIST);
+        $this->assertSame(key::SCOPE_USER, $wallet->scope);
+        $this->assertSame(7, (int) $wallet->scopeid);
+        $this->assertSame(3, (int) $wallet->targetid);
+        $this->assertSame('aaaa', $wallet->hint);
+        $this->assertSame(0, (int) $wallet->timereleased);
+        // A hash, keyed and one way: nothing in the row is the key or can become it.
+        $this->assertSame(64, strlen($wallet->keyhash));
+        $this->assertStringNotContainsString('sk-first-key-aaaa', json_encode($wallet));
+        $this->assertNotSame(hash('sha256', 'sk-first-key-aaaa'), $wallet->keyhash, 'Keyed, so not the plain hash.');
+    }
+
+    public function test_replacing_within_the_same_account_keeps_the_wallet_and_the_limit(): void {
+        global $DB;
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->set_cap($first, 25.0, ledger::PERIOD_MONTH, 30);
+
+        $second = $this->repository->replace($first, 'sk-second-key-bbbb', true, true);
+
+        $this->assertSame((int) $first->get('id'), (int) $second->get('id'));
+        $this->assertSame($first->get_wallet(), $second->get_wallet());
+        $this->assertSame(25.0, $second->get_cap_amount());
+        $this->assertSame('sk-second-key-bbbb', $this->repository->reveal($second));
+        $wallet = $DB->get_record(key_repository::WALLET_TABLE, ['id' => $second->get_wallet()]);
+        $this->assertSame('bbbb', $wallet->hint, 'The wallet follows the key it holds now.');
+        $this->assertSame(0, (int) $wallet->timereleased);
+    }
+
+    public function test_replacing_with_a_key_for_another_account_opens_a_new_wallet_and_releases_the_old(): void {
+        global $DB;
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $before = $first->get_wallet();
+
+        $second = $this->repository->replace($first, 'sk-second-key-bbbb', false);
+
+        $this->assertSame((int) $first->get('id'), (int) $second->get('id'), 'The same key row, moved.');
+        $this->assertNotSame($before, $second->get_wallet());
+        $old = $DB->get_record(key_repository::WALLET_TABLE, ['id' => $before]);
+        $this->assertGreaterThan(0, (int) $old->timereleased);
+        $this->assertSame('aaaa', $old->hint, 'The old wallet remembers the key it last held.');
+        $new = $DB->get_record(key_repository::WALLET_TABLE, ['id' => $second->get_wallet()]);
+        $this->assertSame(0, (int) $new->timereleased);
+        $this->assertSame('bbbb', $new->hint);
+    }
+
+    public function test_the_limit_stays_or_goes_as_the_owner_says(): void {
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->set_cap($first, 25.0, ledger::PERIOD_MONTH, 30);
+
+        $dropped = $this->repository->replace($first, 'sk-second-key-bbbb', true, false);
+        $this->assertFalse($dropped->has_cap());
+
+        $this->repository->set_cap($dropped, 30.0, ledger::PERIOD_ROLLING, 7);
+        $kept = $this->repository->replace($dropped, 'sk-third-key-cccc', false, true);
+        $this->assertSame(30.0, $kept->get_cap_amount());
+        $this->assertSame(ledger::PERIOD_ROLLING, $kept->get_cap_period());
+    }
+
+    public function test_the_same_key_entered_again_is_the_same_account_whatever_was_answered(): void {
+        global $DB;
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->set_cap($first, 25.0, ledger::PERIOD_MONTH, 30);
+
+        // Nothing answered, because nothing is asked; and "another account" would be
+        // wrong, since the same key opens the same account.
+        $unasked = $this->repository->replace($first, 'sk-first-key-aaaa', null);
+        $this->assertSame($first->get_wallet(), $unasked->get_wallet());
+        $this->assertSame(25.0, $unasked->get_cap_amount());
+        $contradicted = $this->repository->replace($first, ' sk-first-key-aaaa ', false);
+        $this->assertSame($first->get_wallet(), $contradicted->get_wallet());
+        $this->assertSame(1, $DB->count_records(key_repository::WALLET_TABLE));
+    }
+
+    public function test_replacing_with_another_key_has_to_say_whose_account_it_is(): void {
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+
+        $this->expectException(\coding_exception::class);
+        $this->repository->replace($first, 'sk-second-key-bbbb', null);
+    }
+
+    public function test_replacing_a_key_that_carries_a_limit_has_to_say_whether_the_limit_stays(): void {
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->set_cap($first, 25.0, ledger::PERIOD_MONTH, 30);
+
+        $this->expectException(\coding_exception::class);
+        $this->repository->replace($first, 'sk-second-key-bbbb', true, null);
+    }
+
+    public function test_removing_a_key_keeps_its_wallet_released_and_forgets_what_was_said_about_it(): void {
+        global $DB;
+        $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $DB->insert_record(budget_notifier::TABLE, (object) [
+            'kind' => budget_notifier::KIND_KEY,
+            'subjectid' => (int) $saved->get('id'),
+            'metric' => ledger::METRIC_COST,
+            'limitamount' => 20.0,
+            'threshold' => 100,
+            'timenotified' => time(),
+        ]);
+
+        $this->repository->delete((int) $saved->get('id'));
+
+        $this->assertSame(0, $DB->count_records(key::TABLE));
+        $wallet = $DB->get_record(key_repository::WALLET_TABLE, ['id' => $saved->get_wallet()], '*', MUST_EXIST);
+        $this->assertGreaterThan(0, (int) $wallet->timereleased);
+        $this->assertSame(0, $DB->count_records(budget_notifier::TABLE));
+    }
+
+    public function test_the_same_key_registered_again_after_being_removed_goes_on_with_its_wallet(): void {
+        global $DB;
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->delete((int) $first->get('id'));
+        $this->assertTrue($this->repository->is_known_secret(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa'));
+        $this->assertFalse($this->repository->is_known_secret(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb'));
+        $this->assertFalse(
+            $this->repository->is_known_secret(key::SCOPE_USER, 8, 3, 'sk-first-key-aaaa'),
+            'Not for somebody else.',
+        );
+
+        $again = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+
+        $this->assertNotSame((int) $first->get('id'), (int) $again->get('id'));
+        $this->assertSame($first->get_wallet(), $again->get_wallet());
+        $this->assertSame(0, (int) $DB->get_field(key_repository::WALLET_TABLE, 'timereleased', ['id' => $again->get_wallet()]));
+        $this->assertSame([], $this->repository->get_previous_wallets(key::SCOPE_USER, 7, 3), 'Held again, so not previous.');
+    }
+
+    public function test_a_key_that_is_held_is_not_a_known_earlier_one(): void {
+        $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+
+        // Known would mean save() goes on with an earlier wallet, and there is none
+        // to go on with: the wallet is held.
+        $this->assertFalse($this->repository->is_known_secret(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa'));
+    }
+
+    public function test_another_key_after_one_was_removed_opens_a_wallet_unless_told_which_to_go_on_with(): void {
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->delete((int) $first->get('id'));
+
+        $other = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb');
+        $this->assertNotSame($first->get_wallet(), $other->get_wallet());
+
+        $this->repository->delete((int) $other->get('id'));
+        $told = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-third-key-cccc', $first->get_wallet());
+        $this->assertSame($first->get_wallet(), $told->get_wallet());
+    }
+
+    public function test_the_same_key_wins_over_a_choice_of_another_wallet(): void {
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->delete((int) $first->get('id'));
+        $other = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb');
+        $this->repository->delete((int) $other->get('id'));
+
+        $again = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa', $other->get_wallet());
+
+        $this->assertSame($first->get_wallet(), $again->get_wallet());
+    }
+
+    public function test_going_on_with_a_wallet_that_is_not_theirs_is_refused(): void {
+        $theirs = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->delete((int) $theirs->get('id'));
+
+        $this->expectException(\moodle_exception::class);
+        $this->repository->save(key::SCOPE_USER, 8, 3, 'sk-somebody-elses', $theirs->get_wallet());
+    }
+
+    public function test_going_on_with_a_wallet_that_is_held_is_a_coding_error(): void {
+        $held = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+
+        $this->expectException(\coding_exception::class);
+        $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb', $held->get_wallet());
+    }
+
+    public function test_previous_wallets_are_listed_newest_first_and_held_ones_not_at_all(): void {
+        $first = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->delete((int) $first->get('id'));
+        $second = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-second-key-bbbb');
+        $this->repository->delete((int) $second->get('id'));
+        $held = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-third-key-cccc');
+        $this->repository->save(key::SCOPE_USER, 8, 3, 'sk-somebody-elses');
+
+        $previous = $this->repository->get_previous_wallets(key::SCOPE_USER, 7, 3);
+
+        $this->assertSame([$second->get_wallet(), $first->get_wallet()], array_map(fn($w) => (int) $w->id, $previous));
+        $this->assertSame(['bbbb', 'aaaa'], array_column($previous, 'hint'));
+        $this->assertNotContains($held->get_wallet(), array_map(fn($w) => (int) $w->id, $previous));
+    }
+
+    public function test_a_wallet_from_before_hashes_were_kept_learns_its_key_when_the_key_goes(): void {
+        global $DB;
+        $saved = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        // As the upgrade leaves a wallet: it did not decrypt the key to hash it.
+        $DB->set_field(key_repository::WALLET_TABLE, 'keyhash', '', ['id' => $saved->get_wallet()]);
+        $this->assertFalse($this->repository->is_known_secret(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa'));
+
+        $this->repository->delete((int) $saved->get('id'));
+
+        $this->assertTrue($this->repository->is_known_secret(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa'));
+        $again = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->assertSame($saved->get_wallet(), $again->get_wallet());
+    }
+
+    public function test_removing_a_persons_keys_takes_their_wallets_and_leaves_the_course_ones(): void {
+        global $DB;
+        $mine = $this->repository->save(key::SCOPE_USER, 7, 3, 'sk-first-key-aaaa');
+        $this->repository->delete((int) $mine->get('id'));
+        $this->repository->save(key::SCOPE_USER, 7, 4, 'sk-second-key-bbbb');
+        $course = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'the-course-key-cccc');
+
+        $this->assertSame(1, $this->repository->delete_for_user(7));
+
+        $this->assertSame(0, $DB->count_records(key_repository::WALLET_TABLE, ['scope' => key::SCOPE_USER, 'scopeid' => 7]));
+        $this->assertTrue($DB->record_exists(key_repository::WALLET_TABLE, ['id' => $course->get_wallet()]));
+    }
+
+    public function test_a_course_being_emptied_takes_its_wallets_with_it(): void {
+        global $DB;
+        $gone = $this->repository->save(key::SCOPE_COURSE, 42, 3, 'the-course-key-bbbb');
+        $this->repository->delete((int) $gone->get('id'));
+        $this->repository->save(key::SCOPE_COURSE, 42, 4, 'another-key-cccc');
+        $kept = $this->repository->save(key::SCOPE_COURSE, 43, 3, 'a-third-key-dddd');
+
+        $this->repository->delete_for_course(42);
+
+        $this->assertSame(0, $DB->count_records(key_repository::WALLET_TABLE, ['scope' => key::SCOPE_COURSE, 'scopeid' => 42]));
+        $this->assertTrue($DB->record_exists(key_repository::WALLET_TABLE, ['id' => $kept->get_wallet()]));
     }
 }

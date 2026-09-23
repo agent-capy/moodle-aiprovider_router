@@ -15,18 +15,24 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Version details for local_airouter.
+ * What a fresh install sets up beyond the schema.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
+/**
+ * Install the plugin.
+ *
+ * @return bool Always true.
+ */
+function xmldb_local_airouter_install(): bool {
+    // The secret that the hashes of brought keys are keyed with, so that the same key
+    // entered again can be recognised without the key itself being kept. One per
+    // site, made once: a hash made under another site's secret matches nothing here,
+    // which is the right answer for a database moved between sites.
+    set_config('walletsecret', bin2hex(random_bytes(32)), 'local_airouter');
 
-$plugin->component = 'local_airouter';
-$plugin->version = 2026092305;
-$plugin->requires = 2025041400;
-$plugin->supported = [500, 502];
-$plugin->maturity = MATURITY_BETA;
-$plugin->release = '0.1.0';
+    return true;
+}
