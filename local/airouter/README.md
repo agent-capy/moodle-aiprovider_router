@@ -493,6 +493,15 @@ that what the provider reported using is not lost because the request could not 
 closed. An attempt the router moves on from is closed on its own before the next
 provider is asked.
 
+Whatever goes wrong while the end is recorded, the person still gets the provider's
+answer, and the provider is not asked again. The endings are written again only once
+the database has confirmed that the transaction was rolled back. If it cannot confirm
+that, nothing more is written on that connection: the attempt and the request are left
+as started and open, which the daily task later closes as lost and the status check
+reports, what the provider reported using goes to the developer log, and Moodle rolls
+the transaction back at the end of the request and writes that it had to in the error
+log.
+
 These rows are only as durable as the transaction they are written in. If the code that
 asks for AI already has a database transaction open, everything the router records --
 including the rows written before a provider is called -- becomes visible to anyone

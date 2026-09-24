@@ -71,6 +71,15 @@ class usage_recorder {
     /** @var int How long to wait for that lock before giving the attempt up as unrecorded. */
     public const LOCK_TIMEOUT = 5;
 
+    /** @var string Both endings committed together. */
+    protected const WRITTEN = 'written';
+
+    /** @var string Rolled back, and the connection is known to be out of the transaction. */
+    protected const UNDONE = 'undone';
+
+    /** @var string Not committed, and the connection could not be shown to be out of the transaction. */
+    protected const STUCK = 'stuck';
+
     /**
      * Constructor.
      *
@@ -261,9 +270,16 @@ class usage_recorder {
      * and each is made again on its own, still under the lock, exactly as the separate
      * methods make them. An attempt's ending must not be lost because its request's
      * could not be written, and the endings are conditional, so writing one again after
-     * a commit whose answer was lost changes nothing that did happen. Pricing endings
-     * left without a price by others is done afterwards and apart, so that its failure
-     * cannot take this ending with it.
+     * a commit whose answer was lost changes nothing that did happen. They are made again
+     * only once the database has said that the connection is out of the transaction
+     * (undo()): written into a transaction that is still open, they would never be
+     * committed. Pricing endings left without a price by others is done afterwards and
+     * apart, so that its failure cannot take this ending with it.
+     *
+     * Like every other write here, nothing that goes wrong reaches the request: the
+     * target has answered, and a failure to record it must not cost the person the
+     * answer. The lock that could not be taken because the database failed is treated
+     * as a lock that could not be taken in time, which allows no price.
      *
      * @param int|null $attemptid The last attempt, or null when it could not be recorded.
      * @param attempt_ending $attempt How the attempt ended.
@@ -296,33 +312,53 @@ class usage_recorder {
 
         $lock = null;
         try {
-            $lock = $this->take_lock('take the record lock before closing the last attempt');
-            if (!$this->write_both($attemptid, $attempt, $requestid, $request, $lock !== null)) {
-                $this->write_again($attemptid, $attempt, $requestid, $request, $lock !== null);
-            } else if ($lock === null) {
-                self::note_deferred();
+            try {
+                $lock = $this->take_lock('take the record lock before closing the last attempt');
+            } catch (\Throwable $e) {
+                $this->note_failure('take the record lock before closing the last attempt', $e);
             }
-            if ($lock !== null) {
+            $locked = $lock !== null;
+            $outcome = $this->write_both($attemptid, $attempt, $requestid, $request, $locked);
+            if ($outcome === self::WRITTEN && !$locked) {
+                self::note_deferred();
+            } else if ($outcome === self::UNDONE) {
+                $this->write_again($attemptid, $attempt, $requestid, $request, $locked);
+            } else if ($outcome === self::STUCK) {
+                $this->report_unwritten($attemptid, $attempt, $requestid, $request);
+            }
+            if ($locked && $outcome !== self::STUCK) {
                 try {
                     $this->price_deferred();
                 } catch (\Throwable $e) {
                     $this->note_failure('price the endings left without a price', $e);
                 }
             }
+        } catch (\Throwable $e) {
+            $this->note_failure('close the last attempt and its request', $e);
         } finally {
-            $lock?->release();
+            try {
+                $lock?->release();
+            } catch (\Throwable $e) {
+                $this->note_failure('let go of the record lock', $e);
+            }
         }
     }
 
     /**
      * Write both endings in one transaction of this recorder's own, and commit it.
      *
+     * The transaction is opened inside the same guard as the writes: core puts it on its
+     * stack before the database is asked to begin, so a failure to begin leaves it there
+     * as surely as a failure to commit does.
+     *
      * @param int $attemptid The attempt.
      * @param attempt_ending $attempt How it ended.
      * @param int $requestid The request.
      * @param request_ending $request How it ended.
      * @param bool $locked Whether the record lock is held, which is what allows a price.
-     * @return bool True when both were committed; false when the transaction was undone.
+     * @return string WRITTEN when both were committed; UNDONE when the transaction was
+     *                rolled back and the connection is out of it; STUCK when that could
+     *                not be established.
      */
     protected function write_both(
         int $attemptid,
@@ -330,19 +366,20 @@ class usage_recorder {
         int $requestid,
         request_ending $request,
         bool $locked,
-    ): bool {
-        $transaction = $this->db->start_delegated_transaction();
+    ): string {
+        $transaction = null;
         try {
+            $transaction = $this->db->start_delegated_transaction();
             $this->write_attempt_ending($attemptid, $attempt, $locked);
             $this->write_request_ending($requestid, $request);
             $this->commit($transaction);
 
-            return true;
+            return self::WRITTEN;
         } catch (\Throwable $e) {
-            $this->undo($transaction, $e);
+            $recovered = $this->undo($transaction, $e);
             $this->note_failure('close the last attempt and its request together', $e);
 
-            return false;
+            return $recovered ? self::UNDONE : self::STUCK;
         }
     }
 
@@ -356,30 +393,71 @@ class usage_recorder {
     }
 
     /**
-     * Undo a transaction this recorder opened, and leave no transaction behind.
+     * Undo a transaction this recorder opened, and say whether the connection is out of it.
      *
-     * Core's rollback throws the exception it is given once it has rolled back, which
-     * is caught here: the caller already has it. A commit or a rollback that itself
-     * failed leaves the transaction on core's stack, where everything written later in
-     * the request -- core's own record of the action included -- would join it and be
-     * thrown away at the end. The transaction on the stack is the one opened here and no
-     * other, because this is never done inside a caller's transaction, so clearing the
-     * stack clears nothing of anybody else's.
+     * Only an answer from the database counts. Core's rollback throws the exception it is
+     * given once it has rolled back, and it takes the transaction off its stack only after
+     * the ROLLBACK has been answered, so an empty stack after it is that answer. Core can
+     * no longer roll back a transaction whose commit failed, nor one whose beginning
+     * failed, which it put on its stack before asking the database to begin; and core's
+     * way of clearing its stack, force_transaction_rollback(), ignores whether its own
+     * ROLLBACK worked. So the database is asked directly, and the stack is cleared only
+     * once the ROLLBACK has been answered. Every transaction on the stack is this
+     * recorder's, since this is never done inside a caller's transaction.
      *
-     * @param \moodle_transaction $transaction The transaction.
+     * When the database does not answer, the stack is left as it is. The connection may
+     * still be in the transaction, and a stack cleared over it would let everything
+     * written later in the request look committed and quietly be lost with the
+     * connection; left in place, core rolls it back at the end of the request and writes
+     * to the error log that it had to.
+     *
+     * @param \moodle_transaction|null $transaction The transaction, or null when opening it failed.
      * @param \Throwable $e What went wrong.
+     * @return bool True when the connection is known to be out of the transaction.
      */
-    protected function undo(\moodle_transaction $transaction, \Throwable $e): void {
-        try {
-            if (!$transaction->is_disposed()) {
+    protected function undo(?\moodle_transaction $transaction, \Throwable $e): bool {
+        if ($transaction !== null && !$transaction->is_disposed()) {
+            try {
                 $transaction->rollback($e);
+            } catch (\Throwable $thrown) {
+                unset($thrown);
             }
+        }
+        if (!$this->db->is_transaction_started()) {
+            return true;
+        }
+        try {
+            $this->db->execute('ROLLBACK');
         } catch (\Throwable $thrown) {
-            unset($thrown);
+            return false;
         }
-        if ($this->db->is_transaction_started()) {
-            $this->db->force_transaction_rollback();
-        }
+        $this->db->force_transaction_rollback();
+
+        return true;
+    }
+
+    /**
+     * Say what could not be recorded, when the connection could not be brought back.
+     *
+     * Nothing is written: the connection may still be in the transaction. The two rows
+     * stay started and open, where the sweeper and the status check find them, and what
+     * the target reported is kept here, in the developer log, for whoever looks.
+     *
+     * @param int $attemptid The attempt.
+     * @param attempt_ending $attempt How it ended.
+     * @param int $requestid The request.
+     * @param request_ending $request How it ended.
+     */
+    protected function report_unwritten(int $attemptid, attempt_ending $attempt, int $requestid, request_ending $request): void {
+        $usage = $attempt->usage;
+        debugging(
+            'local_airouter: the connection could not be brought out of the transaction, so attempt ' .
+                $attemptid . ' (' . $attempt->state . ', ' . $attempt->component . ', model ' .
+                ($attempt->model ?? '-') . ', prompt tokens ' . ($usage->prompttokens ?? '-') .
+                ', completion tokens ' . ($usage->completiontokens ?? '-') . ', images ' . $usage->images .
+                ') and request ' . $requestid . ' (' . $request->state . ') were not recorded as ended',
+            DEBUG_NORMAL,
+        );
     }
 
     /**
