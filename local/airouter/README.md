@@ -493,14 +493,22 @@ that what the provider reported using is not lost because the request could not 
 closed. An attempt the router moves on from is closed on its own before the next
 provider is asked.
 
-Whatever goes wrong while the end is recorded, the person still gets the provider's
-answer, and the provider is not asked again. The endings are written again only once
-the database has confirmed that the transaction was rolled back. If it cannot confirm
-that, nothing more is written on that connection: the attempt and the request are left
-as started and open, which the daily task later closes as lost and the status check
-reports, what the provider reported using goes to the developer log, and Moodle rolls
-the transaction back at the end of the request and writes that it had to in the error
-log.
+When recording the end fails and the database connection can be brought back to a
+normal state, the person still gets the provider's answer, and the provider is not asked
+again. The endings are written again only once the database has confirmed that the
+transaction was rolled back.
+
+If the database cannot confirm even that -- the rollback fails too, on the connection the
+whole request shares -- neither the answer nor the record is guaranteed. Nothing more is
+written on that connection. The attempt and the request are left as started and open,
+which the daily task later closes as lost and the status check reports, and what the
+provider reported using goes to the developer log. Moodle stores its own record of the
+action after the router, on the same connection, and that may fail as well, in which
+case the person does not get the answer; at the end of the request Moodle rolls the
+transaction back and writes to the error log that it had to. A paid provider may have
+charged for a call whose answer never arrived: treat such a request as unfinished, with
+its usage unknown, and bear that in mind before running it again. This is a database
+failure to investigate and recover from.
 
 These rows are only as durable as the transaction they are written in. If the code that
 asks for AI already has a database transaction open, everything the router records --

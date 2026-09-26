@@ -411,6 +411,14 @@ class usage_recorder {
      * connection; left in place, core rolls it back at the end of the request and writes
      * to the error log that it had to.
      *
+     * That is also where the promise that a failure to record never costs the person the
+     * answer stops. Core stores its own record of the action after the router, on this
+     * connection, and when core's rollback here was the one that failed, core has marked
+     * the transaction as one that must be rolled back and refuses that commit, so the
+     * answer does not reach the person. Keeping it would mean core committing on a
+     * connection nobody has shown to be sound; the site is told instead (README), and a
+     * connection that cannot even roll back is a database failure to be recovered from.
+     *
      * @param \moodle_transaction|null $transaction The transaction, or null when opening it failed.
      * @param \Throwable $e What went wrong.
      * @return bool True when the connection is known to be out of the transaction.

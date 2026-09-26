@@ -119,6 +119,8 @@ trait routing_harness {
      * @param array $config The router instance configuration.
      * @param \context|null $context Where the request is raised.
      * @param delegator|null $delegator The delegator to use, or null for the real one.
+     * @param generate_text|null $action The request, for a test that also hands it to core;
+     *                                   null for one made here.
      * @return object The response the router produced.
      */
     protected function route(
@@ -126,11 +128,12 @@ trait routing_harness {
         array $config = ['defaulttarget' => 7],
         ?\context $context = null,
         ?delegator $delegator = null,
+        ?generate_text $action = null,
     ): object {
         global $DB;
 
         $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: json_encode($config), id: 1);
-        $action = new generate_text(
+        $action ??= new generate_text(
             contextid: ($context ?? \context_system::instance())->id,
             userid: self::$requester,
             prompttext: 'Hello',
