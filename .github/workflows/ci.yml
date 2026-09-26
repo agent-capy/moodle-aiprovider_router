@@ -73,16 +73,6 @@ jobs:
           sudo locale-gen en_AU.UTF-8
           echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
 
-      # The repository holds two components. local_airouter is the plugin: the rules,
-      # the budgets, the monitoring, the keys and the screens. aiprovider_router is the
-      # face Moodle's AI subsystem has to see, and it has to be installed alongside or
-      # the other one has nothing to route through. moodle-plugin-ci installs one
-      # plugin and reads any others from a directory, so the second is staged into one.
-      - name: Stage the connector
-        run: |
-          mkdir -p extra
-          cp -r plugin/ai/provider/router extra/router
-
       # The router has to answer actions it did not define, and the only way to find
       # out whether it can store their results on a given release is to have one
       # installed. local_aimedia defines two, and a release once changed what a failed
@@ -90,6 +80,7 @@ jobs:
       # against one Moodle and that plugin was not in this matrix at all.
       - name: Stage the plugin that defines the extra actions
         run: |
+          mkdir -p extra
           git clone --depth 1 https://github.com/agent-capy/moodle-aimedia.git aimedia
           cp -r aimedia/local/aimedia extra/aimedia
           cp -r aimedia/lib/editor/tiny/plugins/aimedia extra/tinyaimedia
@@ -106,19 +97,11 @@ jobs:
 
       - run: moodle-plugin-ci phplint ./plugin/local/airouter
         if: ${{ always() }}
-      - run: moodle-plugin-ci phplint ./plugin/ai/provider/router
-        if: ${{ always() }}
       - run: moodle-plugin-ci phpmd ./plugin/local/airouter
-        if: ${{ always() }}
-      - run: moodle-plugin-ci phpmd ./plugin/ai/provider/router
         if: ${{ always() }}
       - run: ./plugin/.github/run-step.sh phpcs moodle-plugin-ci phpcs --max-warnings 0 ./plugin/local/airouter
         if: ${{ always() }}
-      - run: ./plugin/.github/run-step.sh "phpcs (connector)" moodle-plugin-ci phpcs --max-warnings 0 ./plugin/ai/provider/router
-        if: ${{ always() }}
       - run: ./plugin/.github/run-step.sh validate moodle-plugin-ci validate ./plugin/local/airouter
-        if: ${{ always() }}
-      - run: ./plugin/.github/run-step.sh "validate (connector)" moodle-plugin-ci validate ./plugin/ai/provider/router
         if: ${{ always() }}
       - run: moodle-plugin-ci savepoints ./plugin/local/airouter
         if: ${{ always() }}
@@ -127,7 +110,7 @@ jobs:
       # ⚠ No path here. Grunt runs Moodle's own Gruntfile, which works out which
       # component it is linting from the directory it is run in, relative to the
       # Moodle root. Handed the checkout path instead of the installed one it has
-      # nothing to work that out from. The connector has no assets to lint.
+      # nothing to work that out from.
       - run: ./plugin/.github/run-step.sh grunt moodle-plugin-ci grunt --max-lint-warnings 0
         if: ${{ always() }}
       # Saying so here is what lets the tests refuse to skip quietly: a run whose

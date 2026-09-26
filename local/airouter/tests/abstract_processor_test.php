@@ -19,6 +19,10 @@ namespace local_airouter;
 use local_airouter\exception\declined_request;
 use core_ai\aiactions\generate_text;
 
+defined('MOODLE_INTERNAL') || die();
+
+require_once(__DIR__ . '/fixtures/fixture_router.php');
+
 /**
  * Tests for what the processor is willing to believe and willing to write down.
  *
@@ -107,7 +111,7 @@ final class abstract_processor_test extends \advanced_testcase {
      */
     protected function processor(array $config = []): process_generate_text {
         return new process_generate_text(
-            new \aiprovider_router\provider(
+            new \local_airouter\fixture_router(
                 enabled: true,
                 name: 'Router',
                 config: json_encode($config + ['defaulttarget' => 7]),
@@ -200,18 +204,6 @@ final class abstract_processor_test extends \advanced_testcase {
             $this->assertSame($reason, $e->get_reason());
             $this->assertSame(get_string('error:' . $stringid, 'local_airouter'), $e->getMessage());
         }
-    }
-
-    public function test_a_site_can_ask_for_the_behaviour_core_gives_everybody_else(): void {
-        $outcome = $this->conclude(
-            $this->processor(['strictdecline' => 0]),
-            503,
-            'budgetexhausted',
-            abstract_processor::REASON_BUDGET_SPENT,
-        );
-
-        $this->assertFalse($outcome['success']);
-        $this->assertSame(abstract_processor::REASON_BUDGET_SPENT, $outcome['error']);
     }
 
     public function test_the_status_the_failure_carried_survives_being_thrown(): void {

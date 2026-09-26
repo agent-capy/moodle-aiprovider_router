@@ -21,6 +21,7 @@ use core_ai\manager;
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once(__DIR__ . '/fixtures/fixture_router.php');
 require_once(__DIR__ . '/fixtures/mock/provider.php');
 require_once(__DIR__ . '/fixtures/mock/abstract_processor.php');
 require_once(__DIR__ . '/fixtures/mock/process_generate_text.php');
@@ -46,7 +47,6 @@ final class delegation_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
     }
 
     /**
@@ -75,7 +75,7 @@ final class delegation_test extends \advanced_testcase {
     protected function route(array $targets): \core_ai\aiactions\responses\response_base {
         global $DB;
 
-        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: '{"defaulttarget":9}', id: 1);
+        $router = new \local_airouter\fixture_router(enabled: true, name: 'Router', config: '{"defaulttarget":9}', id: 1);
         $action = new generate_text(contextid: \context_system::instance()->id, userid: 2, prompttext: 'Hello');
 
         $resolver = $this->createStub(target_resolver::class);

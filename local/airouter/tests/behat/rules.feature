@@ -8,9 +8,6 @@ Feature: Routing requests by rule
     Given the following "core_ai > ai providers" exist:
       | provider          | name        | enabled | apikey |
       | aiprovider_openai | Test OpenAI | 1       | abc123 |
-    And the following "core_ai > ai providers" exist:
-      | provider          | name        | enabled | mode |
-      | aiprovider_router | Test router | 1       | full |
     And the following "courses" exist:
       | fullname    | shortname |
       | Biology 101 | BIO101    |

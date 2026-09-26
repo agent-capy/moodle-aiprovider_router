@@ -97,19 +97,18 @@ class target_resolver {
     }
 
     /**
-     * A resolver for this site, however its router is configured.
+     * A resolver for this site.
      *
      * The screens that answer "where would this request go" have to reach the router
-     * the same way a request does. Asking only for a stored instance said there was
-     * no router on a site that routes without one; asking the manager for the router
-     * of a given action additionally wants that action to be one the site has placed
-     * under the router, which the rules do not care about. Both were tried and both
-     * were wrong, which is why the answer lives here rather than in each page.
+     * the same way a request does. Asking the manager for the router of a given action
+     * wants that action to be one the site has placed under the router, which the
+     * rules do not care about, which is why the answer lives here rather than in each
+     * page.
      *
-     * @return self A resolver over whichever router this site has.
+     * @return self A resolver over this site's router.
      */
     public static function for_site(): self {
-        return new self((new order_inspector())->get_primary_router() ?? adapter_provider::create());
+        return new self(adapter_provider::create());
     }
 
     /**

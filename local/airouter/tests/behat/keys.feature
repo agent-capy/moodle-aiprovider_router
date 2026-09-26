@@ -5,10 +5,7 @@ Feature: Registering a key of my own
   I need a page of my own that works whether or not I am in a course
 
   Background:
-    Given the following "core_ai > ai providers" exist:
-      | provider          | name        | enabled | mode |
-      | aiprovider_router | Test router | 1       | full |
-    And the following "users" exist:
+    Given the following "users" exist:
       | username | firstname | lastname |
       | teacher1 | Terry     | Teacher  |
     And the following "courses" exist:

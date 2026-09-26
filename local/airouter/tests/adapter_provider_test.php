@@ -52,7 +52,6 @@ final class adapter_provider_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
         $this->manager = \core\di::get(manager::class);
     }
 
@@ -107,30 +106,28 @@ final class adapter_provider_test extends \advanced_testcase {
         $target = $this->add_target('Routed', 'Answered through the router');
         $this->add_rule((int) $target->id);
         managed_policy::set_managed_actions([generate_text::class]);
+        $instances = $DB->count_records('ai_providers');
 
         $response = $this->ask();
 
         $this->assertTrue($response->get_success());
         $this->assertSame('Answered through the router', $response->get_response_data()['generatedcontent']);
-        $this->assertSame(0, $DB->count_records('ai_providers', ['provider' => provider::INSTANCE_CLASS]));
+        $this->assertSame($instances, $DB->count_records('ai_providers'));
     }
 
     public function test_the_router_is_not_something_a_site_creates(): void {
         // The other half of P-1. The AI provider screen offers exactly the installed
-        // aiprovider plugins, so what this plugin can contribute to that list is the
-        // connector and nothing else: no arrangement of settings, and nothing about
-        // the adapter, can put the router there. Removing the connector is therefore
-        // the whole of the work, with nothing left to check here afterwards.
+        // aiprovider plugins, so the only thing this plugin could ever contribute to that
+        // list was its companion plugin, aiprovider_router. That plugin is gone, and no
+        // arrangement of settings, and nothing about the adapter, can put the router
+        // there.
         $creatable = \core_plugin_manager::instance()->get_plugins_of_type('aiprovider');
 
         foreach (array_keys($creatable) as $name) {
             $this->assertStringStartsNotWith('airouter', $name);
         }
         $this->assertArrayNotHasKey('local_airouter', $creatable);
-
-        // Named, so that this test fails rather than quietly passing if the connector
-        // is removed without the claim above being revisited.
-        $this->assertArrayHasKey('router', $creatable);
+        $this->assertArrayNotHasKey('router', $creatable);
     }
 
     public function test_the_managed_request_does_not_reach_the_provider_ahead(): void {
@@ -233,29 +230,6 @@ final class adapter_provider_test extends \advanced_testcase {
         $this->assertNull($manager->find_router(\core_ai\aiactions\summarise_text::class));
     }
 
-    public function test_a_stored_instance_still_wins_while_one_exists(): void {
-        // The plugin is moving away from the stored row, not ignoring it. A site that
-        // configured the router in the old place keeps the settings it can see.
-        $target = $this->add_target('Routed', 'Answered through the router');
-        $this->add_rule((int) $target->id);
-        $this->manager->create_provider_instance(
-            classname: provider::INSTANCE_CLASS,
-            name: 'Router',
-            enabled: true,
-            config: [],
-            actionconfig: [generate_text::class => ['enabled' => true]],
-        );
-        provider::get_instance_ids(true);
-        managed_policy::set_managed_actions([generate_text::class]);
-
-        /** @var routing_manager $manager */
-        $manager = $this->manager;
-        $found = $manager->find_router(generate_text::class);
-
-        $this->assertNotInstanceOf(adapter_provider::class, $found);
-        $this->assertNotNull($found?->id);
-    }
-
     public function test_choosing_an_action_for_the_first_time_is_not_called_stuck(): void {
         // The management screen warns before placing an action under a router that
         // cannot answer it, because that stops the action working across the site.
@@ -282,30 +256,6 @@ final class adapter_provider_test extends \advanced_testcase {
         $manager = $this->manager;
 
         $this->assertFalse($manager->would_answer(generate_text::class, [generate_text::class]));
-    }
-
-    public function test_a_stored_instance_answers_the_question_itself(): void {
-        // With an instance, what it carries is its own setting, not the policy being
-        // saved, and the screen must report what will actually happen.
-        $target = $this->add_target('Routed', 'Answered through the router');
-        $this->add_rule((int) $target->id);
-        $this->manager->create_provider_instance(
-            classname: provider::INSTANCE_CLASS,
-            name: 'Router',
-            enabled: true,
-            config: [],
-            actionconfig: [generate_text::class => ['enabled' => true]],
-        );
-        provider::get_instance_ids(true);
-
-        /** @var routing_manager $manager */
-        $manager = $this->manager;
-
-        $this->assertTrue($manager->would_answer(generate_text::class, [generate_text::class]));
-        $this->assertFalse($manager->would_answer(
-            \core_ai\aiactions\summarise_text::class,
-            [\core_ai\aiactions\summarise_text::class],
-        ));
     }
 
     public function test_the_switch_hands_the_site_back_to_moodle(): void {
@@ -407,8 +357,6 @@ final class adapter_provider_test extends \advanced_testcase {
         $this->add_rule((int) $target->id);
         managed_policy::set_managed_actions([]);
 
-        $this->assertNull((new order_inspector())->get_primary_router());
-
         $candidates = target_resolver::for_site()->get_candidates(
             new generate_text(
                 contextid: \context_system::instance()->id,
@@ -421,23 +369,12 @@ final class adapter_provider_test extends \advanced_testcase {
         $this->assertSame((int) $target->id, (int) $candidates[0]->target->id);
     }
 
-    public function test_the_screens_reach_whichever_router_the_site_has(): void {
+    public function test_the_screens_reach_the_router_the_requests_reach(): void {
         // A page cannot be unit tested, so the decision the pages were getting wrong
         // lives where it can be.
         $this->add_rule((int) $this->add_target('Routed', 'Answered')->id);
 
         $this->assertInstanceOf(adapter_provider::class, target_resolver::for_site()->get_router());
-
-        $this->manager->create_provider_instance(
-            classname: provider::INSTANCE_CLASS,
-            name: 'Router',
-            enabled: true,
-            config: [],
-            actionconfig: [generate_text::class => ['enabled' => true]],
-        );
-        provider::get_instance_ids(true);
-
-        $this->assertNotInstanceOf(adapter_provider::class, target_resolver::for_site()->get_router());
     }
 
     public function test_an_unusable_target_says_which_one_and_why(): void {

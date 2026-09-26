@@ -18,7 +18,6 @@ namespace local_airouter;
 
 use core_ai\aiactions\base as action_base;
 use core_ai\aiactions\responses\response_base;
-use core_ai\provider as ai_provider;
 use local_airouter\record\request_state;
 use local_airouter\record\usage_recorder;
 
@@ -64,11 +63,7 @@ class routing_manager extends \core_ai\manager {
             return parent::process_action($action);
         }
 
-        // Every provider instance, read once for this request: the router is found in
-        // them, and the router hands the same ones to whatever chooses its target, so
-        // that the router and the instance it delegates to were read together.
-        $instances = $this->get_provider_instances();
-        $router = $this->router_for_dispatch($action::class, $policy, $instances);
+        $router = $this->router_for_dispatch($action::class, $policy);
         if ($router === null) {
             // The site says this action goes through the router and the router cannot
             // take it. Answering it with another provider would be the one thing the
@@ -77,9 +72,9 @@ class routing_manager extends \core_ai\manager {
             // Core's record is not written for this: writing it needs a provider that
             // really exists to attribute it to, and inventing one to make the row
             // appear would be a lie in the site's own audit trail. What is left here
-            // is the case where nothing can run at all -- a stored instance that is
-            // switched off, or an action this release of the router has no processor
-            // for. There is no code that could be asked to explain itself.
+            // is the one case where nothing can run at all: an action this release of
+            // the router has no processor for. There is no code that could be asked to
+            // explain itself.
             //
             // The plugin's own record is written, though: the site kept this action
             // inside the router, and a request it turned away at the door is still a
@@ -104,21 +99,21 @@ class routing_manager extends \core_ai\manager {
             );
         }
 
-        if ($router instanceof provider) {
-            $router->carry_request_instances($instances);
-        }
+        // Every provider instance, read once for this request and handed to whatever
+        // chooses the router's target, so that the choice is made from one reading.
+        $router->carry_request_instances($this->get_provider_instances());
         $dispatch = new single_router_dispatch($this->db, $router);
 
         return $dispatch->process_action($action);
     }
 
     /**
-     * The router instance that can answer this action, if there is one.
+     * The router, when it can answer this action.
      *
      * Availability is asked here and not folded into the managed list, because the two
      * answer different questions. Whether the site manages an action is a decision the
      * site made; whether the router can carry it today is a fact about right now. A
-     * managed action whose router is missing is refused, not quietly let out.
+     * managed action the router cannot answer is refused, not quietly let out.
      *
      * The status check asks the same question through this method rather than
      * repeating the conditions, so that what the administrator is shown and what
@@ -127,132 +122,57 @@ class routing_manager extends \core_ai\manager {
      * @param string $actionclass The action class being requested.
      * @param request_policy|null $policy The settings this request began with, when
      *                                    the answer is going to carry it out.
-     * @param ai_provider[]|null $instances The provider instances this request read,
-     *                                      or null to read them now.
-     * @return ai_provider|null The instance, or null if none can answer.
+     * @return provider|null The router, or null if it cannot answer.
      */
-    public function find_router(
-        string $actionclass,
-        ?request_policy $policy = null,
-        ?array $instances = null,
-    ): ?ai_provider {
-        $actionclass = ltrim($actionclass, '\\');
-        $routers = $this->stored_routers($instances);
-
-        if ($routers === []) {
-            return $this->adapter_for($actionclass, null, $policy);
-        }
-
-        foreach ($routers as $instance) {
-            if (!$instance->enabled || !$instance->is_provider_configured()) {
-                continue;
-            }
-            $carried = array_map(
-                static fn(string $action): string => ltrim($action, '\\'),
-                $instance->get_action_list(),
-            );
-            if (!in_array($actionclass, $carried, true)) {
-                continue;
-            }
-            // What core's is_action_enabled() answers for a provider instance, taken
-            // from the row already read: core reads the same row again by its id and
-            // looks at the same setting, which here would be a second reading of it.
-            $settings = $instance->actionconfig[$actionclass] ?? null;
-            if (!is_array($settings) || empty($settings['enabled'])) {
-                continue;
-            }
-
-            return $instance;
-        }
-
-        return null;
-    }
-
-    /**
-     * The router instances stored in ai_providers.
-     *
-     * @param ai_provider[]|null $instances Every instance as this request read them,
-     *                                      or null to read the routers now.
-     * @return ai_provider[] The stored routers, in the order the table gave them.
-     */
-    protected function stored_routers(?array $instances): array {
-        if ($instances === null) {
-            return $this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]);
-        }
-
-        return array_filter(
-            $instances,
-            static fn(ai_provider $instance): bool => get_class($instance) === provider::INSTANCE_CLASS,
-        );
+    public function find_router(string $actionclass, ?request_policy $policy = null): ?provider {
+        return $this->adapter_for(ltrim($actionclass, '\\'), null, $policy);
     }
 
     /**
      * The router to hand this request to, which may be one that will refuse it.
      *
      * Being unable to answer and being unconfigured are different, and only the first
-     * is a reason to stop here. A site with no stored instance has this plugin as its
-     * router whether or not the rules are finished, and the router knows why it cannot
-     * carry the request: no target, no rule matched, a budget spent, a key it could
-     * not read. Letting it say so puts the refusal through core's own processing, so
-     * the request is recorded and the person is shown a reason, where stopping short
-     * of it left the site with neither.
+     * is a reason to stop here. The router knows why it cannot carry a request whether
+     * or not the rules are finished: no target, no rule matched, a budget spent, a key
+     * it could not read. Letting it say so puts the refusal through core's own
+     * processing, so the request is recorded and the person is shown a reason, where
+     * stopping short of it left the site with neither.
      *
      * @param string $actionclass The action class being requested.
      * @param request_policy|null $policy The settings this request began with.
-     * @param ai_provider[]|null $instances The provider instances this request read,
-     *                                      or null to read them now.
-     * @return ai_provider|null The router, or null when nothing could even explain itself.
+     * @return provider|null The router, or null when it has nothing that could even
+     *                       explain itself for this action.
      */
-    protected function router_for_dispatch(
-        string $actionclass,
-        ?request_policy $policy = null,
-        ?array $instances = null,
-    ): ?ai_provider {
-        $actionclass = ltrim($actionclass, '\\');
+    protected function router_for_dispatch(string $actionclass, ?request_policy $policy = null): ?provider {
         // The settings go with the request all the way to the object that carries it
         // out. Finding the router one way and building it another is how a request
         // came to be judged by this morning's settings and this minute's switch.
-        $found = $this->find_router($actionclass, $policy, $instances);
-        if ($found !== null) {
-            return $found;
-        }
-
-        // A stored instance is the site's router and its own state is the answer:
-        // one that is switched off has been switched off on purpose.
-        if ($this->stored_routers($instances) !== []) {
-            return null;
-        }
-
         $adapter = adapter_provider::create(policy: $policy);
         $carried = array_map(
             static fn(string $action): string => ltrim($action, '\\'),
             $adapter->get_action_list(),
         );
 
-        return in_array($actionclass, $carried, true) ? $adapter : null;
+        return in_array(ltrim($actionclass, '\\'), $carried, true) ? $adapter : null;
     }
 
     /**
      * The router built from the site's own settings, when it can answer this action.
      *
-     * A site with no row in ai_providers is not a site without a router. The policy,
-     * the rules and the budgets live in this plugin's configuration, and the object
-     * core needs while it runs an action can be made from them for the length of the
-     * request. This is the arrangement the plugin is moving to; the stored instance
-     * above is what it is moving from, and while both exist a stored one wins, so
-     * that a site that has configured the router in the old place keeps the settings
-     * it can see.
+     * The router has no row in ai_providers. The policy, the rules and the budgets live
+     * in this plugin's configuration, and the object core needs while it runs an
+     * action is made from them for the length of the request.
      *
      * @param string $actionclass The action class being requested, already normalised.
      * @param string[]|null $managedactions A policy to judge by instead of the saved one.
      * @param request_policy|null $policy The settings this request began with.
-     * @return ai_provider|null The adapter, or null when it cannot answer.
+     * @return provider|null The adapter, or null when it cannot answer.
      */
     protected function adapter_for(
         string $actionclass,
         ?array $managedactions = null,
         ?request_policy $policy = null,
-    ): ?ai_provider {
+    ): ?provider {
         $adapter = adapter_provider::create($managedactions, $policy);
         if (!$adapter->is_provider_configured()) {
             return null;
@@ -274,11 +194,11 @@ class routing_manager extends \core_ai\manager {
      *
      * The management screen warns before an action is placed under a router that
      * cannot answer it, because that stops the action working everywhere. Asking
-     * find_router() gives the wrong answer there: without a stored instance, what the
-     * router answers is the saved policy, so an action being added for the first time
-     * is always one it does not answer yet -- which is precisely what the save being
-     * asked about would change. Every first choice looked like a mistake, and a
-     * warning shown for correct settings is one that stops being read.
+     * find_router() gives the wrong answer there: what the router answers is the saved
+     * policy, so an action being added for the first time is always one it does not
+     * answer yet -- which is precisely what the save being asked about would change.
+     * Every first choice looked like a mistake, and a warning shown for correct
+     * settings is one that stops being read.
      *
      * Nothing is written to decide this. Requests keep asking find_router(), which
      * judges by what is saved, so the policy an administrator is still considering
@@ -289,14 +209,6 @@ class routing_manager extends \core_ai\manager {
      * @return bool True when a request for it would reach the router.
      */
     public function would_answer(string $actionclass, array $managedactions): bool {
-        $actionclass = ltrim($actionclass, '\\');
-
-        // A stored instance carries its own action settings, which this policy does
-        // not change, so the honest answer is the one a request would get today.
-        if ($this->get_provider_instances(['provider' => provider::INSTANCE_CLASS]) !== []) {
-            return $this->find_router($actionclass) !== null;
-        }
-
-        return $this->adapter_for($actionclass, $managedactions) !== null;
+        return $this->adapter_for(ltrim($actionclass, '\\'), $managedactions) !== null;
     }
 }

@@ -17,10 +17,7 @@
 namespace local_airouter;
 
 use local_airouter\record\ledger;
-use local_airouter\check\actionconflict;
-use local_airouter\check\declinereach;
 use local_airouter\check\managedboundary;
-use local_airouter\check\routerfirst;
 use local_airouter\condition\budget;
 use core_ai\aiactions\generate_text;
 use core_ai\aiactions\responses\response_base;
@@ -68,7 +65,6 @@ final class routing_manager_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
         $this->manager = \core\di::get(manager::class);
     }
 
@@ -100,24 +96,17 @@ final class routing_manager_test extends \advanced_testcase {
     }
 
     /**
-     * Create the router instance, behind whatever already exists.
+     * Set the router up with the given settings.
      *
-     * @param array $config The instance configuration.
-     * @param bool $enabled Whether the instance is turned on.
-     * @return provider The instance.
+     * @param array $config The router's settings: defaulttarget, nomatch.
+     * @return provider The router a request would get.
      */
-    protected function add_router(array $config = [], bool $enabled = true): provider {
-        /** @var provider $instance */
-        $instance = $this->manager->create_provider_instance(
-            classname: provider::INSTANCE_CLASS,
-            name: 'Router',
-            enabled: $enabled,
-            config: $config,
-            actionconfig: [generate_text::class => ['enabled' => true]],
-        );
-        provider::get_instance_ids(true);
+    protected function add_router(array $config = []): provider {
+        foreach ($config as $name => $value) {
+            set_config($name, $value, 'local_airouter');
+        }
 
-        return $instance;
+        return adapter_provider::create();
     }
 
     /**
@@ -292,43 +281,6 @@ final class routing_manager_test extends \advanced_testcase {
         $this->assertNull(reset($stored)->generatedcontent);
     }
 
-    public function test_keeping_core_behaviour_no_longer_opens_a_way_round_the_budget(): void {
-        // The setting exists because throwing is heavy handed and a site may not want
-        // it. Until now turning it off meant the next provider answered the requests a
-        // budget had refused. Under management there is no next provider to answer
-        // them, so the same setting no longer decides whether the budget holds.
-        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
-        $target = $this->add_target('Metered', ['content' => 'Within budget']);
-        $this->add_router(['nomatch' => provider::NOMATCH_DECLINE, 'strictdecline' => 0]);
-        $this->add_budget_rule((int) $target->id, 2);
-        $this->spend(2);
-        $this->manage_text();
-
-        $response = $this->ask();
-
-        $this->assertFalse($response->get_success());
-    }
-
-    public function test_a_managed_action_with_no_usable_router_is_refused_not_redirected(): void {
-        global $DB;
-
-        // The site said this action is the router's. The router is switched off. The
-        // one thing that must not happen is the request quietly going somewhere else,
-        // because that is the case the whole arrangement exists to prevent -- and it is
-        // the case a site is most likely to arrive at by accident.
-        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
-        $this->add_router(enabled: false);
-        $this->manage_text();
-
-        $response = $this->ask();
-
-        $this->assertFalse($response->get_success());
-        $this->assertSame(503, $response->get_errorcode());
-        // No provider ran, so there is nothing to attribute a record to and none is
-        // invented. The refusal is the site's, not any provider's.
-        $this->assertSame(0, $DB->count_records('ai_action_register'));
-    }
-
     /**
      * A router that could actually answer: something to delegate to, and a rule saying so.
      */
@@ -351,16 +303,6 @@ final class routing_manager_test extends \advanced_testcase {
         $this->assertSame(\core\check\result::OK, (new managedboundary())->get_result()->get_status());
     }
 
-    public function test_the_status_check_reports_a_managed_action_with_nowhere_to_go(): void {
-        // Turned off is one way to get here. A router with no rules and no default
-        // target is the other, and it reads the same from outside: the site says this
-        // action is the router's and no request for it can be answered.
-        $this->add_router(enabled: false);
-        $this->manage_text();
-
-        $this->assertSame(\core\check\result::ERROR, (new managedboundary())->get_result()->get_status());
-    }
-
     public function test_the_status_check_reports_a_router_with_nothing_to_delegate_to(): void {
         $this->add_router();
         $this->manage_text();
@@ -381,42 +323,6 @@ final class routing_manager_test extends \advanced_testcase {
         $this->assertSame(\core\check\result::ERROR, (new managedboundary())->get_result()->get_status());
     }
 
-    public function test_the_order_checks_stand_down_when_every_action_is_managed(): void {
-        // Three of the checks are questions about the provider order: is the router
-        // first, is something in front of it, and who is behind it to pick up a
-        // refusal. A request that no longer goes through the order cannot be answered
-        // by any of them, and reporting the order as a fault anyway would be telling an
-        // administrator to fix something that has stopped deciding anything.
-        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
-        $this->add_working_router();
-        managed_policy::set_managed_actions(provider::get_action_list());
-
-        $inspector = new order_inspector();
-        foreach ([routerfirst::class, actionconflict::class, declinereach::class] as $class) {
-            $result = (new $class($inspector))->get_result();
-            $this->assertSame(\core\check\result::OK, $result->get_status(), $class);
-            $this->assertSame(
-                get_string('check:ordernotused', 'local_airouter'),
-                $result->get_summary(),
-                $class,
-            );
-        }
-    }
-
-    public function test_the_order_checks_say_which_actions_they_still_cover(): void {
-        // With only some placed under the router, the order still decides the rest, so
-        // the finding stands -- but it is now about fewer actions than it looks.
-        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
-        $this->add_working_router();
-        $this->manage_text();
-
-        $result = (new routerfirst(new order_inspector()))->get_result();
-
-        $this->assertSame(\core\check\result::ERROR, $result->get_status());
-        $this->assertStringContainsString('summarise_text', $result->get_details());
-        $this->assertStringNotContainsString('generate_text', $result->get_details());
-    }
-
     public function test_an_action_the_router_stopped_declaring_stays_managed(): void {
         // The policy is a decision the site made. Reading it back through what the
         // router can carry today would undo that decision the moment a plugin upgrade
@@ -431,6 +337,8 @@ final class routing_manager_test extends \advanced_testcase {
     }
 
     public function test_a_request_for_an_action_the_router_stopped_declaring_is_refused(): void {
+        global $DB;
+
         // The provider ahead of the router answers this action perfectly well, which
         // is what makes the leak worth closing: the request would succeed, on the
         // site's own key, with no rule and no budget consulted, and look like success.
@@ -447,6 +355,9 @@ final class routing_manager_test extends \advanced_testcase {
         $this->assertFalse($response->get_success());
         $this->assertSame(503, $response->get_errorcode());
         $this->assertNull($response->get_response_data()['generatedcontent']);
+        // No provider ran, so there is nothing to attribute a record to and none is
+        // invented. The refusal is the site's, not any provider's.
+        $this->assertSame(0, $DB->count_records('ai_action_register'));
     }
 
     public function test_the_status_check_names_an_action_whose_class_has_gone(): void {
@@ -469,27 +380,6 @@ final class routing_manager_test extends \advanced_testcase {
         managed_policy::set_managed_actions([fixture_dropped_action::class]);
 
         $this->assertTrue($this->ask()->get_success());
-    }
-
-    public function test_an_action_switched_off_at_the_router_is_refused_not_redirected(): void {
-        global $DB;
-
-        // The router is on and has somewhere to delegate, but the action is switched off
-        // on it. The setting is read from the row the router was found in rather than
-        // asked of core, which would read that row again; it has to decide all the same.
-        $this->add_target('Ahead', ['content' => 'Answered by the first provider']);
-        $target = $this->add_target('Routed', ['content' => 'Answered through the router']);
-        $router = $this->add_router();
-        $this->add_rule((int) $target->id);
-        $this->manager->update_provider_instance($router, actionconfig: [generate_text::class => ['enabled' => false]]);
-        $this->manage_text();
-
-        $response = $this->ask();
-
-        $this->assertFalse($response->get_success());
-        $this->assertSame(503, $response->get_errorcode());
-        $this->assertNull($response->get_response_data()['generatedcontent']);
-        $this->assertSame(0, $DB->count_records('ai_action_register'));
     }
 
     public function test_a_provider_changed_between_two_requests_is_seen_by_the_next(): void {

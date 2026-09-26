@@ -14,18 +14,23 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
-namespace aiprovider_router;
+namespace local_airouter;
 
 /**
- * Entry point for the summarise_text action.
+ * A router object for tests, made from a configuration given directly.
  *
- * Moodle builds the name of a processor from the provider's own namespace, so one of
- * these has to exist here for every action the router carries. The work is in
- * local_airouter.
+ * The router a request uses is an adapter_provider, built from the plugin's settings.
+ * A test that is about what the router does with a request rather than about where its
+ * settings come from builds one of these instead, with the settings it needs, the way
+ * core would build a provider from a stored row.
  *
- * @package    aiprovider_router
+ * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class process_summarise_text extends \local_airouter\process_summarise_text {
+class fixture_router extends provider {
+    #[\Override]
+    public function is_provider_configured(): bool {
+        return $this->get_default_target_id() !== null || self::has_rules();
+    }
 }

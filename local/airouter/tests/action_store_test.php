@@ -64,7 +64,6 @@ final class action_store_test extends \advanced_testcase {
         // The actions that work on a file need somewhere to put one, and a draft
         // area belongs to whoever is asking.
         $this->setAdminUser();
-        provider::get_instance_ids(true);
         $this->manager = \core\di::get(manager::class);
     }
 

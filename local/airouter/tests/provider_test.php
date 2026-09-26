@@ -17,116 +17,53 @@
 namespace local_airouter;
 
 /**
- * Tests for the router provider instance itself.
+ * Tests for the router object core runs an action against.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(provider::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(hook_listener::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(adapter_provider::class)]
 final class provider_test extends \advanced_testcase {
     #[\Override]
     protected function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        // The instance list is memoised for the request, so each test starts clean.
-        provider::get_instance_ids(true);
     }
 
-    /**
-     * Create a router instance on the site.
-     *
-     * @param array $config The instance configuration.
-     * @return provider The created instance.
-     */
-    protected function create_router(array $config = []): provider {
-        $instance = \core\di::get(\core_ai\manager::class)->create_provider_instance(
-            classname: provider::INSTANCE_CLASS,
-            name: 'router ' . uniqid(),
-            enabled: true,
-            config: $config,
-        );
-        provider::get_instance_ids(true);
-
-        return $instance;
+    public function test_a_router_with_nowhere_to_delegate_is_not_configured(): void {
+        // Otherwise it would take every request placed under it only to fail them.
+        $this->assertFalse(adapter_provider::create()->is_provider_configured());
     }
 
-    /**
-     * Test that a router with nowhere to delegate reports itself as unconfigured.
-     */
-    public function test_router_without_target_is_not_configured(): void {
-        $router = $this->create_router();
+    public function test_a_default_target_is_somewhere_to_delegate(): void {
+        set_config('defaulttarget', 7, 'local_airouter');
 
-        // Otherwise core would hand it every request only for the router to fail them.
-        $this->assertFalse($router->is_provider_configured());
-        $this->assertNull($router->get_default_target_id());
-    }
-
-    /**
-     * Test that a router with a target reports itself as configured.
-     */
-    public function test_router_with_target_is_configured(): void {
-        $router = $this->create_router(['defaulttarget' => 42]);
+        $router = adapter_provider::create();
 
         $this->assertTrue($router->is_provider_configured());
-        $this->assertEquals(42, $router->get_default_target_id());
+        $this->assertSame(7, $router->get_default_target_id());
     }
 
-    /**
-     * Test that the mode defaults to full routing and only accepts known values.
-     */
-    public function test_mode_defaults_to_full_routing(): void {
-        $this->assertEquals(provider::MODE_FULL, $this->create_router()->get_mode());
-        $this->assertEquals(
-            provider::MODE_COEXIST,
-            $this->create_router(['mode' => provider::MODE_COEXIST])->get_mode(),
-        );
-        // An unrecognised value must not silently disable full router mode.
-        $this->assertEquals(
-            provider::MODE_FULL,
-            $this->create_router(['mode' => 'nonsense'])->get_mode(),
-        );
+    public function test_rules_are_somewhere_to_delegate_too(): void {
+        // A site that routes everything by rule and declines the rest has no use for a
+        // default target.
+        set_config('rulecount', 1, 'local_airouter');
+
+        $this->assertTrue(adapter_provider::create()->is_provider_configured());
     }
 
-    /**
-     * Test that a second instance stands down instead of competing with the first.
-     */
-    public function test_second_instance_takes_itself_out_of_the_running(): void {
-        $first = $this->create_router(['defaulttarget' => 42]);
-        $second = $this->create_router(['defaulttarget' => 42]);
+    public function test_what_no_rule_claimed_goes_to_the_default_target_unless_the_site_declines_it(): void {
+        $this->assertSame(provider::NOMATCH_DELEGATE, adapter_provider::create()->get_nomatch_behaviour());
 
-        // The form refuses a second instance, but CLI and upgrade scripts do not go
-        // through the form, so the rest of the plugin must not assume there is one.
-        $this->assertTrue($first->is_primary_instance());
-        $this->assertFalse($second->is_primary_instance());
-        $this->assertTrue($first->is_provider_configured());
-        $this->assertFalse($second->is_provider_configured());
+        set_config('nomatch', provider::NOMATCH_DECLINE, 'local_airouter');
+
+        $this->assertSame(provider::NOMATCH_DECLINE, adapter_provider::create()->get_nomatch_behaviour());
     }
 
-    /**
-     * Test that the first router may be created but a second is refused.
-     */
-    public function test_form_refuses_a_second_instance(): void {
-        $this->assertTrue(hook_listener::validate_single_instance(['name' => 'first']));
-
-        $this->create_router();
-        $errors = hook_listener::validate_single_instance(['name' => 'second']);
-
-        $this->assertIsArray($errors);
-        $this->assertArrayHasKey('name', $errors);
-    }
-
-    /**
-     * Test that editing an existing instance is never blocked.
-     */
-    public function test_editing_an_existing_instance_is_allowed(): void {
-        $router = $this->create_router();
-
-        // A site that already has two routers still has to be able to edit them,
-        // otherwise the delete guidance would be unreachable.
-        $this->assertTrue(
-            hook_listener::validate_single_instance(['id' => $router->id, 'name' => 'edited']),
-        );
+    public function test_the_router_is_not_stored_anywhere(): void {
+        // It is built for one request from the plugin's settings: no row, no id.
+        $this->assertNull(adapter_provider::create()->id);
     }
 }

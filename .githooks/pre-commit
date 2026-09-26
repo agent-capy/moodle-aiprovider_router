@@ -77,8 +77,9 @@ else
 fi
 
 say "── 3. テスト ────────────────────────────────────"
-# ⚠ このリポジトリは複数コンポーネントを持つ（local/airouter と ai/provider/router）。
-#   置き場所は各コンポーネントの .moodlepath が持っているので、そこから数える。
+# ⚠ コンポーネントの置き場所は各コンポーネントの .moodlepath が持っているので、そこから数える。
+#   （2026-09-26 に ai/provider/router を削除し、いまは local/airouter のみ。
+#     数が変わっても直さずに済むよう、決め打ちしない）
 mapfile -t COMPONENTS < <(
   find "$REPO_ROOT" -name .moodlepath -not -path '*/.git/*' -printf '%h\n' | sort |
   while read -r dir; do

@@ -47,7 +47,6 @@ final class recording_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        \local_airouter\provider::get_instance_ids(true);
     }
 
     /**
@@ -342,30 +341,6 @@ final class recording_test extends \advanced_testcase {
         $this->assertSame(503, (int) $request->errorcode);
         $this->assertSame(0, (int) $request->attempts);
         $this->assertSame('fixture_dropped_action', $request->actionname);
-        $this->assertSame([], $this->attempts());
-    }
-
-    public function test_a_request_refused_for_a_switched_off_instance_is_one_declined_request(): void {
-        global $DB;
-        managed_policy::set_managed_actions([\core_ai\aiactions\generate_text::class]);
-        $manager = \core\di::get(\core_ai\manager::class);
-        $manager->create_provider_instance(
-            classname: \local_airouter\provider::INSTANCE_CLASS,
-            name: 'Switched off router',
-            enabled: false,
-            config: ['nomatch' => \local_airouter\provider::NOMATCH_DECLINE],
-            actionconfig: [\core_ai\aiactions\generate_text::class => ['enabled' => true]],
-        );
-
-        $response = $manager->process_action(new \core_ai\aiactions\generate_text(
-            contextid: \context_system::instance()->id,
-            userid: 2,
-            prompttext: 'Hello',
-        ));
-
-        $this->assertFalse($response->get_success());
-        $this->assertSame(request_state::DECLINED, $this->request()->state);
-        $this->assertSame('router_unavailable', $this->request()->reason);
         $this->assertSame([], $this->attempts());
     }
 

@@ -17,10 +17,8 @@
 /**
  * Lists the routing rules and changes their order.
  *
- * Not registered in the admin tree. Core calls load_settings() for aiplacement plugins
- * only, never for aiprovider ones, so an aiprovider plugin's settings.php is never read
- * on any release this plugin supports. The page is reached from the router's own
- * settings form and from the site status report, the same way the provider order page is.
+ * Registered in the administration tree by settings.php, and linked from the site
+ * status report.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -108,8 +106,6 @@ if ($action === 'delete' && $ruleid > 0 && !$confirm) {
     die;
 }
 
-echo admin_page::back_button($url);
-
 $rules = $repository->get_all();
 $conditions = $repository->get_conditions_for(array_keys($rules));
 $targets = target_resolver::get_delegation_targets();
@@ -170,11 +166,6 @@ echo $OUTPUT->single_button(
 echo $OUTPUT->single_button(
     new moodle_url('/local/airouter/ruletest.php'),
     get_string('ruletest:heading', 'local_airouter'),
-    'get',
-);
-echo $OUTPUT->single_button(
-    new moodle_url('/local/airouter/order.php'),
-    get_string('order:heading', 'local_airouter'),
     'get',
 );
 

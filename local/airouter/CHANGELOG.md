@@ -5,52 +5,60 @@ release, and versions follow [semantic versioning](https://semver.org/).
 
 ## Unreleased
 
-A second way of connecting to Moodle, and fixes from a second independent review of
-the same code.
+A new way of connecting to Moodle, which replaces the old one, and fixes from a second
+independent review of the same code.
 
 ### Added
 
-- A site can place an action **under the router**, on *Actions the AI Router must
-  answer*. Moodle brings that action to the router wherever the router sits in the
-  provider order, and offers the request to nobody else afterwards. The order decides
-  which provider Moodle prefers; it cannot decide which one answers, so until now a
-  provider placed above the router answered before any rule, budget or brought key had
-  been looked at.
+- A site places an action **under the router**, on *Actions the AI Router must
+  answer*. Moodle brings every request for that action to the router, and offers it to
+  nobody else afterwards. The provider order decides which provider Moodle prefers; it
+  cannot decide which one answers, so until now a provider placed above the router
+  answered before any rule, budget or brought key had been looked at.
   - A refusal comes back as an ordinary failed request rather than an error, so Moodle
     records it in its own AI action log for the first time. The prompt of a refused
     request is stored with it, as it is for a request that failed any other way.
-  - An action placed there and not answerable is refused, not passed to another
-    provider. Turning the router off turns that action off.
-  - Nothing is placed there until the site says so, and unmanaged actions are handled
-    exactly as before.
+  - An action placed there is refused, not passed to another provider, while the
+    router has neither a default delegation target nor any rules.
+  - Nothing is placed there until the site says so, and actions not placed there are
+    handled by Moodle exactly as they would be without this plugin.
+- The router's settings - whether it routes at all, what happens when no rule matches,
+  and the default delegation target - are on a *Routing policy* page in the
+  administration tree.
 - A status check, *Actions placed under the AI Router*, reports when a managed action
-  cannot reach the router: no enabled instance carries it, or another plugin has
+  cannot reach the router: the router has nothing to send it to, or another plugin has
   defined Moodle's AI manager and silently displaced this one.
 
 ### Changed
 
-- **The plugin is now two components, and the main one has moved.** What was
-  `aiprovider_router` is now `local_airouter`, installed at `local/airouter`;
-  `aiprovider_router` remains at `ai/provider/router` as a connector with no logic of
-  its own. Moodle never reads an `aiprovider` plugin's `settings.php`, so a router
-  that kept its rules and budgets there could not have a page in the administration
-  tree at all - every one of its screens had to be reached from the provider's own
-  settings form instead. As two components, the router's settings sit where an
-  administrator looks for settings.
+- **The plugin has moved.** What was `aiprovider_router` is now `local_airouter`,
+  installed at `local/airouter`. Moodle never reads an `aiprovider` plugin's
+  `settings.php`, so a router that kept its rules and budgets there could not have a
+  page in the administration tree at all - every one of its screens had to be reached
+  from the provider's own settings form instead.
   - The database tables, capabilities and language strings are renamed to match. There
-    is no upgrade path from `aiprovider_router`: nothing has been released, so the
-    plugin installs fresh.
+    is no upgrade path from a release of `aiprovider_router`: nothing has been
+    released, so the plugin installs fresh.
   - The development-only upgrade steps that carried an unreleased schema forward, and
     the code that existed only to support them, are removed with it.
 
-- The status checks about the provider order - whether the router is first, what is
-  ahead of it, and who is behind it - stand down for an action placed under the router,
-  and name the actions they still cover when only some have been placed there. Such a
-  request does not reach the order, so reporting the order as a fault would be asking
-  an administrator to fix something that no longer decides anything.
-- *Make refusals final* now says in its help that it has no effect on an action placed
-  under the router. Nothing else is offered those requests, so a refusal is final
-  whichever way the setting is left. It still governs every action not placed there.
+### Removed
+
+- **The connector `aiprovider_router`.** For a while the plugin came as two components:
+  this one, and a connector at `ai/provider/router` that let the router be a provider
+  instance in the site order. With actions placed under the router, nothing reaches it
+  that way any more, and an AI Router offered as a provider type only got in the way.
+  - A site that had a router provider instance keeps its settings: the upgrade copies
+    the default delegation target, what happens when no rule matches and the actions
+    the instance was enabled for onto the Routing policy page, then deletes the
+    instance and its place in the provider order. Uninstall the connector afterwards,
+    not before, or the instance is gone before its settings can be copied.
+  - Everything that existed only because the router was a provider in the order goes
+    with it: the operating mode, *Make refusals final*, the *AI provider order* page,
+    the status checks about the router's place in the order, its number of instances
+    and the actions its instance carried, and the button back to the provider instance
+    form. A request that reaches the router is never offered to another provider, so a
+    refusal is final without a setting to say so.
 
 ### Fixed
 

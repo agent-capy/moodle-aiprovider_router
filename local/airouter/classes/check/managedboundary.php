@@ -30,10 +30,10 @@ use core\check\result;
  * displaying its rules and budgets while none of them ran. Nothing warns about that on
  * its own, so it is asked here.
  *
- * The other way it can fail is the site's own doing: an action is managed and no
- * router instance can carry it, so every request for it is refused. That is the
- * designed behaviour rather than a fault, but an administrator needs to be told, and
- * told which way to fix it.
+ * The other way it can fail is the site's own doing: an action is managed and the
+ * router cannot answer it, because it has neither a default delegation target nor any
+ * rules, so every request for it is refused. That is the designed behaviour rather
+ * than a fault, but an administrator needs to be told, and told which way to fix it.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru

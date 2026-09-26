@@ -56,7 +56,6 @@ final class closing_test extends \advanced_testcase {
         parent::setUp();
         $this->resetAfterTest();
         $this->preventResetByRollback();
-        \local_airouter\provider::get_instance_ids(true);
     }
 
     #[\Override]

@@ -49,7 +49,6 @@ final class di_boundary_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
     }
 
     /**

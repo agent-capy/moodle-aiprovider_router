@@ -22,6 +22,7 @@ use local_airouter\record\ledger;
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once(__DIR__ . '/fixtures/fixture_router.php');
 require_once(__DIR__ . '/fixtures/fixture_text_provider.php');
 require_once(__DIR__ . '/fixtures/fixture_unconfigured_provider.php');
 
@@ -42,7 +43,6 @@ final class target_resolver_test extends \advanced_testcase {
         global $DB;
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
         $this->repository = new rule_repository($DB);
     }
 
@@ -70,7 +70,7 @@ final class target_resolver_test extends \advanced_testcase {
      * @return target_resolver The resolver under test.
      */
     protected function resolver(array $instances, array $config = ['defaulttarget' => 7]): target_resolver {
-        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: json_encode($config), id: 1);
+        $router = new \local_airouter\fixture_router(enabled: true, name: 'Router', config: json_encode($config), id: 1);
 
         return new class ($router, $instances) extends target_resolver {
             /**
@@ -239,11 +239,11 @@ final class target_resolver_test extends \advanced_testcase {
         $this->add('points at a router', 2);
         $resolver = $this->resolver([
             $this->instance(7),
-            new \aiprovider_router\provider(enabled: true, name: 'Another router', config: '{"defaulttarget":7}', id: 2),
+            new \local_airouter\fixture_router(enabled: true, name: 'Another router', config: '{"defaulttarget":7}', id: 2),
         ]);
 
-        // A router delegating to a router is how a loop starts, and the single instance
-        // restriction only covers instances created through the form.
+        // A router delegating to a router is how a loop starts. None can be created any
+        // more, but an instance list is not trusted to be free of one.
         $this->assertSame([7], $this->candidates($resolver));
         $this->assertNull($resolver->get_matched_rule());
     }
@@ -259,43 +259,29 @@ final class target_resolver_test extends \advanced_testcase {
         $this->assertSame('anywhere', $resolver->get_matched_rule()?->get('name'));
     }
 
-    public function test_router_only_mode_delegates_what_no_rule_claimed(): void {
-        $resolver = $this->resolver(
-            [$this->instance(7)],
-            ['defaulttarget' => 7, 'mode' => provider::MODE_FULL],
-        );
+    public function test_what_no_rule_claimed_goes_to_the_default_target(): void {
+        $resolver = $this->resolver([$this->instance(7)], ['defaulttarget' => 7]);
 
-        // There is nobody behind the router to take a refused request.
         $this->assertSame([7], $this->candidates($resolver));
         $this->assertFalse($resolver->was_declined());
     }
 
-    public function test_alongside_other_providers_declines_what_no_rule_claimed(): void {
+    public function test_a_site_can_decline_what_no_rule_claimed(): void {
         $resolver = $this->resolver(
             [$this->instance(7)],
-            ['defaulttarget' => 7, 'mode' => provider::MODE_COEXIST],
+            ['defaulttarget' => 7, 'nomatch' => provider::NOMATCH_DECLINE],
         );
 
-        // Declining hands the request back to core, which asks the next provider.
+        // Refusing everything no rule covers is a way of keeping AI spending to the
+        // cases the rules describe.
         $this->assertSame([], $this->candidates($resolver));
         $this->assertTrue($resolver->was_declined());
     }
 
-    public function test_the_administrator_can_choose_the_other_answer(): void {
-        $coexisting = $this->resolver(
-            [$this->instance(7)],
-            ['defaulttarget' => 7, 'mode' => provider::MODE_COEXIST, 'nomatch' => provider::NOMATCH_DELEGATE],
-        );
-        $routeronly = $this->resolver(
-            [$this->instance(7)],
-            ['defaulttarget' => 7, 'mode' => provider::MODE_FULL, 'nomatch' => provider::NOMATCH_DECLINE],
-        );
+    public function test_an_answer_the_router_does_not_know_sends_the_request_on(): void {
+        $resolver = $this->resolver([$this->instance(7)], ['defaulttarget' => 7, 'nomatch' => 'nonsense']);
 
-        $this->assertSame([7], $this->candidates($coexisting));
-        // Refusing everything no rule covers is a way of keeping AI spending to the
-        // cases the rules describe, so router only mode has to be able to do it.
-        $this->assertSame([], $this->candidates($routeronly));
-        $this->assertTrue($routeronly->was_declined());
+        $this->assertSame([7], $this->candidates($resolver));
     }
 
     public function test_declining_also_means_no_silent_fallback_behind_a_rule(): void {
@@ -328,7 +314,7 @@ final class target_resolver_test extends \advanced_testcase {
 
     public function test_a_router_with_rules_and_no_default_target_is_still_configured(): void {
         $this->add('to eight', 8);
-        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: '{}', id: 1);
+        $router = new \local_airouter\fixture_router(enabled: true, name: 'Router', config: '{}', id: 1);
 
         // A site that routes everything by rule and refuses the rest has no use for a
         // default target, and core would otherwise skip the router as unconfigured.
@@ -642,7 +628,7 @@ final class target_resolver_test extends \advanced_testcase {
     }
 
     public function test_a_router_with_neither_rules_nor_a_target_is_not_configured(): void {
-        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: '{}', id: 1);
+        $router = new \local_airouter\fixture_router(enabled: true, name: 'Router', config: '{}', id: 1);
 
         $this->assertFalse($router->is_provider_configured());
     }
@@ -679,10 +665,10 @@ final class target_resolver_test extends \advanced_testcase {
      *
      * @param ai_provider[] $instances The instances, as read.
      * @param array $config The router instance configuration.
-     * @return \aiprovider_router\provider The router.
+     * @return \local_airouter\fixture_router The router.
      */
-    protected function carrying_router(array $instances, array $config = ['defaulttarget' => 7]): \aiprovider_router\provider {
-        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: json_encode($config), id: 1);
+    protected function carrying_router(array $instances, array $config = ['defaulttarget' => 7]): \local_airouter\fixture_router {
+        $router = new \local_airouter\fixture_router(enabled: true, name: 'Router', config: json_encode($config), id: 1);
         $router->carry_request_instances($instances);
 
         return $router;

@@ -22,6 +22,7 @@ use core_ai\provider as ai_provider;
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once(__DIR__ . '/fixtures/fixture_router.php');
 require_once(__DIR__ . '/fixtures/mock/provider.php');
 require_once(__DIR__ . '/fixtures/mock/abstract_processor.php');
 require_once(__DIR__ . '/fixtures/mock/process_generate_text.php');
@@ -55,7 +56,6 @@ final class rule_routing_test extends \advanced_testcase {
         global $DB;
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
         $this->repository = new rule_repository($DB);
     }
 
@@ -108,7 +108,7 @@ final class rule_routing_test extends \advanced_testcase {
     protected function route(array $instances, array $config = ['defaulttarget' => 7]): object {
         global $DB;
 
-        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: json_encode($config), id: 1);
+        $router = new \local_airouter\fixture_router(enabled: true, name: 'Router', config: json_encode($config), id: 1);
         $action = new generate_text(
             contextid: \context_system::instance()->id,
             userid: 2,
@@ -244,12 +244,12 @@ final class rule_routing_test extends \advanced_testcase {
     public function test_a_declined_request_is_reported_as_a_decision_not_a_fault(): void {
         $response = $this->route(
             [$this->target(7, \aiprovider_mock\provider::SUCCESS, ['content' => 'Never reached'])],
-            ['defaulttarget' => 7, 'mode' => provider::MODE_COEXIST],
+            ['defaulttarget' => 7, 'nomatch' => provider::NOMATCH_DECLINE],
         );
 
         $this->assertFalse($response->get_success());
-        // Alongside other providers this is how the router says "not my request", and
-        // core carries on to the next provider in its own order.
+        // The site asked for what no rule claimed to be refused. That is a decision,
+        // and the response says so rather than reporting a fault.
         $this->assertSame(503, $response->get_errorcode());
         $this->assertSame(
             get_string('error:norulematched', 'local_airouter'),

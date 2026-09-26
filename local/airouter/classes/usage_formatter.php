@@ -525,12 +525,12 @@ class usage_formatter {
 
         if ($share < 100) {
             // The router can only apply rules to what reaches it, and what reaches it is
-            // decided by the site's provider order rather than by anything here.
+            // the actions the site has placed under it.
             $output .= \html_writer::div(
                 get_string('usage:passthrough:notall', 'local_airouter')
                     . ' ' . \html_writer::link(
-                        new \moodle_url('/local/airouter/order.php'),
-                        get_string('order:heading', 'local_airouter'),
+                        new \moodle_url('/local/airouter/managed.php'),
+                        get_string('managed:heading', 'local_airouter'),
                     ),
                 'text-muted',
             );

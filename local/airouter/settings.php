@@ -53,16 +53,6 @@ $ADMIN->add($ADMIN->locate('ai') !== null ? 'ai' : 'localplugins', $category);
 $policy = new admin_settingpage('local_airouter_policy', get_string('policy:heading', 'local_airouter'));
 
 if ($ADMIN->fulltree) {
-    // An instance created before the settings moved here still decides what happens,
-    // so say so rather than letting an administrator set something that is not read.
-    if (provider::get_instance_ids() !== []) {
-        $policy->add(new admin_setting_heading(
-            'local_airouter/instanceinuse',
-            get_string('policy:instanceinuse', 'local_airouter'),
-            get_string('policy:instanceinuse_desc', 'local_airouter'),
-        ));
-    }
-
     $policy->add(new admin_setting_configcheckbox(
         'local_airouter/' . managed_policy::SWITCH,
         get_string('routing', 'local_airouter'),
@@ -107,7 +97,6 @@ $ADMIN->add('local_airouter', $policy);
 $pages = [
     'managed' => 'managed:heading',
     'rules' => 'rules:heading',
-    'order' => 'order:heading',
     'rates' => 'rates:heading',
     'byok' => 'byok:heading',
     'usage' => 'usage:heading',

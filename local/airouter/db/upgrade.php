@@ -388,5 +388,71 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092307, 'local', 'airouter');
     }
 
+    if ($oldversion < 2026092600) {
+        // The router is no longer an AI provider instance. The companion plugin that
+        // made it one, aiprovider_router, is gone, and routing is decided here alone.
+        // A site that still has such an instance had its settings there, and they
+        // decided what happened to requests while it existed, so they are carried over
+        // before the instance goes. The lowest id is the one that decided.
+        $routers = $DB->get_records('ai_providers', ['provider' => 'aiprovider_router\\provider'], 'id ASC');
+        if ($routers) {
+            $router = reset($routers);
+            $config = json_decode((string) $router->config, true) ?: [];
+
+            // The instance's own target, or none where it had none. A value left on the
+            // routing policy page from before never decided anything while the instance
+            // existed, and keeping it would start sending unclaimed requests somewhere.
+            $target = (int) ($config['defaulttarget'] ?? 0);
+            if ($target > 0) {
+                set_config('defaulttarget', $target, 'local_airouter');
+            } else {
+                unset_config('defaulttarget', 'local_airouter');
+            }
+            // What the instance did with a request no rule claimed, including where it
+            // said nothing and its operating mode decided instead.
+            $nomatch = (string) ($config['nomatch'] ?? '');
+            if (!in_array($nomatch, ['delegate', 'decline'], true)) {
+                $nomatch = ($config['mode'] ?? '') === 'coexist' ? 'decline' : 'delegate';
+            }
+            set_config('nomatch', $nomatch, 'local_airouter');
+
+            // An enabled instance had requests for its actions reaching it through the
+            // provider order. From now on only the actions placed under the router reach
+            // it, so those actions are placed there: the alternative is that they go
+            // straight to another provider, past every rule, budget and brought key.
+            if (!empty($router->enabled)) {
+                $stored = (string) get_config('local_airouter', 'managedactions');
+                $managed = array_filter(array_map(
+                    static fn(string $action): string => ltrim(trim($action), '\\'),
+                    explode(',', $stored),
+                ));
+                $actionconfig = json_decode((string) $router->actionconfig, true) ?: [];
+                foreach ($actionconfig as $action => $settings) {
+                    if (!empty($settings['enabled'])) {
+                        $managed[] = ltrim((string) $action, '\\');
+                    }
+                }
+                set_config('managedactions', implode(',', array_values(array_unique($managed))), 'local_airouter');
+            }
+
+            // The instances go, and so do their places in the provider order: core
+            // removes the rows when the companion plugin is uninstalled, but leaves the
+            // order as it is, and an id left in it makes moving providers up and down
+            // behave in ways nobody asked for.
+            $ids = array_map('intval', array_keys($routers));
+            $DB->delete_records_list('ai_providers', 'id', $ids);
+            $order = get_config('core_ai', 'provider_order');
+            if ($order !== false) {
+                $kept = array_filter(
+                    explode(',', (string) $order),
+                    static fn(string $entry): bool => $entry === '' || !in_array((int) $entry, $ids, true),
+                );
+                set_config('provider_order', implode(',', $kept), 'core_ai');
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026092600, 'local', 'airouter');
+    }
+
     return true;
 }

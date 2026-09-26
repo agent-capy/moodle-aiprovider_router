@@ -4,25 +4,18 @@ A *router* for the Moodle AI subsystem: instead of talking to a model itself, it
 decides — per request — which configured AI provider should handle the call, and
 delegates to it.
 
-> ## Two plugins, both required
+> **Upgrading from an earlier build.** Earlier builds came as two plugins: this one
+> and a connector, `aiprovider_router`, at `ai/provider/router`. The connector is no
+> longer used. Upgrading this plugin carries the router provider instance's settings
+> over to the Routing policy page — the default delegation target, what happens when no
+> rule matches, and the actions the instance was enabled for, which become actions
+> placed under the router — and then deletes the instance.
 >
-> | Component | Path | What it is |
-> | --- | --- | --- |
-> | `local_airouter` | `local/airouter` | This plugin. Rules, budgets, monitoring, keys people bring, and the settings pages. |
-> | `aiprovider_router` | `ai/provider/router` | The connector, with no logic of its own. |
->
-> Moodle decides whether an AI action is enabled, and which actions a provider offers,
-> by testing whether the plugin's name begins with `aiprovider_`, so a router registered
-> as a provider instance has to be an `aiprovider` plugin. Everything else is better off
-> outside one, because Moodle never reads an `aiprovider` plugin's `settings.php`, which
-> is why the settings could not be in the administration tree until this split.
->
-> A site that has no router provider instance is now routed by `local_airouter` alone,
-> which is where this is going. The connector stays while sites configured the old way
-> still depend on it.
->
-> Install both. `aiprovider_router` declares a dependency on this plugin, so Moodle
-> will tell you if only one is present.
+> Once the upgrade has run, uninstall **AI Router** (`aiprovider_router`) under
+> *Site administration → Plugins → Plugins overview*, or with
+> `php admin/cli/uninstall_plugins.php --plugins=aiprovider_router --run`, and delete
+> its directory. ⚠ **Upgrade first.** Uninstalling the connector deletes the instance,
+> and with it the settings the upgrade would have carried over.
 
 > **Status: beta, 0.1.0.** Everything described below is implemented and covered by
 > tests, and CI runs the suite against Moodle 5.0, 5.1 and 5.2 on PHP 8.3 and 8.4. It
@@ -68,9 +61,8 @@ The router's screens are at **Site administration > AI > AI Router**.
 | Page | What it is for |
 | --- | --- |
 | Routing policy | Whether the router routes at all, what happens when no rule matches, and the default delegation target |
-| Actions the AI Router must answer | Which actions Moodle brings to the router wherever it sits in the provider order |
+| Actions the AI Router must answer | Which actions Moodle brings to the router. Only these reach it |
 | Routing rules | The rules, in the order they are considered |
-| AI provider order | The site order, and the only page that changes it |
 | AI Router rates | What each model costs, which is what budgets are measured against |
 | Keys people bring | Whether a provider may be used with somebody's own key |
 | Usage | What was asked for, by whom, and what it cost |
@@ -81,57 +73,47 @@ placed under the router, the rules and the keys are all still there, and switchi
 back on puts them in charge again. It is a way to find out what the plugin is doing
 for a site without uninstalling it.
 
-⚠ A site that created an AI Router **provider instance** before the settings moved here
-still uses that instance, settings and all, and the Routing policy page says so. Such a
-site configures the router on the provider instance form, as below. A site that has not
-created one uses the Routing policy page.
-
-A router instance has four settings, on the provider instance form.
+The Routing policy page holds two more settings.
 
 | Setting | Description |
 | --- | --- |
-| Operating mode | *Router only* expects every AI request to come through the router, which needs to be first in the provider order. *Alongside other providers* leaves requests the router declines to whichever provider comes next. |
-| When no rule matches | *Send it to the default delegation target*, or *decline the request*. Declining hands the request back to Moodle, which tries the next AI provider in the site order: alongside other providers the site carries on as before, while in router only mode there is no next provider and the request stops. Declining is also how a site keeps AI spending to the cases its rules describe. The default follows the operating mode. |
-| Default delegation target | The provider instance that handles a request when no rule picks one, and the one a request falls back to if the target a rule chose fails. Not needed on a site that routes entirely by rule and declines the rest; otherwise the router reports itself as not configured, so core skips it rather than handing it requests it cannot serve. |
-| Make refusals final | On by default. Stops Moodle trying another provider when the router turns a request down because a budget has been reached, because a key somebody brought cannot be used, or because nothing is configured to handle the request. See *What a refusal is worth* below. |
-
-Only one router instance can exist on a site. The form refuses a second one, and if a
-second is created another way it stands down rather than competing with the first.
+| When no rule matches | *Send it to the default delegation target*, or *decline the request*. A declined request is not offered to another provider: it fails, and Moodle records it as a failed request. Declining is how a site keeps AI spending to the cases its rules describe. |
+| Default delegation target | The provider instance that handles a request when no rule picks one, and the one a request falls back to if the target a rule chose fails. Not needed on a site that routes entirely by rule and declines the rest. With neither this nor any rule, the router has nowhere to send anything, and requests for the actions placed under it are refused. |
 
 ## Actions the site places under the router
 
-The provider order says which provider Moodle *prefers*. It cannot say which provider
-answers: whichever comes first and succeeds is the answer, so a provider above the
-router answers before any rule, budget or key somebody brought has been looked at. For a
-site using the router to decide where requests go and who pays for them, that is the
-difference between a policy and a hope.
+Moodle tries AI providers in the order configured for the site and takes the first
+answer. The order says which provider Moodle *prefers*; it cannot say which provider
+answers, and it knows nothing about rules, budgets or whose key should pay. For a site
+using the router to decide those things, that is the difference between a policy and a
+hope.
 
-A site can instead place an action **under** the router, on **Actions the AI Router must
-answer** (`/local/airouter/managed.php`). Moodle then brings that action to the
-router wherever the router sits in the order, and offers the request to nobody else
+So the router is not a provider in that order. An action is placed **under** it on
+**Actions the AI Router must answer** (`/local/airouter/managed.php`), and Moodle then
+brings every request for that action to the router, and offers it to nobody else
 afterwards:
 
 - a refusal -- no rule claimed the request, the budget has run out, the key somebody
   brought was refused -- comes back as an ordinary failed request. The placement shows
-  what it shows for any failure, and **Moodle records it in its own AI action log**,
-  which it never could before: stopping the next provider used to require raising an
-  error, and an error means core writes nothing down.
+  what it shows for any failure, and **Moodle records it in its own AI action log**.
 - a target that merely breaks is still retried, among the targets the rules allow, and
   nowhere else.
-- if no enabled router instance can carry the action, the request is refused rather
-  than passed on. That is the point of choosing it here, and it has a cost worth stating
-  plainly: **turning the router off turns that action off**.
+- if the router has neither a default delegation target nor any rules, the request is
+  refused rather than passed on. That is the point of choosing it here, and it has a
+  cost worth stating plainly: **an action placed under the router before the router is
+  set up stops working until it is**.
 
-Actions not chosen here behave exactly as they always did, and a site that chooses
-nothing is unchanged.
+An action not placed there does not reach the router at all. Moodle handles it in the
+provider order exactly as it would without this plugin, and no rule, budget or brought
+key applies to it.
 
 Two consequences to decide about before turning this on:
 
-- **Refused requests are now stored.** Moodle records a refusal as it records any other
-  failed request, prompt included. Previously the error path stored nothing at all. The
-  prompt is not shown in the standard AI usage report, which lists token counts rather
-  than text, and it is covered by the Privacy API for export and deletion. ⚠ Moodle has
-  no retention setting for these records, so they are kept indefinitely.
+- **Refused requests are stored.** Moodle records a refusal as it records any other
+  failed request, prompt included. The prompt is not shown in the standard AI usage
+  report, which lists token counts rather than text, and it is covered by the Privacy
+  API for export and deletion. ⚠ Moodle has no retention setting for these records, so
+  they are kept indefinitely.
 - ⚠ **Only one plugin can do this at a time.** The router takes its place by defining
   the AI manager in Moodle's dependency injection container. If another plugin defines
   the same entry, whichever is registered last wins and nothing warns about it - the
@@ -145,64 +127,30 @@ Two consequences to decide about before turning this on:
   it from here. If you install something that does this, that part of the site is
   outside the arrangement. Nothing shipped with Moodle does it.
 
-The three status checks that ask about the provider order - whether the router is
-first, what is ahead of it, and who is behind it to pick up a refusal - stand down for
-an action placed under the router, because such a request never reaches the order. They
-name the actions they still cover when only some have been placed there. On a site with
-no router provider instance they stand down entirely, and say so: there is no provider
-order for them to be about.
+## Status checks
 
-This is the newer of two ways to run the router and it does not replace the older one.
-Sites that leave actions unmanaged keep the arrangement described next, where the
-router is one provider among several and refusals are made final by raising an error.
-
-## Provider order
-
-Moodle tries AI providers in the order configured for the site and returns the first
-answer it gets, so **the router only does anything if it comes first**. Creating a
-provider instance puts it at the end of that order, which means a freshly installed
-router is never reached and appears to do nothing at all.
-
-The plugin reports this on *Site administration → Reports → System status*:
+The plugin reports on *Site administration → Reports → System status*. On a site where
+the router has neither a default delegation target nor any rules, the checks other than
+the first say that there is nothing to check yet.
 
 | Check | Reports |
 | --- | --- |
-| Actions placed under the AI Router | An action the site placed under the router cannot reach it, either because no enabled instance carries it or because another plugin has taken over Moodle's AI manager. Reported only where at least one action has been placed there. |
-| Number of AI Router instances | More than one router instance exists. Only the lowest numbered one is used; delete the rest from the AI provider list. |
-| AI Router in the provider order | The router is absent from the order, so it is tried only after every other provider has refused the request. |
-| AI Router position in the provider order | The router is not tried first. An error in *Router only* mode; in *Alongside other providers* mode this may be deliberate, so it is reported for information only. |
-| Providers ahead of the AI Router | A provider that comes earlier handles the same actions and will answer first. |
-| What happens when the AI Router says no | Which providers come after the router and could answer a request it turned down. A warning where *Make refusals final* is off, because a budget or a brought key would then be bypassed; otherwise a statement of what is behind the router. |
-| How people qualify to bring a key | The eligibility policy rests on a profile field the person it describes can fill in, so they can admit themselves. Reported for information where every condition is required, and as a warning where any one will do. |
-| Leftover entries in the provider order | The order still names instances that have been deleted. Moving providers up and down works on positions in that list, so leftovers can make reordering appear to do nothing. |
+| Actions placed under the AI Router | An action the site placed under the router cannot reach it, either because the router has neither a default delegation target nor any rules or because another plugin has taken over Moodle's AI manager. Reported only where at least one action has been placed there. |
 | Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
-| Actions the router instance can carry | An action the router offers is not configured on its instance, so requests for it never reach the router. This happens when a plugin defining an action is installed after the router instance was made: the action list is read fresh every time, the instance's configuration is written once. ⚠ The provider settings screen cannot put it right for an action outside core, so recreating the instance is the fix. |
+| Keys brought by users and courses | A brought key cannot be decrypted, which happens when a site is restored without the key file under the site data directory. |
+| How people qualify to bring a key | The eligibility policy rests on a profile field the person it describes can fill in, so they can admit themselves. Reported for information where every condition is required, and as a warning where any one will do. |
+| Rates for budget conditions | A budget has too few rates to be measured against, so the rules carrying it match later than they should, or never. |
+| Budget history | A budget looks back further than the usage this site still holds. |
+| Record gaps | The record of requests and attempts has holes in it, so a provider's bill may not match the reports. |
 
-These pages are in the administration tree, so they have the settings navigation and
-the breadcrumb Moodle gives any administration page. They were not while the router was
-an `aiprovider` plugin, because Moodle never reads such a plugin's `settings.php`; the
-**Back to AI Router settings** button they carry from that time still leads to the
-provider instance form, which is where a site that has one keeps its settings.
-
-Each check links to **AI provider order** (`/local/airouter/order.php`), which is the
-only page that changes the order. It shows the current order entry by entry, and what the
-order would become, before anything is written. The change is made with your session key
-over POST, requires `moodle/site:config`, and is recorded in the configuration log.
-
-Two details are deliberate there:
-
-- The **empty first entry** in the order is kept. Moodle's enable and disable handling
-  tests the result of searching the list for truthiness, so a provider sitting at the very
-  first position is duplicated when enabled and left behind when disabled. Keeping that
-  entry empty keeps every real provider clear of it.
-- Moving the router to the front **does not reorder anything else**. The other providers
-  keep their order relative to each other.
+The router's pages are in the administration tree, under *Site administration > AI >
+AI Router*, so they have the settings navigation and the breadcrumb Moodle gives any
+administration page.
 
 ## Rules
 
 Rules are managed at **Routing rules** (`/local/airouter/rules.php`), under
-**Site administration > AI > AI Router**, and linked from the router's own settings form
-and from the site status report.
+**Site administration > AI > AI Router**, and linked from the site status report.
 
 The list shows the rules in the order they are considered, with what each one requires,
 where it delegates, whose key pays for it, and buttons to reorder, copy, switch off or
@@ -276,45 +224,20 @@ condition, while "teacher, in this course" is two.
 
 ### What a refusal is worth
 
-Moodle tries each AI provider in the site order and stops at the first one that
-succeeds. A provider reports a failure, and Moodle reads every failure the same way: as
-that provider being unable to help. There is no way for a provider to say *this request
-has been answered and the answer is no*.
+A request that reaches the router is never offered to another provider afterwards,
+whatever the router decided. What the router's reasons still decide is whether it
+tries another of its own targets first:
 
-That distinction is the whole of what this plugin does. A request the router turned down
-because a budget had been reached, or because the key somebody brought could not be
-used, would otherwise be offered to the next provider in the order and answered on the
-site's own key. The limit would hold only until somebody asked twice.
-
-**Make refusals final** closes that. Where it is on — the default — a refusal of that
-kind raises an error, which is the only thing that stops Moodle's loop. What it costs is
-worth knowing:
-
-- the person making the request sees an error message rather than a quiet failure;
-- Moodle does not write the request to its own AI log (`ai_action_register`). The
-  router's own usage records are written before the error is raised, so the reports in
-  this plugin, and the budgets that read them, are unaffected;
-- a placement that catches the error can show it however it likes. Moodle's own
-  placements do not, so the message appears as an error.
-
-Not every failure is treated this way, and the line matters:
-
-| The router says | Is it final? |
+| The router says | What happens |
 | --- | --- |
-| A rule fitted this request and its budget has been reached | **Yes.** A spending limit that can be bypassed is not a limit |
-| A key somebody brought cannot be read, or was refused, or every instance they hold a key for has been tried | **Yes.** Carrying on would move the cost onto the site, which is the opposite of what was asked |
-| Nothing is configured to handle this request | **Yes.** A half configured site should be visibly half configured rather than quietly answered by something else |
-| No rule claimed this request | **No.** This is the router saying the request was not its business, which is exactly the point of running it alongside other providers. Moodle carrying on is correct |
-| A target was unreachable, broke, or returned nothing usable | **No.** That is what the fallback is for — *unless* the request was being charged to a key somebody brought, in which case the next provider would answer it on the site's key and charge the site for what somebody else asked to pay for |
-| The rate limit set on the router itself has been reached | **Yes.** Moodle checks a provider's rate limit before calling the provider, so a router with a limit set on it had a way past every refusal above: once the limit was reached the router was not asked at all |
+| A rule fitted this request and its budget has been reached | **Stops.** A spending limit that another target could answer past is not a limit |
+| A key somebody brought cannot be read, or was refused, or every instance they hold a key for has been tried | **Stops.** Carrying on would move the cost onto the site, which is the opposite of what was asked |
+| Nothing is configured to handle this request | **Stops.** A half configured site should be visibly half configured |
+| No rule claimed this request, and *When no rule matches* is set to decline | **Stops.** This is the site saying the request is not to be answered |
+| A target was unreachable, broke, or returned nothing usable | **Tries the next target** the rules allow -- among the instances the same payer holds a key for, where the request was being charged to a brought key |
 
-Turning the setting off restores Moodle's ordinary behaviour throughout.
-
-**This is not a complete answer, and the plugin does not pretend otherwise.** It stops
-a refusal from being mistaken for a fault; it cannot remove the other providers from
-Moodle's list. The *What happens when the AI Router says no* status check reports which
-providers sit behind the router, so that a site owner can see what would happen if the
-setting were off. A request for a proper way to say this has been raised with Moodle.
+Either way, the person making the request sees the placement's ordinary failure, and
+the request is in the router's usage records and in Moodle's own AI log.
 
 Conditions that depend on something the request does not carry — a course, when the
 request came from outside any course; a placement, when it cannot be identified — are not
@@ -342,8 +265,8 @@ runs out" setting, because the order of the rules already says it:
 ```
 
 Delete the second rule, on a site that declines requests matching nothing, and the same
-pair blocks instead of switching. A request stopped that way is stopped for good, and
-not handed to the next provider in the site order — see *What a refusal is worth*.
+pair blocks instead of switching. A request stopped that way is stopped for good — see
+*What a refusal is worth*.
 
 **A budget in money is a budget at one provider.** Money is counted per provider, in
 the currency that provider bills in, and is never added across providers, so a money
@@ -482,7 +405,7 @@ site, not an obstacle on the path of every AI request.
 
 Underneath, the router writes two records as it goes: one row for the request, and
 one row for every provider it asked on the request's behalf. The request row is
-opened the moment the request arrives, before the rate limit and before the rules,
+opened the moment the request arrives, before anything is decided about it,
 and closed when the outcome is known. Each attempt row is written before the provider
 is called and finished when it comes back -- or does not.
 
@@ -618,8 +541,8 @@ providers shows two figures.
 
 Two figures sit beside them. **Requests that reached the router** compares this plugin's
 history with Moodle's own register: if only part of the site's AI went through the router,
-the rest reached another provider first, which is a matter of the provider order rather
-than of any rule here. **Why requests failed** counts the failures by reason — refused,
+the rest was for actions not placed under it, which Moodle handled in its provider order
+without asking the router. **Why requests failed** counts the failures by reason — refused,
 every target failed, a target threw — and is drawn from the detail rows alone, so it
 covers the period the detail still reaches back to and says so.
 
@@ -1064,14 +987,9 @@ Two are included as proof: `local_aimedia` defines **transcribe audio** and **as
 about a picture**, and the Sakura AI Engine provider offers both. Rules, budgets, brought keys and the usage
 history all apply to it, because none of them know which actions exist.
 
-An action defined outside core is offered **only while its plugin is installed**.
-Naming one that is absent makes the provider settings screen fatal, because that
-screen asks each action for its own name.
-
-⚠ **Install the plugin defining the action before creating the router instance.**
-An instance is configured for the actions that existed when it was made, and nothing
-revisits that later, so a router that predates the action lists it and never receives
-it. The *Actions the router instance can carry* status check reports this.
+An action defined outside core is offered **only while its plugin is installed**. The
+router reads the list afresh for every request, so an action installed after the router
+was set up can be placed under it on *Actions the AI Router must answer* straight away.
 
 ⚠ Three places in `core_ai\manager` build an action's class name from core's own
 namespace, so an action living anywhere else is not found there. The one that
@@ -1147,6 +1065,9 @@ goes depends on the release, because the web root moved under `public/` in 5.1:
 > Moodle caches the list of present plugins, so if you copy the files with `rsync` or
 > similar, run `php admin/cli/purge_caches.php` **before** the upgrade — otherwise Moodle
 > will not detect the new plugin.
+
+A site that has the connector `aiprovider_router` from an earlier build: see
+*Upgrading from an earlier build* at the top of this page.
 
 ## License
 

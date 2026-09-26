@@ -48,15 +48,6 @@ class recordgaps extends base {
         );
     }
 
-    #[\Override]
-    protected function requires_instance(): bool {
-        return false;
-    }
-
-    #[\Override]
-    protected function depends_on_provider_order(): bool {
-        return false;
-    }
 
     #[\Override]
     protected function check_router(): result {

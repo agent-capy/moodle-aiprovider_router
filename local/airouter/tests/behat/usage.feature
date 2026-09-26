@@ -5,10 +5,7 @@ Feature: Seeing what the router handled
   I need a page that answers what Moodle's own record cannot
 
   Background:
-    Given the following "core_ai > ai providers" exist:
-      | provider          | name        | enabled | mode |
-      | aiprovider_router | Test router | 1       | full |
-    And I log in as "admin"
+    Given I log in as "admin"
 
   Scenario: A site that has recorded nothing says so rather than showing empty charts
     When I visit "/local/airouter/usage.php"

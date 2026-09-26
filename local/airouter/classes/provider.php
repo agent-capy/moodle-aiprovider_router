@@ -17,11 +17,15 @@
 namespace local_airouter;
 
 /**
- * AI Router provider.
+ * The router as core's AI manager sees it while it carries out an action.
  *
- * The declared actions are the four core actions common to Moodle 5.0 through 5.2,
- * matching the "full router mode" design in which the router declares every action and
- * delegates the actual work to another provider.
+ * Core runs an action against a provider object: it asks the object which actions it
+ * offers and hands it to the processor that does the work. The router is not a provider
+ * a site creates, lists or orders, so this object is not stored anywhere; it is built for
+ * one request from the router's own settings (adapter_provider) and thrown away after it.
+ *
+ * The declared actions are the four core actions common to Moodle 5.0 through 5.2, and
+ * the actions other plugins define where they are installed.
  *
  * This class holds what the site has decided; target_resolver decides where an
  * individual request goes.
@@ -31,20 +35,6 @@ namespace local_airouter;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 abstract class provider extends \core_ai\provider {
-    /**
-     * The class Moodle instantiates for this router, which lives in the companion plugin.
-     *
-     * Moodle only accepts a provider from a plugin whose name begins with aiprovider_:
-     * it decides whether an action is enabled, and which actions a provider offers, by
-     * testing that name. The routing itself lives here, so the two are split, and this
-     * is the one place that names the half Moodle has to see. Everything that looks a
-     * provider instance up in the database asks for this rather than repeating it.
-     */
-    public const INSTANCE_CLASS = 'aiprovider_router\\provider';
-
-    /** @var string The companion plugin that class belongs to. */
-    public const INSTANCE_PLUGIN = 'aiprovider_router';
-
     #[\Override]
     public static function get_action_list(): array {
         $actions = [
@@ -55,9 +45,8 @@ abstract class provider extends \core_ai\provider {
         ];
 
         // Actions that are not core's are routed too, where something defines them.
-        // Offered only while the class is installed: an action named in this list
-        // and absent from the site makes the provider settings screen fatal, because
-        // that screen asks each action for its own name.
+        // Offered only while the class is installed: an action named in this list and
+        // absent from the site would be asked for its own settings, and cannot answer.
         foreach (self::EXTRA_ACTIONS as $class) {
             if (class_exists($class)) {
                 $actions[] = $class;
@@ -78,12 +67,6 @@ abstract class provider extends \core_ai\provider {
         'local_aimedia\\aiactions\\describe_image',
     ];
 
-    /** @var string Delegate everything, and expect to be first in the provider order. */
-    public const MODE_FULL = 'full';
-
-    /** @var string Sit alongside other providers and decline what no rule matches. */
-    public const MODE_COEXIST = 'coexist';
-
     /** @var string Send a request no rule claimed to the default target. */
     public const NOMATCH_DELEGATE = 'delegate';
 
@@ -96,11 +79,10 @@ abstract class provider extends \core_ai\provider {
     /**
      * Carry the provider instances read when the request this router answers began.
      *
-     * The router object is made for one request: core builds a new one each time the
-     * instances are read, and the adapter is built per request. What it carries goes
-     * with it and nowhere else, so a change saved meanwhile reaches the next request,
-     * which reads the instances again. The instances themselves are not changed on the
-     * way: a key somebody brought is put into a copy.
+     * The router object is built for one request. What it carries goes with it and
+     * nowhere else, so a change saved meanwhile reaches the next request, which reads
+     * the instances again. The instances themselves are not changed on the way: a key
+     * somebody brought is put into a copy.
      *
      * @param \core_ai\provider[] $instances The instances, as read.
      */
@@ -118,59 +100,24 @@ abstract class provider extends \core_ai\provider {
     }
 
     /**
-     * The operating mode of this router instance.
-     *
-     * @return string One of the MODE_ constants.
-     */
-    public function get_mode(): string {
-        $mode = $this->config['mode'] ?? self::MODE_FULL;
-
-        return $mode === self::MODE_COEXIST ? self::MODE_COEXIST : self::MODE_FULL;
-    }
-
-    /**
      * What to do with a request that no rule claimed.
      *
      * This is not an edge case. It is the most travelled path on a site that has just
      * installed the plugin, on one whose rules cover part of what it does, and on one
-     * whose rules have expired, so each mode starts from the answer that suits it and
-     * the administrator can choose the other.
+     * whose rules have expired. Unless the site says otherwise, such a request goes to
+     * the default target.
      *
-     * Declining means core carries on to the next provider in its own order. Alongside
-     * other providers that leaves the site working exactly as before, with the router
-     * having said only that this request was not its business. In router only mode
-     * there is nobody behind the router, so declining stops the request; that is still
-     * worth offering, because "only these courses may use AI, and nothing else may
-     * spend money" is a reasonable way to run a site.
+     * Declining refuses the request. An action placed under the router is offered to
+     * nobody else, so declining stops it; that is still worth offering, because "only
+     * these courses may use AI, and nothing else may spend money" is a reasonable way
+     * to run a site.
      *
      * @return string One of the NOMATCH_ constants.
      */
     public function get_nomatch_behaviour(): string {
         $behaviour = $this->config['nomatch'] ?? '';
-        if (in_array($behaviour, [self::NOMATCH_DELEGATE, self::NOMATCH_DECLINE], true)) {
-            return $behaviour;
-        }
 
-        return $this->get_mode() === self::MODE_COEXIST ? self::NOMATCH_DECLINE : self::NOMATCH_DELEGATE;
-    }
-
-    /**
-     * Whether a refusal by this router is the end of the matter.
-     *
-     * Core keeps trying providers until one succeeds, and reads a failed response as
-     * "that one could not do it". A refusal by the router means something else: a rule,
-     * a budget or somebody's own key decided, and letting the next provider answer on
-     * the site's key undoes the decision. The only way a provider can say "final" is to
-     * throw, which is what this setting turns on.
-     *
-     * It defaults to on, including for instances that were configured before the
-     * setting existed. A budget that silently does not hold is worse than an error
-     * message, and an administrator who prefers core's behaviour can say so.
-     *
-     * @return bool True when policy refusals should stop the fallback.
-     */
-    public function is_strict_decline(): bool {
-        return (bool) ($this->config['strictdecline'] ?? 1);
+        return $behaviour === self::NOMATCH_DECLINE ? self::NOMATCH_DECLINE : self::NOMATCH_DELEGATE;
     }
 
     /**
@@ -191,69 +138,5 @@ abstract class provider extends \core_ai\provider {
      */
     public static function has_rules(): bool {
         return (int) get_config('local_airouter', 'rulecount') > 0;
-    }
-
-    /**
-     * Ids of every router instance on the site, lowest first.
-     *
-     * Memoised because core asks whether a provider is configured on every request
-     * that reaches the AI subsystem.
-     *
-     * @param bool $reset Discard the memoised value. For tests.
-     * @return int[] The instance ids.
-     */
-    public static function get_instance_ids(bool $reset = false): array {
-        static $ids = null;
-        if ($reset) {
-            $ids = null;
-
-            return [];
-        }
-        if ($ids === null) {
-            $ids = [];
-            $manager = \core\di::get(\core_ai\manager::class);
-            foreach ($manager->get_provider_instances(['provider' => self::INSTANCE_CLASS]) as $instance) {
-                $ids[] = (int) $instance->id;
-            }
-            sort($ids);
-        }
-
-        return $ids;
-    }
-
-    /**
-     * Whether this is the instance the site should actually be routing through.
-     *
-     * The form refuses a second instance, but nothing stops one being created from CLI
-     * or by an upgrade script, so the rest of the plugin does not assume there is only
-     * one. The lowest id wins because it does not move, unlike a position in
-     * provider_order.
-     *
-     * @return bool True if this instance is the canonical one.
-     */
-    public function is_primary_instance(): bool {
-        $ids = self::get_instance_ids();
-        if (!$ids || empty($this->id)) {
-            return true;
-        }
-
-        return (int) $this->id === $ids[0];
-    }
-
-    #[\Override]
-    public function is_provider_configured(): bool {
-        // A router with nothing to delegate to would take every request and fail it, so
-        // it reports itself unconfigured and core skips it. Rules count as something to
-        // delegate to: a site that routes everything by rule and declines the rest has
-        // no use for a default target. The count is kept in the plugin configuration by
-        // the one class that writes rules, because core asks this on every request that
-        // reaches the AI subsystem and a query here would be paid for every time.
-        if ($this->get_default_target_id() === null && !self::has_rules()) {
-            return false;
-        }
-
-        // Second and later instances take themselves out of the running rather than
-        // competing with the canonical one.
-        return $this->is_primary_instance();
     }
 }

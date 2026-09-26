@@ -16,7 +16,6 @@
 
 namespace local_airouter\check;
 
-use local_airouter\fixture_text_provider;
 use local_airouter\eligibility_policy;
 use local_airouter\key;
 use local_airouter\rule;
@@ -26,11 +25,7 @@ use local_airouter\record\ledger;
 use local_airouter\record\summariser;
 use local_airouter\record\usage_recorder;
 use local_airouter\key_repository;
-use local_airouter\order_inspector;
-use local_airouter\provider;
 use core\check\result;
-use core_ai\manager;
-use core_ai\provider as ai_provider;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -47,249 +42,65 @@ require_once(__DIR__ . '/../fixtures/fixture_unconfigured_provider.php');
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(base::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(routerlisted::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(routerfirst::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(staleentries::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(actionconflict::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(declinereach::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(singleinstance::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(byokkeys::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(byokeligibility::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(budgetrates::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(budgethistory::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(staleactions::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(ruletargets::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(recordgaps::class)]
 final class check_test extends \advanced_testcase {
     #[\Override]
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
     }
 
     /**
-     * Every check the plugin reports.
+     * Every check that stands down on a site that has not set the router up.
      *
      * @return string[] The check class names.
      */
     protected static function all_checks(): array {
         return [
-            routerlisted::class,
-            routerfirst::class,
-            staleentries::class,
-            actionconflict::class,
-            declinereach::class,
-            singleinstance::class,
+            ruletargets::class,
+            byokkeys::class,
+            byokeligibility::class,
+            budgetrates::class,
+            budgethistory::class,
+            recordgaps::class,
         ];
     }
 
     /**
-     * Build an inspector over a made up site.
+     * Set the router up, and hand the check back to be run.
      *
-     * @param ai_provider[] $instances Instances keyed by id.
-     * @param string $order The provider_order value to store.
-     * @return order_inspector The inspector.
+     * @param base $check The check.
+     * @return base The same check.
      */
-    protected function inspector(array $instances, string $order): order_inspector {
-        set_config('provider_order', $order, 'core_ai');
-        $manager = $this->createStub(manager::class);
-        $manager->method('get_provider_instances')->willReturn($instances);
+    protected function with_router(base $check): base {
+        set_config('defaulttarget', 99, 'local_airouter');
 
-        return new order_inspector($manager);
+        return $check;
     }
 
-    /**
-     * A router instance.
-     *
-     * @param int $id The instance id.
-     * @param string $mode One of the provider MODE_ constants.
-     * @return provider The router.
-     */
-    protected function router(int $id, string $mode = provider::MODE_FULL, array $extra = []): provider {
-        return new \aiprovider_router\provider(
-            enabled: true,
-            name: "Router {$id}",
-            config: json_encode($extra + ['mode' => $mode, 'defaulttarget' => 99]),
-            id: $id,
-        );
-    }
-
-    /**
-     * A configured provider handling the same action as the router.
-     *
-     * @param int $id The instance id.
-     * @return ai_provider The instance.
-     */
-    protected function other(int $id): ai_provider {
-        return new fixture_text_provider(enabled: true, name: "Provider {$id}", config: '{}', id: $id);
-    }
-
-    public function test_every_check_stands_down_until_a_router_exists(): void {
-        $inspector = $this->inspector([9 => $this->other(9)], ',9');
-
+    public function test_every_check_stands_down_until_the_router_is_set_up(): void {
         foreach (self::all_checks() as $class) {
-            $check = new $class($inspector);
-            $this->assertSame(result::NA, $check->get_result()->get_status(), $class);
+            $result = (new $class())->get_result();
+            $this->assertSame(result::NA, $result->get_status(), $class);
+            $this->assertSame(get_string('check:norouter', 'local_airouter'), $result->get_summary(), $class);
         }
     }
 
-    /**
-     * The checks that are about a stored provider rather than about the site.
-     *
-     * @return string[] The check class names.
-     */
-    protected static function provider_checks(): array {
-        return [
-            routerlisted::class,
-            routerfirst::class,
-            actionconflict::class,
-            declinereach::class,
-            singleinstance::class,
-            staleactions::class,
-        ];
-    }
-
-    public function test_a_site_routing_without_an_instance_is_still_watched(): void {
-        // Asking for a provider instance turned every check off on a site that has no
-        // instance and does route: the rules, the budgets and the keys were being used
-        // and nothing was watching any of them.
-        set_config('defaulttarget', 9, 'local_airouter');
-        $inspector = $this->inspector([9 => $this->other(9)], ',9');
-
-        $result = (new staleentries($inspector))->get_result();
+    public function test_a_site_that_routes_is_watched(): void {
+        // The router is not a provider instance, so there is no instance to ask for; a
+        // site that has given it something to delegate to is a site that routes.
+        $result = $this->with_router(new recordgaps())->get_result();
 
         $this->assertNotSame(result::NA, $result->get_status());
     }
 
-    public function test_the_checks_about_a_provider_stand_down_without_one(): void {
-        // These ask where the router sits in the site order, whether two of it exist,
-        // and what its stored settings say. None of that is about a site that routes
-        // without registering a provider at all.
-        set_config('defaulttarget', 9, 'local_airouter');
-        $inspector = $this->inspector([9 => $this->other(9)], ',9');
-
-        foreach (self::provider_checks() as $class) {
-            $result = (new $class($inspector))->get_result();
-            $this->assertSame(result::NA, $result->get_status(), $class);
-            $this->assertSame(
-                get_string('check:notaprovider', 'local_airouter'),
-                $result->get_summary(),
-                $class,
-            );
-        }
-    }
-
-    public function test_a_site_that_has_set_nothing_up_is_left_alone(): void {
-        // No instance, no rules, no default target. Nothing has been asked for yet,
-        // and a site that has not started is not a site with a problem.
-        $inspector = $this->inspector([9 => $this->other(9)], ',9');
-
-        $result = (new staleentries($inspector))->get_result();
-
-        $this->assertSame(result::NA, $result->get_status());
-        $this->assertSame(get_string('check:norouter', 'local_airouter'), $result->get_summary());
-    }
-
-    public function test_a_router_at_the_front_passes_every_check(): void {
-        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',5,9');
-
-        foreach (self::all_checks() as $class) {
-            $check = new $class($inspector);
-            $this->assertSame(result::OK, $check->get_result()->get_status(), $class);
-        }
-    }
-
-    public function test_a_router_missing_from_the_order_is_an_error(): void {
-        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',9');
-
-        $this->assertSame(result::ERROR, (new routerlisted($inspector))->get_result()->get_status());
-    }
-
-    public function test_a_router_that_is_not_first_is_an_error_in_router_only_mode(): void {
-        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',9,5');
-
-        $this->assertSame(result::ERROR, (new routerfirst($inspector))->get_result()->get_status());
-    }
-
-    public function test_a_router_that_is_not_first_is_only_noted_in_coexist_mode(): void {
-        // An administrator running the router alongside other providers may have put one in
-        // front deliberately, so reporting it as broken would be wrong.
-        $instances = [5 => $this->router(5, provider::MODE_COEXIST), 9 => $this->other(9)];
-        $inspector = $this->inspector($instances, ',9,5');
-
-        $this->assertSame(result::INFO, (new routerfirst($inspector))->get_result()->get_status());
-    }
-
-    public function test_the_position_is_spelled_out_when_the_router_is_not_first(): void {
-        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',9,5');
-
-        $this->assertStringContainsString('2', (new routerfirst($inspector))->get_result()->get_details());
-    }
-
-    public function test_leftover_entries_are_a_warning(): void {
-        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',5,9,77');
-        $result = (new staleentries($inspector))->get_result();
-
-        $this->assertSame(result::WARNING, $result->get_status());
-        $this->assertStringContainsString('77', $result->get_details());
-    }
-
-    public function test_a_provider_answering_first_is_a_warning_that_names_it(): void {
-        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',9,5');
-        $result = (new actionconflict($inspector))->get_result();
-
-        $this->assertSame(result::WARNING, $result->get_status());
-        $this->assertStringContainsString('Provider 9', $result->get_details());
-    }
-
-    public function test_a_provider_behind_the_router_is_named_even_when_refusals_are_final(): void {
-        // Not a problem, but not nothing either: it is the answer to "if the router says
-        // no, does anything else say yes", and an administrator should be able to read it
-        // off the status report rather than reason about the provider order.
-        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',5,9');
-        $result = (new declinereach($inspector))->get_result();
-
-        $this->assertSame(result::OK, $result->get_status());
-        $this->assertStringContainsString('Provider 9', $result->get_details());
-    }
-
-    public function test_a_provider_behind_the_router_is_a_warning_once_refusals_are_not_final(): void {
-        $instances = [5 => $this->router(5, extra: ['strictdecline' => 0]), 9 => $this->other(9)];
-        $inspector = $this->inspector($instances, ',5,9');
-        $result = (new declinereach($inspector))->get_result();
-
-        $this->assertSame(result::WARNING, $result->get_status());
-        $this->assertStringContainsString('Provider 9', $result->get_details());
-    }
-
-    public function test_a_router_with_nobody_behind_it_has_nothing_to_report(): void {
-        $inspector = $this->inspector([5 => $this->router(5)], ',5');
-        $result = (new declinereach($inspector))->get_result();
-
-        $this->assertSame(result::OK, $result->get_status());
-        $this->assertSame('', $result->get_details());
-    }
-
-    public function test_a_provider_ahead_of_the_router_is_not_counted_as_being_behind_it(): void {
-        // It answers first and the router is never reached, which is a different
-        // complaint with a check of its own.
-        $inspector = $this->inspector([5 => $this->router(5), 9 => $this->other(9)], ',9,5');
-        $result = (new declinereach($inspector))->get_result();
-
-        $this->assertSame(result::OK, $result->get_status());
-        $this->assertSame('', $result->get_details());
-    }
-
-    public function test_a_second_router_is_an_error_that_says_which_one_to_delete(): void {
-        $inspector = $this->inspector([4 => $this->router(4), 7 => $this->router(7)], ',4,7');
-        $result = (new singleinstance($inspector))->get_result();
-
-        $this->assertSame(result::ERROR, $result->get_status());
-        $this->assertStringContainsString('Router 7', $result->get_details());
-        $this->assertStringContainsString('Router 4', $result->get_details());
-    }
-
     public function test_keys_nobody_has_brought_are_nothing_to_report_on(): void {
-        $check = new byokkeys($this->inspector([5 => $this->router(5)], ',5'));
+        $check = $this->with_router(new byokkeys());
 
         $this->assertSame(result::NA, $check->get_result()->get_status());
     }
@@ -298,7 +109,7 @@ final class check_test extends \advanced_testcase {
         global $DB;
         (new key_repository($DB))->save(key::SCOPE_USER, 7, 3, 'sk-a-key-abcd');
 
-        $result = (new byokkeys($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new byokkeys()))->get_result();
 
         $this->assertSame(result::OK, $result->get_status());
     }
@@ -311,7 +122,7 @@ final class check_test extends \advanced_testcase {
         // A site restored from a database backup without its encryption key file.
         $DB->set_field(key::TABLE, 'secret', 'nonsense', ['id' => $broken->get('id')]);
 
-        $result = (new byokkeys($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new byokkeys()))->get_result();
 
         // Every request those keys were meant to pay for is failing, so this is not a
         // thing to mention in passing.
@@ -341,7 +152,7 @@ final class check_test extends \advanced_testcase {
         $this->assertSame(0, $DB->count_records(usage_recorder::ATTEMPT_TABLE));
         $this->assertSame(0, $DB->count_records(summariser::TABLE));
 
-        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgethistory()))->get_result();
 
         $this->assertSame(result::WARNING, $result->get_status());
         $this->assertNotSame('', $result->get_details());
@@ -351,7 +162,7 @@ final class check_test extends \advanced_testcase {
         $this->budget_rule();
         $this->request(1.0);
 
-        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgethistory()))->get_result();
 
         // One day of history and a thirty day budget. Nothing is missing: the site
         // has everything that ever happened, which is all a budget can ask for.
@@ -372,7 +183,7 @@ final class check_test extends \advanced_testcase {
         (new summariser($DB))->run(time() - 150 * DAYSECS);
         set_config('summaryretentiondays', 60, 'local_airouter');
 
-        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgethistory()))->get_result();
 
         $this->assertSame(result::OK, $result->get_status());
     }
@@ -386,7 +197,7 @@ final class check_test extends \advanced_testcase {
         $this->budget_rule();
         $CFG->forced_plugin_settings['local_airouter'][\local_airouter\retention_policy::SUMMARY_SETTING] = 2;
         try {
-            $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+            $result = ($this->with_router(new budgethistory()))->get_result();
         } finally {
             unset($CFG->forced_plugin_settings['local_airouter']);
         }
@@ -404,7 +215,7 @@ final class check_test extends \advanced_testcase {
         $repository->set_cap($repository->save(\local_airouter\key::SCOPE_USER, 7, 3, 'sk-mine'), 5.0, ledger::PERIOD_ROLLING, 30);
         set_config('summaryretentiondays', 2, 'local_airouter');
 
-        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgethistory()))->get_result();
 
         $this->assertSame(result::WARNING, $result->get_status());
     }
@@ -412,7 +223,7 @@ final class check_test extends \advanced_testcase {
     public function test_without_a_budget_there_is_nothing_to_report(): void {
         $this->request(1.0);
 
-        $result = (new budgethistory($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgethistory()))->get_result();
 
         $this->assertSame(result::NA, $result->get_status());
     }
@@ -477,40 +288,10 @@ final class check_test extends \advanced_testcase {
         $rate->create();
     }
 
-    public function test_an_instance_made_before_an_action_existed_is_reported(): void {
-        // The action list is read fresh on every request; the instance's action
-        // configuration is written once, when the instance is made. Installing a
-        // plugin that defines a new action leaves the two disagreeing, and the
-        // provider settings screen cannot put it right.
-        // A brand new instance agrees with itself: the constructor fills its action
-        // configuration from the list the provider offers right now.
-        $fresh = $this->router(5);
-        $this->assertSame(
-            result::OK,
-            (new staleactions($this->inspector([5 => $fresh], ',5')))->get_result()->get_status(),
-        );
-
-        // One the site has had for a while, from before an action arrived.
-        $actions = provider::get_action_list();
-        $stale = new \aiprovider_router\provider(
-            enabled: true,
-            name: 'Router 5',
-            config: json_encode(['mode' => provider::MODE_FULL, 'defaulttarget' => 99]),
-            actionconfig: json_encode([
-                reset($actions) => ['enabled' => true, 'settings' => []],
-            ]),
-            id: 5,
-        );
-        $result = (new staleactions($this->inspector([5 => $stale], ',5')))->get_result();
-
-        $this->assertSame(result::WARNING, $result->get_status());
-        $this->assertStringContainsString('recreat', strtolower($result->get_details()));
-    }
-
     public function test_rates_are_only_load_bearing_once_a_rule_routes_by_budget(): void {
         $this->request(null);
 
-        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgetrates()))->get_result();
 
         // Rates are worth having anyway, for the monitor. Nothing here depends on them.
         $this->assertSame(result::NA, $result->get_status());
@@ -521,7 +302,7 @@ final class check_test extends \advanced_testcase {
         $this->request(null);
         $this->request(null);
 
-        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgetrates()))->get_result();
 
         // The rule is enabled, looks right, and can never match. Nothing else on the
         // site would say so, and it says which provider has no rates.
@@ -534,7 +315,7 @@ final class check_test extends \advanced_testcase {
         $this->request(null);
         $this->request(null);
 
-        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgetrates()))->get_result();
 
         // Requests are counted, not priced. Telling this site its budgets can never
         // match would send somebody looking for a problem it does not have.
@@ -549,7 +330,7 @@ final class check_test extends \advanced_testcase {
         $this->request(null);
         $this->request(null);
 
-        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgetrates()))->get_result();
 
         $this->assertSame(result::WARNING, $result->get_status());
     }
@@ -560,7 +341,7 @@ final class check_test extends \advanced_testcase {
         $this->request(1.0);
         $this->request(2.0);
 
-        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgetrates()))->get_result();
 
         $this->assertSame(result::OK, $result->get_status());
     }
@@ -569,7 +350,7 @@ final class check_test extends \advanced_testcase {
         $this->rate();
         $this->budget_rule();
 
-        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgetrates()))->get_result();
 
         $this->assertSame(result::NA, $result->get_status());
     }
@@ -580,17 +361,15 @@ final class check_test extends \advanced_testcase {
         // never be measured, whatever the rest of the site has priced.
         $this->budget_rule();
 
-        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgetrates()))->get_result();
 
         $this->assertSame(result::ERROR, $result->get_status());
         $this->assertStringContainsString('OpenAI', $result->get_summary());
     }
 
     public function test_every_check_offers_somewhere_to_go_and_has_a_name(): void {
-        $inspector = $this->inspector([5 => $this->router(5)], ',5');
-
-        foreach ([...self::all_checks(), byokkeys::class, budgetrates::class] as $class) {
-            $check = new $class($inspector);
+        foreach (self::all_checks() as $class) {
+            $check = $this->with_router(new $class());
             $this->assertNotEmpty($check->get_name(), $class);
             $this->assertNotNull($check->get_action_link(), $class);
         }
@@ -616,7 +395,7 @@ final class check_test extends \advanced_testcase {
     }
 
     public function test_a_site_deciding_by_no_conditions_has_no_eligibility_to_report_on(): void {
-        $check = new byokeligibility($this->inspector([5 => $this->router(5)], ',5'));
+        $check = $this->with_router(new byokeligibility());
 
         $this->assertSame(result::NA, $check->get_result()->get_status());
     }
@@ -627,7 +406,7 @@ final class check_test extends \advanced_testcase {
             'profilefield' => ['field' => 'checked', 'values' => ['staff']],
         ]);
 
-        $check = new byokeligibility($this->inspector([5 => $this->router(5)], ',5'));
+        $check = $this->with_router(new byokeligibility());
 
         $this->assertSame(result::OK, $check->get_result()->get_status());
     }
@@ -638,7 +417,7 @@ final class check_test extends \advanced_testcase {
             'profilefield' => ['field' => 'selfsaid', 'values' => ['staff']],
         ]);
 
-        $result = (new byokeligibility($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new byokeligibility()))->get_result();
 
         $this->assertSame(result::WARNING, $result->get_status());
         $this->assertStringContainsString('selfsaid', $result->get_details());
@@ -654,7 +433,7 @@ final class check_test extends \advanced_testcase {
             eligibility_policy::MATCH_ALL,
         );
 
-        $result = (new byokeligibility($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new byokeligibility()))->get_result();
 
         $this->assertSame(result::INFO, $result->get_status());
     }
@@ -669,7 +448,7 @@ final class check_test extends \advanced_testcase {
         // reach it, or one that it slipped past.
         $DB->set_field(usage_recorder::ATTEMPT_TABLE, 'currency', 'JPY', ['model' => 'gpt-4o']);
 
-        $result = (new budgetrates($this->inspector([5 => $this->router(5)], ',5')))->get_result();
+        $result = ($this->with_router(new budgetrates()))->get_result();
 
         $this->assertSame(result::WARNING, $result->get_status());
         $this->assertStringContainsString('OpenAI', $result->get_summary());

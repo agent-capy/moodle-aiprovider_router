@@ -31,8 +31,6 @@ require_once(__DIR__ . '/lib.php');
 use local_airouter\admin_page;
 use local_airouter\form\managed_actions_form;
 use local_airouter\managed_policy;
-use local_airouter\order_inspector;
-use local_airouter\provider;
 use local_airouter\routing_manager;
 
 // Action class names, which carry separators. Nothing is built from these: they
@@ -173,17 +171,6 @@ foreach (managed_policy::managed_actions() as $action) {
             new moodle_url($url, ['unmanage' => $action, 'sesskey' => sesskey()]),
             get_string('managed:unmanage', 'local_airouter'),
         ),
-        \core\output\notification::NOTIFY_WARNING,
-    );
-}
-
-// Running alongside other providers means letting them answer what no rule claimed.
-// An action placed under the router cannot do that, so the two settings are asking for
-// opposite things and an administrator should hear it from the screen.
-$router = (new order_inspector())->get_primary_router();
-if ($router !== null && $router->get_mode() === provider::MODE_COEXIST && managed_policy::is_active()) {
-    echo $OUTPUT->notification(
-        get_string('managed:coexist', 'local_airouter'),
         \core\output\notification::NOTIFY_WARNING,
     );
 }

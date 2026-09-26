@@ -18,7 +18,6 @@ namespace local_airouter;
 
 use local_airouter\record\ledger;
 use local_airouter\condition\budget;
-use local_airouter\exception\declined_request;
 use local_airouter\record\usage_recorder;
 use local_airouter\record\request_state;
 use core_ai\aiactions\generate_text;
@@ -36,22 +35,22 @@ require_once(__DIR__ . '/fixtures/mock/process_generate_text.php');
  * What a site really does with a request, entered where a placement enters.
  *
  * Every other test here starts inside the router. That is where its decisions are made,
- * but it is not where they take effect: core walks the whole provider order and stops at
- * the first success, so what the router returns is only half the story. A refusal that
- * reads perfectly well on its own is, from one step further out, an invitation to the
- * next provider to answer the same request on the site's own key -- which is how a
- * budget, a rule and a choice of who pays can all be true and none of them hold.
+ * but it is not where they take effect: the request comes in through core's AI manager,
+ * with real provider instances in the database and core's own processing around the
+ * router. A refusal that reads perfectly well on its own has to stay a refusal from
+ * there too, or a budget, a rule and a choice of who pays can all be true and none of
+ * them hold.
  *
- * These tests start at core_ai\manager::process_action(), with real provider instances
- * in the database and core's own dispatch in between, because that is the only vantage
- * point from which that could be seen at all.
+ * The site has placed the action under the router. Every request for it therefore
+ * reaches the router whatever the provider order says, and nothing else is offered it
+ * afterwards; the provider created first in each test is the one core would have asked
+ * otherwise, and seeing it never answer is the point.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(abstract_processor::class)]
-#[\PHPUnit\Framework\Attributes\CoversClass(declined_request::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(provider::class)]
 final class core_dispatch_test extends \advanced_testcase {
     /** @var manager The AI manager, as a placement would get it. */
@@ -61,32 +60,23 @@ final class core_dispatch_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
         $this->manager = \core\di::get(manager::class);
     }
 
     /**
-     * Create the router instance, first in the site's order.
+     * Set the router up and place generate_text under it.
      *
-     * @param array $config The instance configuration.
-     * @return provider The instance.
+     * @param array $config The router's settings: defaulttarget, nomatch.
      */
-    protected function add_router(array $config): provider {
-        /** @var provider $instance */
-        $instance = $this->manager->create_provider_instance(
-            classname: provider::INSTANCE_CLASS,
-            name: 'Router',
-            enabled: true,
-            config: $config,
-            actionconfig: [generate_text::class => ['enabled' => true]],
-        );
-        provider::get_instance_ids(true);
-
-        return $instance;
+    protected function add_router(array $config): void {
+        foreach ($config as $name => $value) {
+            set_config($name, $value, 'local_airouter');
+        }
+        managed_policy::set_managed_actions([generate_text::class]);
     }
 
     /**
-     * Create an ordinary provider instance behind the router.
+     * Create an ordinary provider instance.
      *
      * @param string $name Its name.
      * @param array $config Scenario settings for the mock.
@@ -108,11 +98,6 @@ final class core_dispatch_test extends \advanced_testcase {
      * @return response_base What the site produced.
      */
     protected function ask(): response_base {
-        // Creating an instance puts it last in the site's order, so each test creates
-        // the providers in the order core should try them and the router is moved to
-        // the front here, which is where its own status check asks for it.
-        set_config('provider_order', (new order_inspector())->build_promoted_order(), 'core_ai');
-
         return $this->manager->process_action(new generate_text(
             contextid: \context_system::instance()->id,
             userid: get_admin()->id,
@@ -150,6 +135,20 @@ final class core_dispatch_test extends \advanced_testcase {
                 'days' => 30,
             ],
         ]);
+    }
+
+    /**
+     * A rule sending every request to one target.
+     *
+     * @param int $targetid Where it delegates.
+     */
+    protected function add_rule_to(int $targetid): void {
+        global $DB;
+
+        $rule = new rule();
+        $rule->set('name', 'Everything');
+        $rule->set('targetid', $targetid);
+        (new rule_repository($DB))->save($rule);
     }
 
     /**
@@ -201,30 +200,41 @@ final class core_dispatch_test extends \advanced_testcase {
         \core_cache\helper::purge_by_definition('local_airouter', ledger::CACHE_AREA);
     }
 
+    /**
+     * The router's own record of the last request.
+     *
+     * @return \stdClass The request row.
+     */
+    protected function last_request(): \stdClass {
+        global $DB;
+
+        $rows = $DB->get_records(usage_recorder::REQUEST_TABLE, null, 'id DESC', '*', 0, 1);
+
+        return reset($rows);
+    }
+
     public function test_a_spent_budget_is_not_handed_to_the_next_provider_to_pay_for(): void {
         global $DB;
 
         // The finding this whole arrangement exists for. A rule says "while there is
-        // room, use this provider"; the room runs out; core, which cannot be told that
-        // a failure was a decision, offers the same request to the next provider and it
-        // is answered on the site's own key. The limit would hold only until somebody
-        // asked twice.
+        // room, use this provider"; the room runs out; a provider that core would
+        // otherwise try answers the same request on the site's own key, and the limit
+        // holds only until somebody asks twice.
         $this->add_target('Site provider', ['content' => 'Answered on the site key']);
         $target = $this->add_target('Metered', ['content' => 'Within budget']);
         $this->add_router(['nomatch' => provider::NOMATCH_DECLINE]);
         $this->add_budget_rule((int) $target->id, 2);
         $this->spend(2);
 
-        try {
-            $this->ask();
-            $this->fail('A spent budget should have stopped the request.');
-        } catch (declined_request $e) {
-            $this->assertSame(abstract_processor::REASON_BUDGET_SPENT, $e->get_reason());
-        }
+        $response = $this->ask();
 
-        // Core writes one of these for every provider it calls that returns, so an
-        // empty table says nobody behind the router was given a turn.
-        $this->assertSame(0, $DB->count_records('ai_action_generate_text'));
+        $this->assertFalse($response->get_success());
+        $this->assertNull($response->get_response_data()['generatedcontent']);
+        $this->assertSame(abstract_processor::REASON_BUDGET_SPENT, $this->last_request()->reason);
+        // Core stores one record for the refusal, with nothing in it: nobody answered.
+        $stored = $DB->get_records('ai_action_generate_text');
+        $this->assertCount(1, $stored);
+        $this->assertNull(reset($stored)->generatedcontent);
     }
 
     public function test_a_budget_with_room_left_routes_as_the_rule_says(): void {
@@ -239,60 +249,30 @@ final class core_dispatch_test extends \advanced_testcase {
         $this->assertSame('Within budget', $response->get_response_data()['generatedcontent']);
     }
 
-    public function test_turning_the_setting_off_lets_the_next_provider_pay_for_it_instead(): void {
-        // What core does with a provider that cannot say "final", kept as a setting so
-        // that a site can have it back, and kept as a test so that what it costs is
-        // written down rather than remembered.
-        $this->add_target('Site provider', ['content' => 'Answered on the site key']);
-        $target = $this->add_target('Metered', ['content' => 'Within budget']);
-        $this->add_router(['nomatch' => provider::NOMATCH_DECLINE, 'strictdecline' => 0]);
-        $this->add_budget_rule((int) $target->id, 2);
-        $this->spend(2);
-
-        $response = $this->ask();
-
-        $this->assertTrue($response->get_success());
-        $this->assertSame('Answered on the site key', $response->get_response_data()['generatedcontent']);
-    }
-
-    public function test_a_request_no_rule_was_ever_about_is_still_somebody_elses(): void {
-        // The other half of the setting, and the reason a refusal is not final on its
-        // own. Running the router alongside other providers means exactly this: the
-        // router handles what its rules describe and says nothing about the rest.
-        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
-        $target = $this->add_target('Metered', ['content' => 'Never reached']);
-        $this->add_router(['nomatch' => provider::NOMATCH_DECLINE, 'defaulttarget' => $target->id]);
-
-        $response = $this->ask();
-
-        $this->assertTrue($response->get_success());
-        $this->assertSame('Answered by the next provider', $response->get_response_data()['generatedcontent']);
-    }
-
     public function test_a_limit_nobody_has_reached_does_not_stop_anybody(): void {
         // A rule that says "once the site has passed a hundred requests, send them
         // somewhere cheaper". Before the hundredth request that rule simply does not
-        // apply, and a coexisting site expects its other providers to carry on. The
-        // router used to read every way that rule could fail as the money having run
-        // out, so writing one rule of this shape stopped every request the site made.
-        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
+        // apply, and the request goes where requests go by default. The router used to
+        // read every way that rule could fail as the money having run out, so writing
+        // one rule of this shape stopped every request the site made.
+        $site = $this->add_target('Site provider', ['content' => 'Answered by the default target']);
         $cheaper = $this->add_target('Cheaper', ['content' => 'Never reached']);
-        $this->add_router(['nomatch' => provider::NOMATCH_DECLINE, 'defaulttarget' => $cheaper->id]);
+        $this->add_router(['defaulttarget' => $site->id]);
         $this->add_budget_rule((int) $cheaper->id, 100, budget::DIRECTION_OVER);
 
         $response = $this->ask();
 
         $this->assertTrue($response->get_success());
-        $this->assertSame('Answered by the next provider', $response->get_response_data()['generatedcontent']);
+        $this->assertSame('Answered by the default target', $response->get_response_data()['generatedcontent']);
     }
 
     public function test_a_limit_that_has_been_passed_sends_the_request_where_the_rule_says(): void {
         // The same rule, doing the job it was written for. Nothing here is refused, so
         // nothing here tests the refusal: it is the other end of the test above, kept
         // beside it so that neither can be broken to make the other pass.
-        $this->add_target('Site provider', ['content' => 'Never reached']);
+        $site = $this->add_target('Site provider', ['content' => 'Never reached']);
         $cheaper = $this->add_target('Cheaper', ['content' => 'Answered by the cheaper one']);
-        $this->add_router(['nomatch' => provider::NOMATCH_DECLINE, 'defaulttarget' => $cheaper->id]);
+        $this->add_router(['defaulttarget' => $site->id]);
         $this->add_budget_rule((int) $cheaper->id, 1, budget::DIRECTION_OVER);
         $this->spend(2);
 
@@ -302,12 +282,14 @@ final class core_dispatch_test extends \advanced_testcase {
         $this->assertSame('Answered by the cheaper one', $response->get_response_data()['generatedcontent']);
     }
 
-    public function test_a_target_that_merely_broke_still_lets_the_next_provider_try(): void {
-        // Core's fallback is worth having, and only a decision is taken away from it: a
-        // target that was simply down is passed over exactly as before.
-        $this->add_target('Working', ['content' => 'The second one answered']);
+    public function test_a_target_that_merely_broke_still_lets_the_next_one_try(): void {
+        // Falling back is worth having, and only a decision is taken away from it: a
+        // target that was simply down is passed over for the next one the router may
+        // use, here the default target behind the rule.
+        $working = $this->add_target('Working', ['content' => 'The second one answered']);
         $broken = $this->add_target('Broken', ['scenario' => \aiprovider_mock\provider::FAILURE]);
-        $this->add_router(['defaulttarget' => $broken->id]);
+        $this->add_router(['defaulttarget' => $working->id]);
+        $this->add_rule_to((int) $broken->id);
 
         $response = $this->ask();
 
@@ -329,125 +311,30 @@ final class core_dispatch_test extends \advanced_testcase {
         $this->add_target('Site provider', ['content' => 'Answered on the site key']);
         $this->add_router([]);
 
-        try {
-            $this->ask();
-            $this->fail('A router with nowhere to send the request should have stopped it.');
-        } catch (declined_request $e) {
-            $this->assertSame(abstract_processor::REASON_NO_TARGET, $e->get_reason());
-        }
-    }
-
-    public function test_the_routers_own_rate_limit_is_not_a_way_round_its_refusals(): void {
-        // Core checks a provider's rate limit before it calls the provider at all, and
-        // returns a plain failure. Everything this plugin does happens after that
-        // point, so the router was never asked -- and the request it would have refused
-        // on a spent budget went to the next provider on the site's own key instead.
-        // Reaching the limit used to unlock everything the router was there to stop.
-        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
-        $target = $this->add_target('Metered', ['content' => 'Never reached']);
-        $this->add_router([
-            'defaulttarget' => $target->id,
-            'enableuserratelimit' => 1,
-            'userratelimit' => 1,
-        ]);
-        $this->add_budget_rule((int) $target->id, 1);
-
-        // The first request uses the one request the limiter allows.
-        $this->ask();
-
-        $this->expectException(declined_request::class);
-        $this->ask();
-    }
-
-    public function test_a_rate_limited_request_is_written_down_like_any_other_refusal(): void {
-        global $DB;
-
-        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
-        $target = $this->add_target('Metered', ['content' => 'Answered by the router']);
-        $this->add_router([
-            'defaulttarget' => $target->id,
-            'enableuserratelimit' => 1,
-            'userratelimit' => 1,
-        ]);
-
-        $this->ask();
-        try {
-            $this->ask();
-        } catch (declined_request $e) {
-            $this->assertSame(abstract_processor::REASON_RATE_LIMITED, $e->get_reason());
-        }
-
-        $refused = $DB->get_records(usage_recorder::REQUEST_TABLE, ['state' => request_state::DECLINED]);
-        $this->assertCount(1, $refused);
-        $this->assertSame(
-            abstract_processor::REASON_RATE_LIMITED,
-            reset($refused)->reason,
-        );
-    }
-
-    public function test_a_site_that_would_rather_keep_cores_behaviour_still_can(): void {
-        $this->add_target('Site provider', ['content' => 'Answered by the next provider']);
-        $target = $this->add_target('Metered', ['content' => 'Answered by the router']);
-        $this->add_router([
-            'defaulttarget' => $target->id,
-            'strictdecline' => 0,
-            'enableuserratelimit' => 1,
-            'userratelimit' => 1,
-        ]);
-
-        $this->ask();
         $response = $this->ask();
 
-        // Core's own answer, unchanged: the next provider takes it.
-        $this->assertTrue($response->get_success());
-        $this->assertSame('Answered by the next provider', $response->get_response_data()['generatedcontent']);
-    }
-
-    public function test_one_request_spends_one_of_the_allowance(): void {
-        // The limiter counts a request as it allows it, so reading its answer twice
-        // would spend two of the allowance for one request and halve every limit on
-        // the site. Three requests against a limit of three must all get through.
-        $target = $this->add_target('Metered', ['content' => 'Answered by the router']);
-        $this->add_router([
-            'defaulttarget' => $target->id,
-            'enableuserratelimit' => 1,
-            'userratelimit' => 3,
-        ]);
-
-        for ($i = 0; $i < 3; $i++) {
-            $this->assertTrue($this->ask()->get_success(), "request {$i} should have been allowed");
-        }
+        $this->assertFalse($response->get_success());
+        $this->assertNull($response->get_response_data()['generatedcontent']);
+        $this->assertSame(abstract_processor::REASON_NO_TARGET, $this->last_request()->reason);
     }
 
     public function test_a_request_somebody_pays_for_is_not_finished_on_the_sites_money(): void {
-        // A target that spends its token budget and returns nothing is ordinarily just
-        // a target that did not work, and core trying the next one is right. It stops
-        // being right when the request was being charged to somebody's own key: the
-        // next provider answers on the site's key, so the request the person asked to
-        // pay for is paid for by the site, quietly, with nothing to say it happened.
-        $this->add_target('Site provider', ['content' => 'Answered on the site key']);
+        // A target that spends its token budget and returns nothing, when the request
+        // was being charged to somebody's own key. Another target would answer on the
+        // site's key, so the request the person asked to pay for would be paid for by
+        // the site, quietly, with nothing to say it happened.
+        $site = $this->add_target('Site provider', ['content' => 'Answered on the site key']);
         $theirs = $this->add_target('Theirs', ['scenario' => \aiprovider_mock\provider::TRUNCATED]);
-        $this->add_router(['defaulttarget' => $theirs->id]);
+        $this->add_router(['defaulttarget' => $site->id]);
         $this->add_byok_rule((int) $theirs->id);
-
-        $this->expectException(declined_request::class);
-        $this->ask();
-    }
-
-    public function test_the_same_failure_on_the_sites_own_money_still_falls_through(): void {
-        // The other half: nobody brought a key, so nobody is being charged for
-        // something they did not ask for, and core's fallback is worth having.
-        $this->add_target('Site provider', ['content' => 'Answered on the site key']);
-        $empty = $this->add_target('Empty', ['scenario' => \aiprovider_mock\provider::TRUNCATED]);
-        $this->add_router(['defaulttarget' => $empty->id]);
 
         $response = $this->ask();
 
-        $this->assertTrue($response->get_success());
-        $this->assertSame('Answered on the site key', $response->get_response_data()['generatedcontent']);
+        $this->assertFalse($response->get_success());
+        $this->assertNull($response->get_response_data()['generatedcontent']);
     }
 
-    public function test_the_refusal_is_written_down_before_it_is_thrown(): void {
+    public function test_the_refusal_is_written_down(): void {
         global $DB;
 
         $target = $this->add_target('Metered');
@@ -456,38 +343,13 @@ final class core_dispatch_test extends \advanced_testcase {
         $this->spend(2);
         $before = $DB->count_records(usage_recorder::REQUEST_TABLE);
 
-        try {
-            $this->ask();
-        } catch (declined_request $e) {
-            $this->assertNotEmpty($e->getMessage());
-        }
+        $this->ask();
 
-        // Throwing takes core's own record of the action away, so the router's has to
-        // be written first. A refusal nobody can count is a refusal nobody can audit.
-        $rows = $DB->get_records(usage_recorder::REQUEST_TABLE, null, 'id DESC', '*', 0, 1);
+        // A refusal nobody can count is a refusal nobody can audit.
         $this->assertSame($before + 1, $DB->count_records(usage_recorder::REQUEST_TABLE));
-        $row = reset($rows);
+        $row = $this->last_request();
         $this->assertSame(request_state::DECLINED, $row->state);
         $this->assertSame(abstract_processor::REASON_BUDGET_SPENT, $row->reason);
-    }
-
-    public function test_core_keeps_no_record_of_its_own_when_the_refusal_is_thrown(): void {
-        global $DB;
-
-        $target = $this->add_target('Metered');
-        $this->add_router(['nomatch' => provider::NOMATCH_DECLINE]);
-        $this->add_budget_rule((int) $target->id, 2);
-        $this->spend(2);
-
-        try {
-            $this->ask();
-        } catch (declined_request $e) {
-            unset($e);
-        }
-
-        // What the workaround costs, stated rather than discovered later: core writes
-        // ai_action_register after the provider returns, and nothing returns here.
-        $this->assertSame(0, $DB->count_records('ai_action_register'));
     }
 
     public function test_the_message_the_person_sees_names_nothing_about_the_site(): void {
@@ -496,16 +358,10 @@ final class core_dispatch_test extends \advanced_testcase {
         $this->add_budget_rule((int) $target->id, 2);
         $this->spend(2);
 
-        try {
-            $this->ask();
-            $this->fail('Expected a spent budget to stop the request.');
-        } catch (declined_request $e) {
-            $this->assertStringNotContainsString('Expensive provider', $e->getMessage());
-            $this->assertStringNotContainsString('While there is money left', $e->getMessage());
-            $this->assertSame(
-                get_string('error:budgetexhausted', 'local_airouter'),
-                $e->getMessage(),
-            );
-        }
+        $message = $this->ask()->get_errormessage();
+
+        $this->assertStringNotContainsString('Expensive provider', $message);
+        $this->assertStringNotContainsString('While there is money left', $message);
+        $this->assertSame(get_string('error:budgetexhausted', 'local_airouter'), $message);
     }
 }

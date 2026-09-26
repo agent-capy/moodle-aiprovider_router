@@ -31,8 +31,7 @@ use core_ai\aiactions\responses\response_base;
  * The router does not call an AI service itself. It resolves candidate targets, runs
  * the action against them in order and passes the winning response through. Returning
  * the delegated response data from query_ai_api() keeps core's own flow intact, so the
- * model, finish reason and token counts reported by the target survive, and the router's
- * own rate limiting still applies on the way in.
+ * model, finish reason and token counts reported by the target survive.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -171,11 +170,10 @@ abstract class abstract_processor extends \core_ai\process_base {
      *
      * core_ai\process_base::process() checks the provider's rate limit and returns a
      * failure without ever calling query_ai_api(), which is where everything this
-     * plugin does lives. A router with a rate limit set on it therefore had a way out
-     * of its own refusals: once the limit was reached, core's plain failure went back
-     * to the provider loop and the next provider answered the request -- including the
-     * requests a budget had already refused, since the router was never asked about
-     * them at all.
+     * plugin does lives. The router built from the site's settings carries no rate
+     * limit of its own, so today that failure does not happen. It is still handled,
+     * because a failure nothing here saw would leave a request that was never
+     * recorded as having ended.
      *
      * The limit is not asked about again here. Core's limiter counts the request as it
      * allows it, so asking twice would spend two of the allowance for one request. The
@@ -504,14 +502,12 @@ abstract class abstract_processor extends \core_ai\process_base {
      * way, and nothing in the monitor says it happened.
      *
      * Throwing stops that, because neither the loop nor call_action_provider() catches
-     * anything. It is a heavy way to say something simple and the cost is real: the
-     * placement shows an error rather than a quiet failure, and core does not get to
-     * write its own row in ai_action_register. The usage entry is therefore already
-     * written by the time this runs -- every caller records before it returns -- and
-     * only the reasons that mean the site decided are treated this way.
-     *
-     * Administrators who would rather keep core's behaviour can turn this off, in which
-     * case the failure is returned as before and the next provider may well answer it.
+     * anything. The usage entry is already written by the time this runs -- every
+     * caller records before it returns -- and only the reasons that mean the site
+     * decided are treated this way. The router is only ever run for an action the site
+     * placed under it, by a dispatcher with no second candidate, which turns the throw
+     * back into an ordinary failed response, so the placement shows the failure and
+     * core writes its own row in ai_action_register.
      *
      * @param array $outcome The failure payload built by fail().
      * @return array The same payload, when the failure is not a final one.
@@ -523,24 +519,12 @@ abstract class abstract_processor extends \core_ai\process_base {
         if (!$final) {
             return $outcome;
         }
-        if (!$this->is_strict_decline()) {
-            return $outcome;
-        }
 
         throw new declined_request(
             (string) $this->reason,
             (string) $this->failurestring,
             (int) ($this->failurecode ?? 503),
         );
-    }
-
-    /**
-     * Whether this router makes its refusals final.
-     *
-     * @return bool True when a policy refusal should stop core trying anybody else.
-     */
-    protected function is_strict_decline(): bool {
-        return $this->provider instanceof provider && $this->provider->is_strict_decline();
     }
 
     /**

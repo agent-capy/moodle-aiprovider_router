@@ -35,7 +35,6 @@ use local_airouter\admin_page;
 use local_airouter\condition\registry;
 use local_airouter\evaluation_context;
 use local_airouter\form\rule_test_form;
-use local_airouter\order_inspector;
 use local_airouter\rule_evaluator;
 use local_airouter\rule_repository;
 use local_airouter\target_resolver;
@@ -54,7 +53,6 @@ admin_page::setup($PAGE, $url, get_string('ruletest:heading', 'local_airouter'),
 $form = new rule_test_form($url);
 
 echo $OUTPUT->header();
-echo admin_page::back_button($url);
 echo $OUTPUT->box(get_string('ruletest:intro', 'local_airouter'));
 $form->display();
 

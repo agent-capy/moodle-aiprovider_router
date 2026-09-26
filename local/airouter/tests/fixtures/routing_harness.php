@@ -22,6 +22,7 @@ use core_ai\provider as ai_provider;
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once(__DIR__ . '/fixture_router.php');
 require_once(__DIR__ . '/mock/provider.php');
 require_once(__DIR__ . '/mock/abstract_processor.php');
 require_once(__DIR__ . '/mock/process_generate_text.php');
@@ -132,7 +133,7 @@ trait routing_harness {
     ): object {
         global $DB;
 
-        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: json_encode($config), id: 1);
+        $router = new \local_airouter\fixture_router(enabled: true, name: 'Router', config: json_encode($config), id: 1);
         $action ??= new generate_text(
             contextid: ($context ?? \context_system::instance())->id,
             userid: self::$requester,

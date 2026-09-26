@@ -49,7 +49,7 @@ class single_router_dispatch extends \core_ai\manager {
      * Constructor.
      *
      * @param \moodle_database $db The database.
-     * @param ai_provider $router The router instance that will answer, already checked.
+     * @param ai_provider $router The router that will answer, already checked.
      */
     public function __construct(
         \moodle_database $db,

@@ -53,7 +53,6 @@ final class closing_fault_test extends \advanced_testcase {
         parent::setUp();
         $this->resetAfterTest();
         $this->preventResetByRollback();
-        \local_airouter\provider::get_instance_ids(true);
     }
 
     /**
@@ -291,7 +290,7 @@ final class closing_fault_test extends \advanced_testcase {
             userid: 2,
             prompttext: 'Hello',
         );
-        $router = new \aiprovider_router\provider(enabled: true, name: 'Router', config: '{"defaulttarget":7}', id: 1);
+        $router = new \local_airouter\fixture_router(enabled: true, name: 'Router', config: '{"defaulttarget":7}', id: 1);
         $processor = fn() => $this->route(
             [$this->target(7, \aiprovider_mock\provider::SUCCESS)],
             delegator: $delegator,

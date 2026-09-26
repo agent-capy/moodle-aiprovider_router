@@ -16,7 +16,6 @@
 
 namespace local_airouter;
 
-use core_ai\aiactions\generate_text;
 
 /**
  * Tests for the router's place in the site administration tree.
@@ -44,7 +43,6 @@ final class settings_test extends \advanced_testcase {
         $this->resetAfterTest();
         $this->setAdminUser();
         require_once($CFG->libdir . '/adminlib.php');
-        provider::get_instance_ids(true);
     }
 
     /**
@@ -77,7 +75,6 @@ final class settings_test extends \advanced_testcase {
             'routing policy' => ['local_airouter_policy'],
             'managed actions' => ['local_airouter_managed'],
             'rules' => ['local_airouter_rules'],
-            'provider order' => ['local_airouter_order'],
             'rates' => ['local_airouter_rates'],
             'brought keys' => ['local_airouter_byok'],
             'usage' => ['local_airouter_usage'],
@@ -145,24 +142,5 @@ final class settings_test extends \advanced_testcase {
 
         $this->assertFalse(get_config('local_airouter', managed_policy::SWITCH));
         $this->assertTrue(managed_policy::is_switched_on());
-    }
-
-    public function test_a_site_with_a_stored_instance_is_told_it_is_in_charge(): void {
-        // Offering settings that are not read would be worse than not offering them.
-        $manager = \core\di::get(\core_ai\manager::class);
-        $manager->create_provider_instance(
-            classname: provider::INSTANCE_CLASS,
-            name: 'Router',
-            enabled: true,
-            config: [],
-            actionconfig: [generate_text::class => ['enabled' => true]],
-        );
-        provider::get_instance_ids(true);
-
-        /** @var \admin_settingpage $page */
-        $page = $this->tree()->locate('local_airouter_policy');
-        $names = self::setting_names($page);
-
-        $this->assertContains('instanceinuse', $names);
     }
 }

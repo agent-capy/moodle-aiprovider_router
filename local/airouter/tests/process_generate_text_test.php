@@ -20,6 +20,10 @@ use local_airouter\exception\declined_request;
 use core_ai\aiactions\generate_text;
 use core_ai\aiactions\responses\response_generate_text;
 
+defined('MOODLE_INTERNAL') || die();
+
+require_once(__DIR__ . '/fixtures/fixture_router.php');
+
 /**
  * Tests for the delegation flow shared by every router action.
  *
@@ -42,7 +46,7 @@ final class process_generate_text_test extends \advanced_testcase {
      * @return array The payload the router hands back to core.
      */
     protected function run_processor(array $responses, bool $hastarget = true, array $config = []): array {
-        $provider = new \aiprovider_router\provider(
+        $provider = new \local_airouter\fixture_router(
             enabled: true,
             name: 'router',
             config: json_encode($config + ['defaulttarget' => $hastarget ? 7 : 0]),
@@ -56,7 +60,7 @@ final class process_generate_text_test extends \advanced_testcase {
         // One stand-in target per scripted response. The fake delegator ignores which
         // one it is handed, so any provider object will do.
         $targets = $hastarget
-            ? array_fill(0, count($responses), new \aiprovider_router\provider(enabled: true, name: 'target', config: '{}'))
+            ? array_fill(0, count($responses), new \local_airouter\fixture_router(enabled: true, name: 'target', config: '{}'))
             : [];
 
         $resolver = $this->createStub(target_resolver::class);
@@ -179,21 +183,6 @@ final class process_generate_text_test extends \advanced_testcase {
     }
 
     /**
-     * Test that the same case is an ordinary failure once the setting is turned off.
-     */
-    public function test_no_target_is_an_ordinary_failure_when_refusals_are_not_final(): void {
-        $this->resetAfterTest();
-        $result = $this->run_processor([], hastarget: false, config: ['strictdecline' => 0]);
-
-        $this->assertFalse($result['success']);
-        $this->assertEquals(503, $result['errorcode']);
-        $this->assertEquals(
-            get_string('error:nodefaulttarget', 'local_airouter'),
-            $result['errormessage'],
-        );
-    }
-
-    /**
      * Test that the first usable target wins and later ones are not tried.
      */
     public function test_first_usable_target_wins(): void {
@@ -268,9 +257,6 @@ final class process_generate_text_test extends \advanced_testcase {
         // Moodle 5.2 throws a coding_exception when a failed response has no error
         // name, and 5.0 has no such field at all. Sending it always covers both.
         $cases = [
-            // The first one is only ever returned where refusals are not made final,
-            // since otherwise it is thrown and never becomes a response at all.
-            [[], false, ['strictdecline' => 0], abstract_processor::REASON_NO_TARGET],
             [[$this->failure(500)], true, [], abstract_processor::REASON_ALL_FAILED],
             [[$this->success('', 'length')], true, [], abstract_processor::REASON_EMPTY],
         ];

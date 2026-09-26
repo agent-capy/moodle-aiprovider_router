@@ -54,7 +54,6 @@ final class store_failure_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
         \aiprovider_mock\provider::$ratechecks = [];
         $this->manager = \core\di::get(manager::class);
     }

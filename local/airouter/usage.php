@@ -133,7 +133,6 @@ $reasons = $report->get_failure_reasons($from, $now, null, $keysource);
 $bykeysource = $report->get_breakdown(reader::BY_KEYSOURCE, $from, $now);
 
 echo $OUTPUT->header();
-echo admin_page::back_button($url);
 echo $OUTPUT->box(get_string('usage:intro', 'local_airouter'));
 
 // The filters sit in one row with a gap between them. A single_select carries no

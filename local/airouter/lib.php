@@ -25,30 +25,21 @@
 /**
  * Status checks reported on the site status report.
  *
- * A router that is not reached is indistinguishable from a router that is not working, and
- * the admin has no reason to suspect the provider order, so the site status report is where
- * that gets said. One inspector is shared so the checks cannot describe different sites.
+ * A router that is not reached is indistinguishable from a router that is not working,
+ * and the admin has no reason to suspect it, so the site status report is where that
+ * gets said.
  *
  * @return \core\check\check[] The checks.
  */
 function local_airouter_status_checks(): array {
-    $inspector = new \local_airouter\order_inspector();
-
     return [
         new \local_airouter\check\managedboundary(),
-        new \local_airouter\check\singleinstance($inspector),
-        new \local_airouter\check\routerlisted($inspector),
-        new \local_airouter\check\routerfirst($inspector),
-        new \local_airouter\check\actionconflict($inspector),
-        new \local_airouter\check\declinereach($inspector),
-        new \local_airouter\check\staleentries($inspector),
-        new \local_airouter\check\ruletargets($inspector),
-        new \local_airouter\check\staleactions($inspector),
-        new \local_airouter\check\byokkeys($inspector),
-        new \local_airouter\check\byokeligibility($inspector),
-        new \local_airouter\check\budgetrates($inspector),
-        new \local_airouter\check\budgethistory($inspector),
-        new \local_airouter\check\recordgaps($inspector),
+        new \local_airouter\check\ruletargets(),
+        new \local_airouter\check\byokkeys(),
+        new \local_airouter\check\byokeligibility(),
+        new \local_airouter\check\budgetrates(),
+        new \local_airouter\check\budgethistory(),
+        new \local_airouter\check\recordgaps(),
     ];
 }
 

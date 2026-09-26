@@ -49,7 +49,6 @@ final class effective_policy_test extends \advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
-        provider::get_instance_ids(true);
         \aiprovider_mock\provider::$ratechecks = [];
         $this->manager = \core\di::get(manager::class);
     }
@@ -186,14 +185,10 @@ final class effective_policy_test extends \advanced_testcase {
             }
 
             #[\Override]
-            protected function router_for_dispatch(
-                string $actionclass,
-                ?request_policy $policy = null,
-                ?array $instances = null,
-            ): ?\core_ai\provider {
+            protected function router_for_dispatch(string $actionclass, ?request_policy $policy = null): ?provider {
                 ($this->interrupt)();
 
-                return parent::router_for_dispatch($actionclass, $policy, $instances);
+                return parent::router_for_dispatch($actionclass, $policy);
             }
         };
 
