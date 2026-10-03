@@ -803,6 +803,15 @@ field for each provider, offering a guess taken from the instance's own configur
 
 A provider nobody has answered for cannot take a key.
 
+⚠ **The instance's own key field cannot be left empty, even on a provider used only with
+brought keys.** Moodle treats an instance with an empty key field as not configured, and
+does not offer the AI features it would serve. The router asks the same question, so it
+does not delegate to that instance either, even with somebody's key ready to go in.
+Moodle's own OpenAI form requires the field anyway. The site's own key is fine there; to
+keep the site from paying, set the provider to *Only usable with a brought key* below. A
+value that is not a real key also works with brought keys, though this has been checked
+with OpenAI only.
+
 What we have found so far, which the providers themselves may change:
 
 | Provider | Where it ships | The field | Can take a brought key |
@@ -833,9 +842,12 @@ provider, and whether people may bring one is a decision of the site's.
 | **This site allows no brought keys here** | The provider disappears from the key registration page, and a rule asking for a brought key here is never honoured. Requests still go through it on the site's own key. |
 | **Only usable with a brought key** | The site's own key is refused here. A rule paying with it moves on to the next rule, the provider is never used as the default target or as a fallback behind another rule, and only requests carrying somebody's own key reach it. |
 
-The last one is the way to keep a provider off the site's bill entirely. It is enforced
-before the request leaves Moodle, so a request the site would have paid for moves on to
-the next rule rather than spending a round trip being refused by the provider.
+The last one is the way to keep a provider off the site's bill for requests that come
+through the router. It is enforced before the request leaves Moodle, so a request the site
+would have paid for moves on to the next rule rather than spending a round trip being
+refused by the provider. ⚠ It does not cover actions that are not placed under the router,
+or any action while routing is switched off: Moodle sends those itself, with the key in
+the instance's own field.
 
 Rules that can never be honoured are called out in the rule list: one asking for a
 brought key where nobody has said the field, and one paying with the site's key at a
