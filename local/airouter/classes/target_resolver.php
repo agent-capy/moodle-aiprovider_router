@@ -46,6 +46,30 @@ use core_ai\provider as ai_provider;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class target_resolver {
+    /** @var string The instance named no longer exists. */
+    public const PROBLEM_MISSING = 'missing';
+
+    /** @var string The instance named is a router. */
+    public const PROBLEM_ROUTER = 'router';
+
+    /** @var string The instance is switched off. */
+    public const PROBLEM_DISABLED = 'disabled';
+
+    /** @var string The instance says it is not set up, usually because its key field is empty. */
+    public const PROBLEM_UNCONFIGURED = 'unconfigured';
+
+    /** @var string The provider does not offer the action at all. */
+    public const PROBLEM_NOACTION = 'noaction';
+
+    /** @var string The provider offers the action, but it is switched off on this instance. */
+    public const PROBLEM_ACTIONOFF = 'actionoff';
+
+    /** @var string The instance is kept for brought keys, and the site would pay. */
+    public const PROBLEM_BYOKONLY = 'byokonly';
+
+    /** @var string The instance takes no brought keys, and the request would carry one. */
+    public const PROBLEM_BYOKDISALLOWED = 'byokdisallowed';
+
     /** @var rule|null The rule that decided the last resolution. */
     protected ?rule $matchedrule = null;
 
@@ -109,6 +133,22 @@ class target_resolver {
      */
     public static function for_site(): self {
         return new self(adapter_provider::create());
+    }
+
+    /**
+     * A resolver for the site's router that reads the provider list only once.
+     *
+     * For screens and checks that ask about many targets in a row. A request reads
+     * the list once anyway, because the manager hands it over; asked from a screen,
+     * each question would otherwise read it again.
+     *
+     * @return self The resolver.
+     */
+    public static function for_site_with_instances(): self {
+        $router = adapter_provider::create();
+        $router->carry_request_instances(\core\di::get(\core_ai\manager::class)->get_provider_instances());
+
+        return new self($router);
     }
 
     /**
@@ -537,30 +577,81 @@ class target_resolver {
      *
      * @param int $targetid The provider instance the rule names.
      * @param action_base $action The action being tested.
+     * @param bool $brought Whether the request would be paid for with a brought key.
      * @return string|null The reason, or null when the target can be used.
      */
-    public function describe_unusable(int $targetid, action_base $action): ?string {
-        $instance = $this->get_instances_by_id()[$targetid] ?? null;
+    public function describe_unusable(int $targetid, action_base $action, bool $brought = false): ?string {
+        $problem = $this->get_target_problem($targetid, $action::class, $brought);
+
+        return $problem === null ? null : self::describe_problem($problem, $action::class);
+    }
+
+    /**
+     * A reason this resolver gave, in words.
+     *
+     * @param string $problem One of the PROBLEM_ constants.
+     * @param string $actionclass The action the target was asked about.
+     * @return string The reason.
+     */
+    public static function describe_problem(string $problem, string $actionclass): string {
+        return get_string('ruletest:reason:' . $problem, 'local_airouter', $actionclass::get_name());
+    }
+
+    /**
+     * Why a provider instance cannot carry an action, asked by its id.
+     *
+     * The question every screen that describes a target asks: the setup page, the
+     * status check, the managed actions page and the rule tester. They ask it here,
+     * of the same method the router asks when a request arrives, so that none of them
+     * can call a target usable that the router would pass over, or the other way round.
+     *
+     * @param int $targetid The provider instance.
+     * @param string $actionclass The action, as a class name.
+     * @param bool $brought Whether the request would be paid for with a brought key.
+     * @return string|null One of the PROBLEM_ constants, or null when it can be used.
+     */
+    public function get_target_problem(int $targetid, string $actionclass, bool $brought = false): ?string {
+        return $this->problem_with($this->get_instances_by_id()[$targetid] ?? null, $actionclass, $brought);
+    }
+
+    /**
+     * Why a provider instance cannot carry anything at all, asked by its id.
+     *
+     * The part of the judgement that does not depend on the action: whether the
+     * instance exists, is not a router, is switched on and is set up. A rule names one
+     * target for every action it claims, so this is what can be said about the rule
+     * as a whole.
+     *
+     * @param int $targetid The provider instance.
+     * @return string|null One of the PROBLEM_ constants, or null when nothing stops it.
+     */
+    public function get_instance_problem(int $targetid): ?string {
+        return self::instance_problem($this->get_instances_by_id()[$targetid] ?? null);
+    }
+
+    /**
+     * What stops an instance carrying any action, if anything does.
+     *
+     * @param ai_provider|null $instance The instance, or null when it is gone.
+     * @return string|null One of the PROBLEM_ constants, or null when nothing stops it.
+     */
+    protected static function instance_problem(?ai_provider $instance): ?string {
         if ($instance === null) {
-            return get_string('ruletest:reason:missing', 'local_airouter');
+            return self::PROBLEM_MISSING;
         }
+        // Never delegate to a router. A router chain would loop.
         if ($instance instanceof provider) {
-            return get_string('ruletest:reason:router', 'local_airouter');
+            return self::PROBLEM_ROUTER;
         }
         if (!$instance->enabled) {
-            return get_string('ruletest:reason:disabled', 'local_airouter');
+            return self::PROBLEM_DISABLED;
         }
+        // Asked of the instance as it is stored, before any key somebody brought is put
+        // in. A provider whose own key field is empty is therefore never used, even for
+        // a request that would carry a brought key: Moodle itself treats it as not set
+        // up and offers none of its actions, and the site has accepted that.
         if (!$instance->is_provider_configured()) {
-            return get_string('ruletest:reason:unconfigured', 'local_airouter');
-        }
-        if (!in_array($action::class, $instance::get_action_list(), true)) {
-            return get_string('ruletest:reason:noaction', 'local_airouter', $action::get_name());
-        }
-        if (empty(($instance->actionconfig[$action::class] ?? [])['enabled'])) {
-            return get_string('ruletest:reason:actionoff', 'local_airouter', $action::get_name());
-        }
-        if (in_array($targetid, $this->get_byok_only(), true)) {
-            return get_string('ruletest:reason:byokonly', 'local_airouter');
+            return self::PROBLEM_UNCONFIGURED;
         }
 
         return null;
@@ -575,22 +666,29 @@ class target_resolver {
      * @return bool True if the instance may be used.
      */
     protected function is_usable(ai_provider $instance, action_base $action, bool $brought = false): bool {
-        // Never delegate to a router. A router chain would loop, and the single
-        // instance restriction only stops routers being created through the UI.
-        if ($instance instanceof provider) {
-            return false;
-        }
-        if (!$instance->enabled || !$instance->is_provider_configured()) {
-            return false;
+        return $this->problem_with($instance, $action::class, $brought) === null;
+    }
+
+    /**
+     * What stops an instance carrying an action, if anything does.
+     *
+     * @param ai_provider|null $instance The candidate instance, or null when it is gone.
+     * @param string $actionclass The action, as a class name.
+     * @param bool $brought Whether the request would be paid for with a brought key.
+     * @return string|null One of the PROBLEM_ constants, or null when it can be used.
+     */
+    protected function problem_with(?ai_provider $instance, string $actionclass, bool $brought): ?string {
+        $problem = self::instance_problem($instance);
+        if ($problem !== null) {
+            return $problem;
         }
         // Excluding targets that do not declare the action is the first of the four
         // guards against an unsupported action reaching a target.
-        if (!in_array($action::class, $instance::get_action_list(), true)) {
-            return false;
+        if (!in_array($actionclass, $instance::get_action_list(), true)) {
+            return self::PROBLEM_NOACTION;
         }
-        $actionconfig = $instance->actionconfig[$action::class] ?? [];
-        if (empty($actionconfig['enabled'])) {
-            return false;
+        if (empty(($instance->actionconfig[$actionclass] ?? [])['enabled'])) {
+            return self::PROBLEM_ACTIONOFF;
         }
 
         if ($brought) {
@@ -598,13 +696,15 @@ class target_resolver {
             // keys people bring must not be reached by a fallback chain either, or the
             // setting would hold for the target a rule names and not for the one the
             // request actually lands on.
-            return !in_array((int) $instance->id, $this->get_byok_disallowed(), true);
+            return in_array((int) $instance->id, $this->get_byok_disallowed(), true)
+                ? self::PROBLEM_BYOKDISALLOWED
+                : null;
         }
 
         // A provider the site has set aside for brought keys only. Turned away here
         // rather than at the provider, so that a request the site would have paid for
         // moves on to the next rule instead of spending a round trip finding out.
-        return !in_array((int) $instance->id, $this->get_byok_only(), true);
+        return in_array((int) $instance->id, $this->get_byok_only(), true) ? self::PROBLEM_BYOKONLY : null;
     }
 
     /**

@@ -30,10 +30,9 @@ use core\check\result;
  * displaying its rules and budgets while none of them ran. Nothing warns about that on
  * its own, so it is asked here.
  *
- * The other way it can fail is the site's own doing: an action is managed and the
- * router cannot answer it, because it has neither a default delegation target nor any
- * rules, so every request for it is refused. That is the designed behaviour rather
- * than a fault, but an administrator needs to be told, and told which way to fix it.
+ * Whether the router has anywhere to send a request once it arrives is a different
+ * question, asked by the delegation check. This one used to ask both, and its "reaches
+ * the router" was read as "is answered".
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -82,20 +81,6 @@ class managedboundary extends check {
                     'actions' => $names,
                     'manager' => $manager::class,
                 ]),
-            );
-        }
-
-        $unreachable = array_values(array_filter(
-            $managed,
-            static fn(string $action): bool => $manager->find_router($action) === null,
-        ));
-        if ($unreachable !== []) {
-            return new result(
-                result::ERROR,
-                get_string('check:managedboundary:unreachable', 'local_airouter', implode(', ', array_map(
-                    static fn(string $action): string => managed_policy::basename_for($action),
-                    $unreachable,
-                ))),
             );
         }
 

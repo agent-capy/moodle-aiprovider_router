@@ -34,6 +34,7 @@
 function local_airouter_status_checks(): array {
     return [
         new \local_airouter\check\managedboundary(),
+        new \local_airouter\check\delegation(),
         new \local_airouter\check\ruletargets(),
         new \local_airouter\check\byokkeys(),
         new \local_airouter\check\byokeligibility(),

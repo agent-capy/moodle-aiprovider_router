@@ -10,27 +10,43 @@ independent review of the same code.
 
 ### Added
 
-- A site places an action **under the router**, on *Actions the AI Router must
-  answer*. Moodle brings every request for that action to the router, and offers it to
+- A site routes an action **through the AI Router**, on *Actions routed through the AI
+  Router*. Moodle brings every request for that action to the router, and offers it to
   nobody else afterwards. The provider order decides which provider Moodle prefers; it
   cannot decide which one answers, so until now a provider placed above the router
   answered before any rule, budget or brought key had been looked at.
   - A refusal comes back as an ordinary failed request rather than an error, so Moodle
     records it in its own AI action log for the first time. The prompt of a refused
     request is stored with it, as it is for a request that failed any other way.
-  - An action placed there is refused, not passed to another provider, while the
-    router has neither a default delegation target nor any rules.
-  - Nothing is placed there until the site says so, and actions not placed there are
+  - An action routed there is refused, not passed to another provider, while nothing
+    the router's settings name can carry it.
+  - Nothing is routed there until the site says so, and actions not routed there are
     handled by Moodle exactly as they would be without this plugin.
+  - Each action on that page says where its requests go now and where they would go
+    the other way, and the *Routing policy* page starts by listing the actions its
+    settings apply to and what switching routing off would hand back to Moodle.
 - The router's settings - whether it routes at all, what happens when no rule matches,
   and the default delegation target - are on a *Routing policy* page in the
   administration tree.
-- A status check, *Actions placed under the AI Router*, reports when a managed action
-  cannot reach the router: the router has nothing to send it to, or another plugin has
-  defined Moodle's AI manager and silently displaced this one.
+- A status check, *Actions routed through the AI Router*, reports when a routed action
+  cannot reach the router because another plugin has defined Moodle's AI manager and
+  silently displaced this one.
+- A status check, *Delegation targets for actions routed through the AI Router*, reports
+  what the settings offer each routed action - a target is available, it depends on the
+  rules, it is refused by the routing policy, or it needs attention - from the same
+  judgement the router makes when a request arrives. It reads the settings only and
+  says so: it does not claim that a request will be answered. Whether a request reaches
+  the router and whether the router has somewhere to send it used to be one check, and
+  the first was being read as the second.
 
 ### Changed
 
+- *Rule delegation targets* also reports a rule naming a provider that is switched off
+  or not set up, not only one that has been deleted. Its reason is given with each rule.
+- The help for *When no rule matches* and *Default delegation target* now says that the
+  same setting decides where a site-paid request goes when its target fails, and where
+  a request a budget turned away goes. The help for the routing switch says that
+  switching it off does not switch AI off.
 - **The plugin has moved.** What was `aiprovider_router` is now `local_airouter`,
   installed at `local/airouter`. Moodle never reads an `aiprovider` plugin's
   `settings.php`, so a router that kept its rules and budgets there could not have a

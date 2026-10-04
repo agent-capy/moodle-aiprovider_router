@@ -190,7 +190,7 @@ if ($data) {
             // The target itself may be perfectly able to carry this, and the request
             // still be stopped: a budget that has run out and a key that cannot be
             // read are decisions about the request, not about the provider.
-            $reason = $resolver->describe_unusable($targetid, $action);
+            $reason = $resolver->describe_unusable($targetid, $action, $rule->is_byok());
             if ($reason === null && $unreadablekey !== null) {
                 $reason = get_string('ruletest:reason:unreadablekey', 'local_airouter');
             }

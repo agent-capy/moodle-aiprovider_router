@@ -113,6 +113,42 @@ final class settings_test extends \advanced_testcase {
         $this->assertNotContains('mode', $names);
     }
 
+    public function test_the_policy_page_says_which_actions_it_applies_to(): void {
+        // The settings on this page only ever apply to the actions routed through the
+        // router. A site that has routed nothing is told so here, rather than seeing a
+        // switch that reads "on" over a router nothing reaches.
+        $heading = $this->routed_heading();
+        $this->assertStringContainsString(
+            substr(get_string('policy:routed:none', 'local_airouter', 'X'), 0, 20),
+            $heading->description,
+        );
+
+        managed_policy::set_managed_actions([\core_ai\aiactions\generate_text::class]);
+        $heading = $this->routed_heading();
+        $this->assertStringContainsString(\core_ai\aiactions\generate_text::get_name(), $heading->description);
+        $this->assertStringContainsString(get_string('setup:state:actionneeded', 'local_airouter'), $heading->description);
+        $this->assertStringContainsString(
+            get_string('policy:routed:off', 'local_airouter', \core_ai\aiactions\generate_text::get_name()),
+            $heading->description,
+        );
+    }
+
+    /**
+     * The heading on the policy page that lists the routed actions.
+     *
+     * @return \admin_setting_heading The heading.
+     */
+    protected function routed_heading(): \admin_setting_heading {
+        /** @var \admin_settingpage $page */
+        $page = $this->tree()->locate('local_airouter_policy');
+        foreach ((array) $page->settings as $setting) {
+            if ($setting->name === 'routed') {
+                return $setting;
+            }
+        }
+        $this->fail('The policy page has no list of routed actions.');
+    }
+
     public function test_the_router_reads_what_the_settings_page_writes(): void {
         set_config('nomatch', provider::NOMATCH_DECLINE, 'local_airouter');
         set_config('defaulttarget', 42, 'local_airouter');

@@ -17,6 +17,7 @@
 namespace local_airouter;
 
 use local_airouter\record\ledger;
+use local_airouter\check\delegation;
 use local_airouter\check\managedboundary;
 use local_airouter\condition\budget;
 use core_ai\aiactions\generate_text;
@@ -56,6 +57,7 @@ require_once(__DIR__ . '/fixtures/mock/process_fixture_dropped_action.php');
 #[\PHPUnit\Framework\Attributes\CoversClass(managed_policy::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(response_factory::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(managedboundary::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(delegation::class)]
 #[\PHPUnit\Framework\Attributes\CoversClass(\local_airouter\check\base::class)]
 final class routing_manager_test extends \advanced_testcase {
     /** @var manager The manager a placement would be given. */
@@ -307,7 +309,10 @@ final class routing_manager_test extends \advanced_testcase {
         $this->add_router();
         $this->manage_text();
 
-        $this->assertSame(\core\check\result::ERROR, (new managedboundary())->get_result()->get_status());
+        // The request reaches the router, which is all the boundary check says; that
+        // it has nowhere to go from there is the delegation check's to report.
+        $this->assertSame(\core\check\result::OK, (new managedboundary())->get_result()->get_status());
+        $this->assertSame(\core\check\result::ERROR, (new delegation())->get_result()->get_status());
     }
 
     public function test_the_status_check_notices_another_plugin_taking_the_manager(): void {
@@ -366,7 +371,7 @@ final class routing_manager_test extends \advanced_testcase {
         $this->add_working_router();
         managed_policy::set_managed_actions(['local_airouter\\action_that_was_uninstalled']);
 
-        $result = (new managedboundary())->get_result();
+        $result = (new delegation())->get_result();
 
         $this->assertSame(\core\check\result::ERROR, $result->get_status());
         $this->assertStringContainsString('action_that_was_uninstalled', $result->get_summary());

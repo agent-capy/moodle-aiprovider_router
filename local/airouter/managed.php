@@ -15,10 +15,11 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Chooses which actions Moodle must bring to the router, whatever the provider order says.
+ * Chooses which actions are routed through the AI Router, whatever the provider order says.
  *
- * Not registered in the admin tree, for the reason the other pages here are not: core
- * never reads an aiprovider plugin's settings.php.
+ * Each action is shown with what it gets now and what it would get the other way,
+ * so that routing an action, or taking it back, is decided knowing where its
+ * requests will go afterwards.
  *
  * @package    local_airouter
  * @copyright  2026 UDAGAWA Mitsuru
@@ -31,7 +32,8 @@ require_once(__DIR__ . '/lib.php');
 use local_airouter\admin_page;
 use local_airouter\form\managed_actions_form;
 use local_airouter\managed_policy;
-use local_airouter\routing_manager;
+use local_airouter\setup\route_inspection;
+use local_airouter\setup\route_inspector;
 
 // Action class names, which carry separators. Nothing is built from these: they
 // are only compared against lists this plugin holds, and anything that matches
@@ -46,23 +48,16 @@ require_capability('moodle/site:config', $context);
 $url = new moodle_url('/local/airouter/managed.php');
 admin_page::setup($PAGE, $url, get_string('managed:heading', 'local_airouter'), section: 'local_airouter_managed');
 
-$manager = \core\di::get(\core_ai\manager::class);
-
-// Whether a request for an action would reach the router right now. This is the same
-// question the router itself asks when a request arrives, asked through the same
-// method, so that what this screen promises and what happens cannot differ.
-$answerable = function (string $actionclass) use ($manager): bool {
-    return $manager instanceof routing_manager && $manager->find_router($actionclass) !== null;
-};
-
-// Whether it would reach the router once the choice below is saved, which is a
-// different question and the one to ask before saving. Without a stored instance the
-// router answers what the policy says, so an action being added for the first time is
-// not one it answers yet -- and saying so would mean warning about every correct
-// choice until the warning stopped being read.
-$wouldanswer = function (string $actionclass, array $policy) use ($manager): bool {
-    return $manager instanceof routing_manager && $manager->would_answer($actionclass, $policy);
-};
+// What the settings offer each action, read the way a request would read them. The
+// managed list does not change the answer -- only whether a request gets there -- so
+// the same reading serves the actions being chosen as well as the ones already chosen.
+$inspector = new route_inspector($DB);
+$inspections = [];
+foreach (managed_policy::declared_actions() as $action) {
+    $inspections[$action] = $inspector->inspect($action);
+}
+$stuck = static fn(string $action): bool =>
+    ($inspections[ltrim($action, '\\')] ?? null)?->state === route_inspection::STATE_ACTION_NEEDED;
 
 // Taking one action back out, from the warning that says it is stuck. Reached from
 // here and from the status check, which is where an administrator notices.
@@ -116,7 +111,7 @@ if ($confirmed !== null) {
     $save($keepunsupported($chosen));
 }
 
-$form = new managed_actions_form($url);
+$form = new managed_actions_form($url, ['inspections' => $inspections]);
 
 if ($form->is_cancelled()) {
     redirect($url);
@@ -130,15 +125,13 @@ if ($data = $form->get_data()) {
         }
     }
 
-    // Choosing an action the router cannot answer stops that action working across the
-    // site, which is the intended behaviour and an easy thing to do by accident. It is
-    // worth one question before it takes effect rather than an error report afterwards.
-    $stuck = array_values(array_filter(
-        $chosen,
-        static fn(string $action): bool => !$wouldanswer($action, $chosen),
-    ));
-    if ($stuck !== []) {
-        $names = implode(', ', array_map(static fn(string $action): string => $action::get_name(), $stuck));
+    // Choosing an action nothing in the settings can carry stops that action working
+    // across the site, which is the intended behaviour and an easy thing to do by
+    // accident. It is worth one question before it takes effect rather than an error
+    // report afterwards.
+    $chosenstuck = array_values(array_filter($chosen, $stuck));
+    if ($chosenstuck !== []) {
+        $names = implode(', ', array_map(static fn(string $action): string => $action::get_name(), $chosenstuck));
         $classes = implode(',', $chosen);
 
         echo $OUTPUT->header();
@@ -161,12 +154,19 @@ echo $OUTPUT->heading(get_string('managed:heading', 'local_airouter'));
 // An action brought to a router that cannot answer it is refused, which is the point,
 // but an administrator arriving here should be told, and given the way out in the same
 // place rather than having to work out which checkbox caused it.
+$unsupported = managed_policy::unsupported_actions();
 foreach (managed_policy::managed_actions() as $action) {
-    if ($answerable($action)) {
+    if (in_array($action, $unsupported, true)) {
+        // Refused at the door whatever the settings say, and its class may have gone,
+        // so only its name is shown.
+        $message = get_string('managed:noprocessor', 'local_airouter', managed_policy::basename_for($action));
+    } else if (managed_policy::is_switched_on() && $stuck($action)) {
+        $message = get_string('managed:unreachable', 'local_airouter', managed_policy::label_for($action));
+    } else {
         continue;
     }
     echo $OUTPUT->notification(
-        get_string('managed:unreachable', 'local_airouter', managed_policy::label_for($action))
+        $message
         . ' ' . \html_writer::link(
             new moodle_url($url, ['unmanage' => $action, 'sesskey' => sesskey()]),
             get_string('managed:unmanage', 'local_airouter'),

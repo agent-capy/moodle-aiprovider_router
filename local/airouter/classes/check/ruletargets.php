@@ -45,11 +45,15 @@ class ruletargets extends base {
     protected function check_router(): result {
         global $DB;
 
-        $targets = target_resolver::get_delegation_targets();
+        // Only what stops a target carrying anything: a rule names one target for every
+        // action it claims, and what an action needs is reported per action by the
+        // delegation check and the screens.
+        $resolver = target_resolver::for_site_with_instances();
         $broken = [];
         foreach ((new rule_repository($DB))->get_all() as $rule) {
-            if (!isset($targets[(int) $rule->get('targetid')])) {
-                $broken[] = $rule->get('name');
+            $problem = $resolver->get_instance_problem((int) $rule->get('targetid'));
+            if ($problem !== null) {
+                $broken[] = s($rule->get('name')) . ' (' . s(get_string('ruletest:reason:' . $problem, 'local_airouter')) . ')';
             }
         }
 
@@ -60,7 +64,7 @@ class ruletargets extends base {
         return new result(
             result::WARNING,
             get_string('check:ruletargets:found', 'local_airouter', count($broken)),
-            get_string('check:ruletargets:found_details', 'local_airouter', s(implode(', ', $broken))),
+            get_string('check:ruletargets:found_details', 'local_airouter', implode(', ', $broken)),
         );
     }
 }

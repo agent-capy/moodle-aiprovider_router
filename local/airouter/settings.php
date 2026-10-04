@@ -53,6 +53,42 @@ $ADMIN->add($ADMIN->locate('ai') !== null ? 'ai' : 'localplugins', $category);
 $policy = new admin_settingpage('local_airouter_policy', get_string('policy:heading', 'local_airouter'));
 
 if ($ADMIN->fulltree) {
+    // What the settings below decide is only ever applied to the actions routed
+    // through the router, so the page says which those are before anything else. A
+    // site that has routed nothing sees that here, rather than a switch that reads
+    // "on" over a router nothing reaches.
+    $managedlink = html_writer::link(
+        new moodle_url('/local/airouter/managed.php'),
+        get_string('managed:heading', 'local_airouter'),
+    );
+    $routed = (new \local_airouter\setup\route_inspector($DB))->inspect_managed();
+    if (!managed_policy::is_switched_on()) {
+        $routedtext = get_string('check:managedboundary:off', 'local_airouter');
+    } else if ($routed === []) {
+        $routedtext = get_string('policy:routed:none', 'local_airouter', $managedlink);
+    } else {
+        $items = array_map(
+            static fn(\local_airouter\setup\route_inspection $inspection): string =>
+                html_writer::tag('strong', s(managed_policy::label_for($inspection->actionclass)))
+                . ' - ' . \local_airouter\setup\route_formatter::state_label($inspection) . ': '
+                . implode(' ', \local_airouter\setup\route_formatter::explain($inspection)),
+            $routed,
+        );
+        $routedtext = get_string('policy:routed:list', 'local_airouter', (object) [
+            'list' => html_writer::alist($items),
+            'link' => $managedlink,
+        ]) . html_writer::tag('p', get_string('policy:routed:off', 'local_airouter', implode(', ', array_map(
+            static fn(\local_airouter\setup\route_inspection $inspection): string =>
+                managed_policy::label_for($inspection->actionclass),
+            $routed,
+        )))) . html_writer::tag('p', get_string('setup:unchecked', 'local_airouter'));
+    }
+    $policy->add(new admin_setting_heading(
+        'local_airouter/routed',
+        get_string('policy:routed', 'local_airouter'),
+        $routedtext,
+    ));
+
     $policy->add(new admin_setting_configcheckbox(
         'local_airouter/' . managed_policy::SWITCH,
         get_string('routing', 'local_airouter'),

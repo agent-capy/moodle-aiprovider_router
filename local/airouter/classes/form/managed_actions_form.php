@@ -18,6 +18,7 @@ namespace local_airouter\form;
 
 use local_airouter\managed_policy;
 use local_airouter\provider;
+use local_airouter\setup\route_formatter;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -54,6 +55,13 @@ class managed_actions_form extends \moodleform {
             $mform->addElement('advcheckbox', $field, $action::get_name(), $action::get_description());
             $mform->setType($field, PARAM_BOOL);
             $mform->setDefault($field, in_array($class, $managed, true) ? 1 : 0);
+
+            // Where its requests go now, and where they would go the other way, so that
+            // a change is made knowing what it changes.
+            $inspection = $this->_customdata['inspections'][$class] ?? null;
+            if ($inspection !== null) {
+                $mform->addElement('static', $field . '_route', '', route_formatter::describe($inspection));
+            }
         }
 
         $this->add_action_buttons(false, get_string('savechanges'));

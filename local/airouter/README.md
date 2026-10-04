@@ -9,7 +9,7 @@ delegates to it.
 > longer used. Upgrading this plugin carries the router provider instance's settings
 > over to the Routing policy page — the default delegation target, what happens when no
 > rule matches, and the actions the instance was enabled for, which become actions
-> placed under the router — and then deletes the instance.
+> routed through the AI Router — and then deletes the instance.
 >
 > Once the upgrade has run, uninstall **AI Router** (`aiprovider_router`) under
 > *Site administration → Plugins → Plugins overview*, or with
@@ -60,8 +60,8 @@ The router's screens are at **Site administration > AI > AI Router**.
 
 | Page | What it is for |
 | --- | --- |
-| Routing policy | Whether the router routes at all, what happens when no rule matches, and the default delegation target |
-| Actions the AI Router must answer | Which actions Moodle brings to the router. Only these reach it |
+| Routing policy | Whether the router routes at all, what happens when no rule matches, and the default delegation target. It starts by listing the actions those settings apply to |
+| Actions routed through the AI Router | Which actions go through the router. Only these reach it. Each action shows where its requests go now, and where they would go the other way |
 | Routing rules | The rules, in the order they are considered |
 | AI Router rates | What each model costs, which is what budgets are measured against |
 | Keys people bring | Whether a provider may be used with somebody's own key |
@@ -69,18 +69,19 @@ The router's screens are at **Site administration > AI > AI Router**.
 
 **Route AI requests through the AI Router** is one switch above everything else. Off,
 the site behaves as it would without the plugin, and nothing is forgotten: the actions
-placed under the router, the rules and the keys are all still there, and switching it
-back on puts them in charge again. It is a way to find out what the plugin is doing
+routed through the router, the rules and the keys are all still there, and switching it
+back on puts them in charge again. ⚠ Switching it off does not switch AI off: every
+action is handled by Moodle as usual, on the site's own keys. It is a way to find out what the plugin is doing
 for a site without uninstalling it.
 
 The Routing policy page holds two more settings.
 
 | Setting | Description |
 | --- | --- |
-| When no rule matches | *Send it to the default delegation target*, or *decline the request*. A declined request is not offered to another provider: it fails, and Moodle records it as a failed request. Declining is how a site keeps AI spending to the cases its rules describe. |
-| Default delegation target | The provider instance that handles a request when no rule picks one, and the one a request falls back to if the target a rule chose fails. Not needed on a site that routes entirely by rule and declines the rest. With neither this nor any rule, the router has nowhere to send anything, and requests for the actions placed under it are refused. |
+| When no rule matches | *Send it to the default delegation target*, or *decline the request*. A declined request is not offered to another provider: it fails, and Moodle records it as a failed request. Declining is how a site keeps AI spending to the cases its rules describe. ⚠ The same setting decides two more things: whether a site-paid request whose target failed goes on to the default delegation target, and where a request a budget turned away goes — a budget limits a rule, so what it turns away is a request no rule claimed. |
+| Default delegation target | The provider instance that handles a request when no rule picks one, and the one a site-paid request falls back to if the target its rule chose fails — in both cases only while requests no rule claims are sent to it. Not needed on a site that routes entirely by rule and declines the rest. With nothing usable here or in the rules, requests for the actions routed through the router are refused. |
 
-## Actions the site places under the router
+## Actions routed through the AI Router
 
 Moodle tries AI providers in the order configured for the site and takes the first
 answer. The order says which provider Moodle *prefers*; it cannot say which provider
@@ -88,8 +89,8 @@ answers, and it knows nothing about rules, budgets or whose key should pay. For 
 using the router to decide those things, that is the difference between a policy and a
 hope.
 
-So the router is not a provider in that order. An action is placed **under** it on
-**Actions the AI Router must answer** (`/local/airouter/managed.php`), and Moodle then
+So the router is not a provider in that order. An action is **routed through** it on
+**Actions routed through the AI Router** (`/local/airouter/managed.php`), and Moodle then
 brings every request for that action to the router, and offers it to nobody else
 afterwards:
 
@@ -100,7 +101,7 @@ afterwards:
   nowhere else.
 - if the router has neither a default delegation target nor any rules, the request is
   refused rather than passed on. That is the point of choosing it here, and it has a
-  cost worth stating plainly: **an action placed under the router before the router is
+  cost worth stating plainly: **an action routed through the router before the router is
   set up stops working until it is**.
 
 An action not placed there does not reach the router at all. Moodle handles it in the
@@ -118,7 +119,7 @@ Two consequences to decide about before turning this on:
   the AI manager in Moodle's dependency injection container. If another plugin defines
   the same entry, whichever is registered last wins and nothing warns about it - the
   site would go on displaying its rules and budgets with none of them consulted. The
-  *Actions placed under the AI Router* status check exists for that: it reports an error
+  *Actions routed through the AI Router* status check exists for that: it reports an error
   when the manager in use is not this plugin's, and names the class that took it.
 - ⚠⚠ **Code that builds its own manager is not covered.** Everything in Moodle asks
   the container for the manager, which is what makes this work at all, but a plugin
@@ -131,12 +132,18 @@ Two consequences to decide about before turning this on:
 
 The plugin reports on *Site administration → Reports → System status*. On a site where
 the router has neither a default delegation target nor any rules, the checks other than
-the first say that there is nothing to check yet.
+the first two say that there is nothing to check yet.
+
+The first two are kept apart on purpose. Whether a request **reaches** the router and
+whether the router has **somewhere to send it** are different questions, and an answer
+to the first was being read as an answer to the second. Neither asks a provider
+anything, so neither says that a request will be answered.
 
 | Check | Reports |
 | --- | --- |
-| Actions placed under the AI Router | An action the site placed under the router cannot reach it, either because the router has neither a default delegation target nor any rules or because another plugin has taken over Moodle's AI manager. Reported only where at least one action has been placed there. |
-| Rule delegation targets | A rule names a provider instance that no longer exists. Requests matching it fall through to the next rule. |
+| Actions routed through the AI Router | Requests for the actions routed through the router do not reach it, because another plugin has taken over Moodle's AI manager. Reported only where at least one action is routed. |
+| Delegation targets for actions routed through the AI Router | What the settings offer each routed action: *a target is available* (requests no rule claims go to a default delegation target that can carry them), *depends on the rules*, *refused by the routing policy* (no rule applies and unclaimed requests are declined: reported for information, as it may be intended), or *needs attention* (nothing named can carry it, or this version of the router cannot). A default delegation target that has been deleted, switched off or left without its key is a warning, because unclaimed requests and failed site-paid requests stop going there. |
+| Rule delegation targets | A rule names a provider instance that no longer exists, is switched off, or is not set up. Requests matching it fall through to the next rule. |
 | Keys brought by users and courses | A brought key cannot be decrypted, which happens when a site is restored without the key file under the site data directory. |
 | How people qualify to bring a key | The eligibility policy rests on a profile field the person it describes can fill in, so they can admit themselves. Reported for information where every condition is required, and as a warning where any one will do. |
 | Rates for budget conditions | A budget has too few rates to be measured against, so the rules carrying it match later than they should, or never. |
@@ -541,7 +548,7 @@ providers shows two figures.
 
 Two figures sit beside them. **Requests that reached the router** compares this plugin's
 history with Moodle's own register: if only part of the site's AI went through the router,
-the rest was for actions not placed under it, which Moodle handled in its provider order
+the rest was for actions not routed through it, which Moodle handled in its provider order
 without asking the router. **Why requests failed** counts the failures by reason — refused,
 every target failed, a target threw — and is drawn from the detail rows alone, so it
 covers the period the detail still reaches back to and says so.
@@ -845,7 +852,7 @@ provider, and whether people may bring one is a decision of the site's.
 The last one is the way to keep a provider off the site's bill for requests that come
 through the router. It is enforced before the request leaves Moodle, so a request the site
 would have paid for moves on to the next rule rather than spending a round trip being
-refused by the provider. ⚠ It does not cover actions that are not placed under the router,
+refused by the provider. ⚠ It does not cover actions that are not routed through the router,
 or any action while routing is switched off: Moodle sends those itself, with the key in
 the instance's own field.
 
@@ -1001,7 +1008,7 @@ history all apply to it, because none of them know which actions exist.
 
 An action defined outside core is offered **only while its plugin is installed**. The
 router reads the list afresh for every request, so an action installed after the router
-was set up can be placed under it on *Actions the AI Router must answer* straight away.
+was set up can be routed through it on *Actions routed through the AI Router* straight away.
 
 ⚠ Three places in `core_ai\manager` build an action's class name from core's own
 namespace, so an action living anywhere else is not found there. The one that
