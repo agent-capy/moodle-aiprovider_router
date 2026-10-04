@@ -280,6 +280,23 @@ final class setup_status_test extends \advanced_testcase {
         );
     }
 
+    public function test_where_a_failed_request_goes_is_only_in_place_once_there_is_something_to_judge(): void {
+        // Nothing routed yet: nothing can be said to stay local.
+        $this->assertSame(setup_step::CHECK, $this->steps(setup_status::PURPOSE_LOCAL)['failure']->status);
+
+        $local = $this->target('Local');
+        $this->rule((int) $local->id);
+        set_config('nomatch', provider::NOMATCH_DECLINE, 'local_airouter');
+        managed_policy::set_managed_actions([generate_text::class]);
+        $this->assertSame(setup_step::DONE, $this->steps(setup_status::PURPOSE_LOCAL)['failure']->status);
+
+        // A cloud default behind it, and unclaimed requests sent there: a failed local
+        // request goes to the cloud, which is for the site to look at.
+        set_config('defaulttarget', $this->target('Cloud')->id, 'local_airouter');
+        set_config('nomatch', provider::NOMATCH_DELEGATE, 'local_airouter');
+        $this->assertSame(setup_step::CHECK, $this->steps(setup_status::PURPOSE_LOCAL)['failure']->status);
+    }
+
     public function test_every_step_has_a_title_and_a_status_in_words(): void {
         foreach (setup_status::purposes() as $purpose) {
             foreach ($this->steps($purpose) as $step) {

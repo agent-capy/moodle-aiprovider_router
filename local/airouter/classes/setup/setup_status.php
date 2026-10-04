@@ -507,11 +507,13 @@ class setup_status {
     protected function failure_step(): setup_step {
         $lines = [];
         $leaks = false;
+        $judged = false;
         foreach ($this->routed_inspections() as $inspection) {
             $sitepaid = array_filter($inspection->usable_rules(), static fn(route_rule $r): bool => !$r->brought);
             if ($sitepaid === []) {
                 continue;
             }
+            $judged = true;
             $leaks = $leaks || $inspection->has_default_route();
             $lines[] = \html_writer::tag('strong', s(managed_policy::label_for($inspection->actionclass))) . ': '
                 . ($inspection->has_default_route()
@@ -522,9 +524,11 @@ class setup_status {
             $lines[] = get_string('setup:failure:none', 'local_airouter');
         }
 
+        // In place only when there is something to judge and nothing leaves: with no
+        // routed rule yet, there is nothing to call in place.
         return new setup_step(
             'failure',
-            $leaks ? setup_step::CHECK : setup_step::DONE,
+            $judged && !$leaks ? setup_step::DONE : setup_step::CHECK,
             $lines,
             new \moodle_url('/admin/settings.php', ['section' => 'local_airouter_policy']),
             get_string('policy:heading', 'local_airouter')
