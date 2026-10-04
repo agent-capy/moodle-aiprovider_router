@@ -58,6 +58,8 @@ independent review of the same code.
 
 ### Changed
 
+- The Japanese language strings and manual write a key as キー, the way Japanese
+  computing usage does (API キー), instead of translating it as 鍵.
 - *Rule delegation targets* also reports a rule naming a provider that is switched off
   or not set up, not only one that has been deleted. Its reason is given with each rule.
 - The help for *When no rule matches* and *Default delegation target* now says that the
