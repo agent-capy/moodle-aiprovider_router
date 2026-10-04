@@ -1,0 +1,53 @@
+{
+  "name": "tour:policy:name,local_airouter",
+  "description": "tour:policy:description,local_airouter",
+  "pathmatch": "/admin/settings.php?section=local_airouter_policy%",
+  "enabled": "1",
+  "sortorder": "0",
+  "endtourlabel": "",
+  "configdata": "{\"placement\":\"bottom\",\"orphan\":\"1\",\"backdrop\":\"1\",\"reflex\":\"0\",\"filtervalues\":{\"accessdate\":{\"filter_accessdate\":\"tool_usertours_accountcreation\",\"filter_accessdate_range\":0,\"filter_accessdate_enabled\":\"0\"},\"category\":[],\"course\":[],\"courseformat\":[],\"role\":[],\"theme\":[],\"cssselector\":[]},\"majorupdatetime\":1791072000}",
+  "displaystepnumbers": true,
+  "version": "2026100400",
+  "steps": [
+    {
+      "title": "tour:policy:routed:title,local_airouter",
+      "content": "tour:policy:routed:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": "#local-airouter-routed",
+      "sortorder": "0",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:policy:switch:title,local_airouter",
+      "content": "tour:policy:switch:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": "#admin-routing",
+      "sortorder": "1",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:policy:nomatch:title,local_airouter",
+      "content": "tour:policy:nomatch:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": "#admin-nomatch",
+      "sortorder": "2",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:policy:default:title,local_airouter",
+      "content": "tour:policy:default:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": "#admin-defaulttarget",
+      "sortorder": "3",
+      "configdata": "{}",
+      "files": []
+    }
+  ]
+}

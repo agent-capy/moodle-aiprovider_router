@@ -104,6 +104,33 @@ if ($data) {
     ];
     echo html_writer::table($summary);
 
+    // Before any rule: whether this request reaches the router at all, and whether the
+    // person would be offered the button in the first place. Both are decided outside
+    // the rules, and a screen that answered only about the rules said where a request
+    // would go when it would never have come here.
+    echo $OUTPUT->heading(get_string('ruletest:route', 'local_airouter'), 3);
+    $inspection = (new \local_airouter\setup\route_inspector($DB))->inspect($data->actionclass);
+    $routelines = [\local_airouter\setup\route_formatter::applied($inspection)];
+    if ($inspection->applied !== \local_airouter\setup\route_inspection::APPLIED_ROUTED) {
+        $routelines[] = \local_airouter\setup\route_formatter::core_route($inspection);
+        $routelines[] = get_string('ruletest:route:reference', 'local_airouter');
+    }
+    if ($user === null || $placement === null) {
+        $routelines[] = get_string('ruletest:button:choose', 'local_airouter');
+    } else {
+        $reasons = \local_airouter\setup\placement_check::reasons(
+            $placement,
+            $data->actionclass,
+            $requestcontext,
+            (int) $user->id,
+        );
+        $routelines[] = $reasons === []
+            ? get_string('ruletest:button:shown', 'local_airouter')
+            : get_string('ruletest:button:hidden', 'local_airouter', implode(' ', $reasons));
+        $routelines[] = get_string('ruletest:button:policy', 'local_airouter');
+    }
+    echo html_writer::alist($routelines);
+
     $repository = new rule_repository($DB);
     $evaluator = new rule_evaluator($repository);
     $trace = $evaluator->trace($evaluationcontext);
@@ -190,7 +217,15 @@ if ($data) {
             // The target itself may be perfectly able to carry this, and the request
             // still be stopped: a budget that has run out and a key that cannot be
             // read are decisions about the request, not about the provider.
-            $reason = $resolver->describe_unusable($targetid, $action, $rule->is_byok());
+            // The router recorded why it went past the rule as it did so; that reason is
+            // the one shown, so that the screen cannot explain one thing while the
+            // router did another. A brought key rule is passed over for reasons that are
+            // the site's settings and for reasons that are the person's own state, and
+            // the words say which.
+            $skip = $resolver->get_skip_reason((int) $rule->get('id'));
+            $reason = $skip === null || $skip === ''
+                ? $resolver->describe_unusable($targetid, $action, $rule->is_byok())
+                : target_resolver::describe_problem($skip, $action::class);
             if ($reason === null && $unreadablekey !== null) {
                 $reason = get_string('ruletest:reason:unreadablekey', 'local_airouter');
             }
@@ -238,6 +273,19 @@ if ($data) {
         // No rule claimed it, which is the commonest outcome on most sites and is decided
         // by the router's own setting rather than by anything on this page.
         echo $OUTPUT->notification(get_string('ruletest:nomatch', 'local_airouter'), 'info');
+    }
+    if ($candidates) {
+        // Every target that would be tried, and who would pay at each, in order. A
+        // site-paid rule is followed by the default target only while unclaimed
+        // requests go there; a brought key only by the payer's other keys.
+        $items = [];
+        foreach ($candidates as $candidate) {
+            $items[] = get_string('ruletest:chain:item', 'local_airouter', (object) [
+                'target' => s($candidate->target->name),
+                'payer' => get_string('keysource:' . $candidate->keysource, 'local_airouter'),
+            ]);
+        }
+        echo html_writer::tag('p', get_string('ruletest:chain', 'local_airouter', implode(' &rarr; ', $items)));
     }
 }
 

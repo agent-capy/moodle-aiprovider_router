@@ -59,7 +59,7 @@ if ($id) {
     $existingconditions = $repository->get_conditions($id);
 }
 
-$form = new rule_form($url, ['targets' => target_resolver::get_delegation_targets()]);
+$form = new rule_form($url, ['targets' => target_resolver::get_delegation_target_options()]);
 
 if ($form->is_cancelled()) {
     redirect($listurl);
@@ -73,8 +73,9 @@ if ($data = $form->get_data()) {
     $rule->set('timestart', (int) ($data->timestart ?? 0));
     $rule->set('timeend', (int) ($data->timeend ?? 0));
 
+    $conditions = rule_form::read_conditions($data, $existingconditions);
     try {
-        $repository->save($rule, rule_form::read_conditions($data, $existingconditions));
+        $repository->save($rule, $conditions);
     } catch (\moodle_exception $e) {
         // The form weighed the budget against the retention already. These are the two
         // ways the save can still be refused: the retention was shortened since, or
@@ -83,6 +84,24 @@ if ($data = $form->get_data()) {
             throw $e;
         }
         redirect($url, $e->getMessage(), null, \core\output\notification::NOTIFY_ERROR);
+    }
+
+    // Saved either way. A budget in money with no rates for its provider has nothing to
+    // be measured in, so the rule can never match until a rate is entered; that is
+    // worth saying now, not only on the status report. What the rule list already
+    // warns about is not repeated here.
+    $budget = $conditions['budget'] ?? null;
+    if (
+        is_array($budget)
+        && ($budget['metric'] ?? \local_airouter\record\ledger::METRIC_COST) === \local_airouter\record\ledger::METRIC_COST
+        && (string) ($budget['provider'] ?? '') !== ''
+        && (new \local_airouter\price_book($DB))->currency_of((string) $budget['provider']) === null
+    ) {
+        $component = (string) $budget['provider'];
+        $providername = get_string_manager()->string_exists('pluginname', $component)
+            ? get_string('pluginname', $component)
+            : $component;
+        \core\notification::warning(get_string('rule:warning:norates', 'local_airouter', s($providername)));
     }
 
     redirect(

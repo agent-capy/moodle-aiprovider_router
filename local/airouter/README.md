@@ -60,6 +60,7 @@ The router's screens are at **Site administration > AI > AI Router**.
 
 | Page | What it is for |
 | --- | --- |
+| Setup status | Where to start. Where the site stands for what you mean to do with the router, step by step, with a link to where each step is done |
 | Routing policy | Whether the router routes at all, what happens when no rule matches, and the default delegation target. It starts by listing the actions those settings apply to |
 | Actions routed through the AI Router | Which actions go through the router. Only these reach it. Each action shows where its requests go now, and where they would go the other way |
 | Routing rules | The rules, in the order they are considered |
@@ -80,6 +81,36 @@ The Routing policy page holds two more settings.
 | --- | --- |
 | When no rule matches | *Send it to the default delegation target*, or *decline the request*. A declined request is not offered to another provider: it fails, and Moodle records it as a failed request. Declining is how a site keeps AI spending to the cases its rules describe. ⚠ The same setting decides two more things: whether a site-paid request whose target failed goes on to the default delegation target, and where a request a budget turned away goes — a budget limits a rule, so what it turns away is a request no rule claimed. |
 | Default delegation target | The provider instance that handles a request when no rule picks one, and the one a site-paid request falls back to if the target its rule chose fails — in both cases only while requests no rule claims are sent to it. Not needed on a site that routes entirely by rule and declines the rest. With nothing usable here or in the rules, requests for the actions routed through the router are refused. |
+
+## Setup status
+
+**Setup status** (`/local/airouter/setup.php`) is where setting the router up starts.
+There is no single list every site has to finish, so you choose what you mean to do -
+route requests and keep a record of them, keep spending within budgets, keep some
+requests on a model you run yourself, let people pay with their own key, or let a
+course pay with its own - and the page shows the steps every site shares and the steps
+that purpose needs on top. A site that routes by rule alone is not asked for a default
+delegation target, budgets counted in requests are not asked for rates, and a course
+key does not wait on the policy for personal keys.
+
+Each step says where it stands: **in place**, **to do**, **not needed for this
+purpose**, or **to check**. The last is for what settings cannot answer - whether one
+person sees a button, whether a provider answers - and nothing of that kind is ever
+shown as in place. The page reads settings and the router's own record only: it
+changes nothing and sends nothing to any provider. For each provider it shows when the
+router last had an answer from it, and last saw it fail, over the past 30 days; one
+nothing has been sent to is "not known", not "fine".
+
+The plugin's status checks are shown at the foot of the page.
+
+### User tours
+
+Three short user tours come with the plugin, for the setup page, the routing policy
+page and the actions page. They are not installed automatically. To use them, import
+the files in `doc/tours/` under *Site administration > Appearance > User tours >
+Import tour*. Their text is in this plugin's language files, so they follow the
+language of whoever is looking. Each is shown once per person; the link at the foot of
+the page shows it again.
 
 ## Actions routed through the AI Router
 
@@ -181,6 +212,20 @@ action, a placement and a prompt, and shows what each rule did with that request
 skipped, which conditions were not satisfied, or not reached because something above it
 matched first. Nothing is sent to any provider and nothing is recorded; the rules are
 evaluated by exactly the code a real request uses.
+
+Before the rules, it says whether a request like this one reaches the router at all -
+an action not routed through it is handled by Moodle, and the rules are then shown for
+reference only - and, when you choose a person and one of Moodle's placements, whether
+that person would be offered the button there, and if not, why: the placement is off,
+they lack its capability in that course, no provider is set up for the action, or the
+placement has the action switched off. Whether they have accepted the AI policy is not
+checked.
+
+After the rules, it lists the targets in the order they would be tried and who would
+pay at each. Where a rule's conditions held and the router still went past it, the
+reason is the one the router recorded as it did so, and a brought key rule's reasons say
+whether they are a site setting (the policy, where a key goes, a provider taking no
+brought keys) or the payer's own state (no key registered, their limit reached).
 
 The placement is the one thing the form has to supply rather than observe. A real
 request is identified by what called it, and nothing calls this page except you, so a
@@ -770,6 +815,14 @@ the request and the next rule is considered, so
 2. *Teachers → Sakura AI Engine, paid for by the site*
 
 reads as "their own key if they have one, ours otherwise".
+
+The keys page (*AI Router keys*) opens with where each provider stands for brought
+keys: whether somebody has said where a key goes, whether the site allows brought keys
+there, and whether the provider's own key field is filled, which Moodle requires before
+it counts the provider as set up at all. Personal and course keys are told apart: the
+policy on who may bring a key is about personal keys only, and a course key is
+registered by whoever may manage the course's AI key. The number of keys registered is
+shown as a guide, not as readiness.
 
 ### Who may bring one
 

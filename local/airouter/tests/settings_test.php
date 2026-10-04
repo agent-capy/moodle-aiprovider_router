@@ -72,6 +72,7 @@ final class settings_test extends \advanced_testcase {
      */
     public static function tree_pages(): array {
         return [
+            'setup status' => ['local_airouter_setup'],
             'routing policy' => ['local_airouter_policy'],
             'managed actions' => ['local_airouter_managed'],
             'rules' => ['local_airouter_rules'],

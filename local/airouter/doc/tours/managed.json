@@ -1,0 +1,43 @@
+{
+  "name": "tour:managed:name,local_airouter",
+  "description": "tour:managed:description,local_airouter",
+  "pathmatch": "/local/airouter/managed.php%",
+  "enabled": "1",
+  "sortorder": "0",
+  "endtourlabel": "",
+  "configdata": "{\"placement\":\"bottom\",\"orphan\":\"1\",\"backdrop\":\"1\",\"reflex\":\"0\",\"filtervalues\":{\"accessdate\":{\"filter_accessdate\":\"tool_usertours_accountcreation\",\"filter_accessdate_range\":0,\"filter_accessdate_enabled\":\"0\"},\"category\":[],\"course\":[],\"courseformat\":[],\"role\":[],\"theme\":[],\"cssselector\":[]},\"majorupdatetime\":1791072000}",
+  "displaystepnumbers": true,
+  "version": "2026100400",
+  "steps": [
+    {
+      "title": "tour:managed:intro:title,local_airouter",
+      "content": "tour:managed:intro:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "2",
+      "targetvalue": "",
+      "sortorder": "0",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:managed:route:title,local_airouter",
+      "content": "tour:managed:route:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": ".local-airouter-route",
+      "sortorder": "1",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:managed:end:title,local_airouter",
+      "content": "tour:managed:end:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "2",
+      "targetvalue": "",
+      "sortorder": "2",
+      "configdata": "{}",
+      "files": []
+    }
+  ]
+}

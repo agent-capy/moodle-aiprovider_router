@@ -28,6 +28,23 @@ independent review of the same code.
 - The router's settings - whether it routes at all, what happens when no rule matches,
   and the default delegation target - are on a *Routing policy* page in the
   administration tree.
+- A *Setup status* page, first under *AI Router*. The administrator chooses what they
+  mean to do, and the page shows the steps every site shares and the steps that purpose
+  needs, each in place, to do, not needed, or to check. It reads settings only; what
+  they cannot answer is never shown as in place. For each provider it shows when the
+  router last had an answer from it and last saw it fail.
+- Three user tours, for the setup, routing policy and actions pages, in `doc/tours/`,
+  for an administrator to import. Their text is in the plugin's language files.
+- The rule tester now starts before the rules: whether the request reaches the router
+  at all, and whether the chosen person would be offered the button in the chosen
+  placement. It lists the targets in the order they would be tried, with who pays at
+  each, and says why a brought key rule was passed over, as a site setting or as the
+  payer's own state.
+- The keys page opens with where each provider stands for brought keys, personal and
+  course keys apart.
+- Provider choices on the settings and rule forms say when a provider is switched off
+  or not set up. Saving a rule whose money budget has no rates for its provider says
+  that the rule cannot match until a rate is entered.
 - A status check, *Actions routed through the AI Router*, reports when a routed action
   cannot reach the router because another plugin has defined Moodle's AI manager and
   silently displaced this one.

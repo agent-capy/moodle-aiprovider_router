@@ -70,6 +70,24 @@ class target_resolver {
     /** @var string The instance takes no brought keys, and the request would carry one. */
     public const PROBLEM_BYOKDISALLOWED = 'byokdisallowed';
 
+    /** @var string A course key was wanted, and the request is not in a course. */
+    public const SKIP_NOCOURSE = 'nocourse';
+
+    /** @var string A personal key was wanted, and the request has nobody to pay for it. */
+    public const SKIP_NOUSER = 'nouser';
+
+    /** @var string The site's policy does not let this person bring a key. */
+    public const SKIP_NOTELIGIBLE = 'noteligible';
+
+    /** @var string The person or course has registered no key for the target. */
+    public const SKIP_NOKEY = 'nokey';
+
+    /** @var string Nobody has said where a brought key goes for the target. */
+    public const SKIP_NOFIELD = 'nofield';
+
+    /** @var string The limit the key's owner set has been reached. */
+    public const SKIP_SPENT = 'spent';
+
     /** @var rule|null The rule that decided the last resolution. */
     protected ?rule $matchedrule = null;
 
@@ -99,6 +117,12 @@ class target_resolver {
 
     /** @var rule_evaluator|null The evaluator, kept so its findings can be read back. */
     protected ?rule_evaluator $evaluator = null;
+
+    /** @var string[] Why each rule that matched was passed over, keyed by rule id. */
+    protected array $skipped = [];
+
+    /** @var string|null Why the last brought key rule could not be honoured. */
+    protected ?string $broughtskip = null;
 
     /**
      * Constructor.
@@ -174,6 +198,7 @@ class target_resolver {
         $this->byokonly = null;
         $this->byokdisallowed = null;
         $this->targetsettings = null;
+        $this->skipped = [];
         $instances = $this->get_instances_by_id();
 
         // The context the start of this request was recorded with, when there is one
@@ -183,7 +208,9 @@ class target_resolver {
             ?? ($this->evaluated?->is_for($action) ? $this->evaluated : $this->get_evaluation_context($action));
         foreach ($this->get_evaluator()->matches($this->evaluated) as $rule) {
             $target = $instances[(int) $rule->get('targetid')] ?? null;
-            if ($target === null || !$this->is_usable($target, $action, $rule->is_byok())) {
+            $problem = $this->problem_with($target, $action::class, $rule->is_byok());
+            if ($problem !== null) {
+                $this->skipped[(int) $rule->get('id')] = $problem;
                 continue;
             }
             if (!$rule->is_byok()) {
@@ -194,7 +221,9 @@ class target_resolver {
 
             $candidates = $this->with_brought_key($rule, $target, $instances, $action);
             if ($candidates === null) {
-                // Nobody has a key here. An ordinary state, and the rule does not apply.
+                // Nobody has a key here, or nobody who may use one. An ordinary state,
+                // and the rule does not apply.
+                $this->skipped[(int) $rule->get('id')] = (string) $this->broughtskip;
                 continue;
             }
             $this->matchedrule = $rule;
@@ -213,6 +242,22 @@ class target_resolver {
      */
     public function get_keysource(): string {
         return $this->keysource;
+    }
+
+    /**
+     * Why a rule that matched the last request was passed over, if it was.
+     *
+     * Read by the rule tester, which has to say why the router went on past a rule
+     * whose conditions were met. The reasons are the router's own, recorded as it
+     * passed the rule, so the screen cannot explain one thing while the router did
+     * another.
+     *
+     * @param int $ruleid The rule.
+     * @return string|null One of the PROBLEM_ or SKIP_ constants, or null when the
+     *                     rule was not passed over.
+     */
+    public function get_skip_reason(int $ruleid): ?string {
+        return $this->skipped[$ruleid] ?? null;
     }
 
     /**
@@ -330,12 +375,16 @@ class target_resolver {
         if ($scopeid <= 0) {
             // A course key wanted by a request made outside any course, or a user key
             // with nobody to own it.
+            $this->broughtskip = $scope === rule::KEYSOURCE_COURSE ? self::SKIP_NOCOURSE : self::SKIP_NOUSER;
+
             return null;
         }
         if ($scope === rule::KEYSOURCE_USER && !$this->get_policy()->is_eligible($scopeid)) {
             // Asked again here, not only when the key was registered, so that a policy
             // the administrator tightens stops being obeyed on the next request rather
             // than when somebody remembers to go and delete the keys.
+            $this->broughtskip = self::SKIP_NOTELIGIBLE;
+
             return null;
         }
 
@@ -348,6 +397,12 @@ class target_resolver {
             return [];
         }
         if (!$injection->is_usable()) {
+            $this->broughtskip = match ($injection->status) {
+                key_status::NO_FIELD => self::SKIP_NOFIELD,
+                key_status::DISALLOWED => self::PROBLEM_BYOKDISALLOWED,
+                default => self::SKIP_NOKEY,
+            };
+
             return null;
         }
         if ($this->is_spent($injection->key)) {
@@ -355,6 +410,8 @@ class target_resolver {
             // spent. Treated exactly as a key that was never registered: the rule does
             // not apply and the next one is tried. It is not a fault, and stopping the
             // request would punish somebody for setting themselves a limit.
+            $this->broughtskip = self::SKIP_SPENT;
+
             return null;
         }
 
@@ -538,6 +595,26 @@ class target_resolver {
                 continue;
             }
             $options[(int) $instance->id] = $instance->name;
+        }
+
+        return $options;
+    }
+
+    /**
+     * The same instances as get_delegation_targets(), each saying if it cannot be used.
+     *
+     * For the choices on the settings and rule forms. An instance that is switched off
+     * or not set up is still offered, since it may be about to be put right, but it is
+     * labelled, so that choosing it is not a surprise later.
+     *
+     * @return string[] Instance names, with their state where it matters, keyed by id.
+     */
+    public static function get_delegation_target_options(): array {
+        $resolver = self::for_site_with_instances();
+        $options = [];
+        foreach (self::get_delegation_targets() as $id => $name) {
+            $problem = $resolver->get_instance_problem($id);
+            $options[$id] = $problem === null ? $name : get_string('setup:target:' . $problem, 'local_airouter', $name);
         }
 
         return $options;

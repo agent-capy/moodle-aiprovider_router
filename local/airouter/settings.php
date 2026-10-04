@@ -83,10 +83,11 @@ if ($ADMIN->fulltree) {
             $routed,
         )))) . html_writer::tag('p', get_string('setup:unchecked', 'local_airouter'));
     }
+    // The id is what the user tour for this page points at.
     $policy->add(new admin_setting_heading(
         'local_airouter/routed',
         get_string('policy:routed', 'local_airouter'),
-        $routedtext,
+        html_writer::div($routedtext, '', ['id' => 'local-airouter-routed']),
     ));
 
     $policy->add(new admin_setting_configcheckbox(
@@ -107,7 +108,7 @@ if ($ADMIN->fulltree) {
         ],
     ));
 
-    $targets = target_resolver::get_delegation_targets();
+    $targets = target_resolver::get_delegation_target_options();
     if ($targets === []) {
         $policy->add(new admin_setting_heading(
             'local_airouter/notargets',
@@ -124,6 +125,14 @@ if ($ADMIN->fulltree) {
         ));
     }
 }
+
+// The setup page comes first: it is where somebody setting the router up starts, and
+// every other page is reached from it.
+$ADMIN->add('local_airouter', new admin_externalpage(
+    'local_airouter_setup',
+    get_string('setup:heading', 'local_airouter'),
+    new moodle_url('/local/airouter/setup.php'),
+));
 
 $ADMIN->add('local_airouter', $policy);
 

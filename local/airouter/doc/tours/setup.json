@@ -1,0 +1,73 @@
+{
+  "name": "tour:setup:name,local_airouter",
+  "description": "tour:setup:description,local_airouter",
+  "pathmatch": "/local/airouter/setup.php%",
+  "enabled": "1",
+  "sortorder": "0",
+  "endtourlabel": "",
+  "configdata": "{\"placement\":\"bottom\",\"orphan\":\"1\",\"backdrop\":\"1\",\"reflex\":\"0\",\"filtervalues\":{\"accessdate\":{\"filter_accessdate\":\"tool_usertours_accountcreation\",\"filter_accessdate_range\":0,\"filter_accessdate_enabled\":\"0\"},\"category\":[],\"course\":[],\"courseformat\":[],\"role\":[],\"theme\":[],\"cssselector\":[]},\"majorupdatetime\":1791072000}",
+  "displaystepnumbers": true,
+  "version": "2026100400",
+  "steps": [
+    {
+      "title": "tour:setup:intro:title,local_airouter",
+      "content": "tour:setup:intro:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "2",
+      "targetvalue": "",
+      "sortorder": "0",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:setup:purpose:title,local_airouter",
+      "content": "tour:setup:purpose:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": "#local-airouter-setup-purpose",
+      "sortorder": "1",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:setup:common:title,local_airouter",
+      "content": "tour:setup:common:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": "#local-airouter-setup-common",
+      "sortorder": "2",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:setup:forpurpose:title,local_airouter",
+      "content": "tour:setup:forpurpose:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": "#local-airouter-setup-forpurpose",
+      "sortorder": "3",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:setup:checks:title,local_airouter",
+      "content": "tour:setup:checks:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "0",
+      "targetvalue": "#local-airouter-setup-checks",
+      "sortorder": "4",
+      "configdata": "{}",
+      "files": []
+    },
+    {
+      "title": "tour:setup:end:title,local_airouter",
+      "content": "tour:setup:end:content,local_airouter",
+      "contentformat": "1",
+      "targettype": "2",
+      "targetvalue": "",
+      "sortorder": "5",
+      "configdata": "{}",
+      "files": []
+    }
+  ]
+}

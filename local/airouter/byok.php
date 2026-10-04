@@ -103,6 +103,36 @@ $form->set_data($defaults);
 echo $OUTPUT->header();
 echo $OUTPUT->box(get_string('byok:intro', 'local_airouter'));
 
+// Where each provider stands, before the settings that change it. Personal and course
+// keys are told apart because they do not need the same things.
+$readiness = new \local_airouter\setup\byok_readiness($DB, time());
+echo $OUTPUT->heading(get_string('byokready:heading', 'local_airouter'), 3);
+echo html_writer::alist([
+    get_string($readiness->personal_keys_admitted() ? 'byokready:personal:on' : 'byokready:personal:off', 'local_airouter'),
+    get_string('byokready:course', 'local_airouter'),
+]);
+$rows = $readiness->rows();
+if ($rows) {
+    $table = new html_table();
+    $table->attributes['class'] = 'admintable generaltable';
+    $table->head = [
+        get_string('byokready:provider', 'local_airouter'),
+        get_string('byokready:state', 'local_airouter'),
+        get_string('byokready:rules', 'local_airouter'),
+        get_string('byokready:keys', 'local_airouter'),
+    ];
+    foreach ($rows as $row) {
+        $table->data[] = [
+            s($row->name),
+            \local_airouter\setup\byok_readiness::describe($row),
+            get_string('byokready:counts', 'local_airouter', (object) ['user' => $row->userrules, 'course' => $row->courserules]),
+            get_string('byokready:counts', 'local_airouter', (object) ['user' => $row->userkeys, 'course' => $row->coursekeys]),
+        ];
+    }
+    echo html_writer::table($table);
+    echo html_writer::div(get_string('byokready:note', 'local_airouter'), 'text-muted mb-3');
+}
+
 echo $OUTPUT->heading(get_string('eligibility:heading', 'local_airouter'), 3);
 echo html_writer::div(get_string('eligibility:intro', 'local_airouter'));
 $unknown = $policy->get_unknown_conditions();
