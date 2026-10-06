@@ -17,7 +17,7 @@ Please use the GitHub issue tracker. Include:
 The plugin lives at `local/airouter/` inside a Moodle installation (`public/local/airouter/` from Moodle 5.1).
 
 Supported versions: **Moodle 5.0 and later**. Development targets 5.0 (the lowest
-supported release) so that APIs introduced in 5.1/5.2 are not used accidentally.
+supported release) so that APIs introduced in 5.1, 5.2 and 5.3 are not used accidentally.
 
 ## Coding style
 

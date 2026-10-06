@@ -18,7 +18,7 @@ delegates to it.
 > and with it the settings the upgrade would have carried over.
 
 > **Status: beta, 0.1.0.** Everything described below is implemented and covered by
-> tests, and CI runs the suite against Moodle 5.0, 5.1 and 5.2 on PHP 8.3 and 8.4. It
+> tests, and CI runs the suite against Moodle 5.0, 5.1, 5.2 and 5.3 on PHP 8.3 and 8.4. It
 > has not yet been run on a site that is not the author's, so please try it on a test
 > site rather than a live one. Reports of what does not work, or does not read clearly,
 > are very welcome — finding that out is what this release is for.
@@ -884,6 +884,7 @@ What we have found so far, which the providers themselves may change:
 | AWS Bedrock (`aiprovider_awsbedrock`) | Moodle 5.2 onwards | `apikey` **and** `apisecret` | **No** — see below |
 | Sakura AI Engine (`aiprovider_sakuraaiengine`) | Separately | `account_token` | Yes |
 | Claude (`aiprovider_claude`) | Separately | `apikey` | Yes |
+| Anthropic (`aiprovider_anthropic`) | Moodle 5.3 onwards | `apikey` | Yes, judging by its source: it sends the key from that field. Not yet tried with a brought key |
 
 ⚠ **A brought key cannot be used with AWS Bedrock in this version.** It authenticates
 with an access key *and* a secret, and only one field is substituted, so the request
@@ -1094,15 +1095,13 @@ identify a target — including what an exception said — go to the developer l
 
 ## Requirements
 
-- Moodle **5.0 to 5.2**
+- Moodle **5.0 to 5.3**
 - PHP 8.3 or later (as required by your Moodle release)
+- On PostgreSQL, the version your Moodle release requires: 17 or later for Moodle 5.3
 
 Development targets Moodle 5.0 — the lowest supported release — so that APIs introduced
-in 5.1 and 5.2 are not used by accident. CI runs every push against 5.0 and 5.2 on both
-PHP 8.3 and 8.4.
-
-Moodle 5.3 is due in October 2026. It will be added to CI from November 2026 and the
-supported range extended once it has been verified.
+in 5.1, 5.2 and 5.3 are not used by accident. CI runs every push against 5.0, 5.1, 5.2
+and 5.3 on both PHP 8.3 and 8.4, on PostgreSQL.
 
 ### Reaching a model you run yourself
 

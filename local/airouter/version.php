@@ -27,6 +27,6 @@ defined('MOODLE_INTERNAL') || die();
 $plugin->component = 'local_airouter';
 $plugin->version = 2026092600;
 $plugin->requires = 2025041400;
-$plugin->supported = [500, 502];
+$plugin->supported = [500, 503];
 $plugin->maturity = MATURITY_BETA;
 $plugin->release = '0.1.0';

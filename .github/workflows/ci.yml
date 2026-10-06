@@ -29,7 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         # Every release the plugin claims to support is built, because version.php
-        # says 5.0 to 5.2 and a claim nothing tests is not a claim.
+        # says 5.0 to 5.3 and a claim nothing tests is not a claim.
         #
         # 5.1 is not redundant. The AI subsystem changed in 5.1 and not again in
         # 5.2 (response constructors gained an $error argument, failed responses
@@ -38,10 +38,10 @@ jobs:
         # the old check API, and testing 5.0 and 5.2 alone would only cover that
         # combination by accident.
         #
-        # 5.3 was released on 2026-10-05 and joins as a non-blocking job first: it is
-        # promoted, and version.php's supported range extended, once it has been
-        # seen to pass here. The tests already pass against v5.3.0 locally, which
-        # is the same commit as MOODLE_503_STABLE on release day.
+        # 5.3 was released on 2026-10-05. It joined as a non-blocking job, passed, and
+        # is required like the others. A release added later starts the same way:
+        # experimental first, and version.php's supported range extended only once
+        # it has been seen to pass here.
         include:
           - moodle-branch: MOODLE_500_STABLE
             php: '8.3'
@@ -69,11 +69,11 @@ jobs:
             postgres: '16'
           - moodle-branch: MOODLE_503_STABLE
             php: '8.3'
-            experimental: true
+            experimental: false
             postgres: '17'
           - moodle-branch: MOODLE_503_STABLE
             php: '8.4'
-            experimental: true
+            experimental: false
             postgres: '17'
 
     steps:

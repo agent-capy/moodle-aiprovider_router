@@ -58,6 +58,14 @@ independent review of the same code.
 
 ### Changed
 
+- **Moodle 5.3 is supported**: the supported range is now 5.0 to 5.3, and CI builds
+  every push against 5.3 on PHP 8.3 and 8.4 as it does the others. On PostgreSQL, 5.3
+  itself requires version 17 or later. Nothing in the router had to change: what it
+  relies on in Moodle's AI subsystem is the same in 5.3, and the three columns 5.3
+  adds to Moodle's own AI log are not ones the router reads.
+- The provider table for brought keys lists Anthropic, which Moodle 5.3 ships. It
+  sends the key from its `apikey` field, so a brought key should take its place there;
+  that has not yet been tried.
 - The Japanese language strings and manual write a key as キー, the way Japanese
   computing usage does (API キー), instead of translating it as 鍵.
 - *Rule delegation targets* also reports a rule naming a provider that is switched off
