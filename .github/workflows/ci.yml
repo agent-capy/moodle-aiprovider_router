@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A release being added runs without holding the others up; see the matrix.
+    continue-on-error: ${{ matrix.experimental }}
 
     services:
       postgres:
@@ -34,23 +36,35 @@ jobs:
         # the old check API, and testing 5.0 and 5.2 alone would only cover that
         # combination by accident.
         #
-        # 5.3 is released on 2026-10-05, and joins this matrix as soon as it is,
-        # as a non-blocking job first and promoted once it has been verified.
-        # MOODLE_503_STABLE does not exist until release day; main carries 5.3
-        # until then, so that is what an early look has to use.
+        # 5.3 was released on 2026-10-05 and joins as a non-blocking job first: it is
+        # promoted, and version.php's supported range extended, once it has been
+        # seen to pass here. The tests already pass against v5.3.0 locally, which
+        # is the same commit as MOODLE_503_STABLE on release day.
         include:
           - moodle-branch: MOODLE_500_STABLE
             php: '8.3'
+            experimental: false
           - moodle-branch: MOODLE_500_STABLE
             php: '8.4'
+            experimental: false
           - moodle-branch: MOODLE_501_STABLE
             php: '8.3'
+            experimental: false
           - moodle-branch: MOODLE_501_STABLE
             php: '8.4'
+            experimental: false
           - moodle-branch: MOODLE_502_STABLE
             php: '8.3'
+            experimental: false
           - moodle-branch: MOODLE_502_STABLE
             php: '8.4'
+            experimental: false
+          - moodle-branch: MOODLE_503_STABLE
+            php: '8.3'
+            experimental: true
+          - moodle-branch: MOODLE_503_STABLE
+            php: '8.4'
+            experimental: true
 
     steps:
       - uses: actions/checkout@v4
