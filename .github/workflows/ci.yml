@@ -13,7 +13,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # Each release's own minimum: 5.3 refuses to install on anything older than
+        # PostgreSQL 17, and the releases before it are left on the 16 they pass on.
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -44,27 +46,35 @@ jobs:
           - moodle-branch: MOODLE_500_STABLE
             php: '8.3'
             experimental: false
+            postgres: '16'
           - moodle-branch: MOODLE_500_STABLE
             php: '8.4'
             experimental: false
+            postgres: '16'
           - moodle-branch: MOODLE_501_STABLE
             php: '8.3'
             experimental: false
+            postgres: '16'
           - moodle-branch: MOODLE_501_STABLE
             php: '8.4'
             experimental: false
+            postgres: '16'
           - moodle-branch: MOODLE_502_STABLE
             php: '8.3'
             experimental: false
+            postgres: '16'
           - moodle-branch: MOODLE_502_STABLE
             php: '8.4'
             experimental: false
+            postgres: '16'
           - moodle-branch: MOODLE_503_STABLE
             php: '8.3'
             experimental: true
+            postgres: '17'
           - moodle-branch: MOODLE_503_STABLE
             php: '8.4'
             experimental: true
+            postgres: '17'
 
     steps:
       - uses: actions/checkout@v4
