@@ -213,4 +213,30 @@ final class target_settings_test extends \advanced_testcase {
         $this->assertTrue($this->settings->supports_byok(7));
         $this->assertFalse((new target_settings($DB))->supports_byok(7));
     }
+
+    public function test_owners_may_not_choose_the_model_until_an_administrator_allows_it(): void {
+        global $DB;
+        $settings = new target_settings($DB);
+        $settings->set_key_field(3, 'apikey');
+
+        $this->assertFalse($settings->allows_model_choice(3));
+
+        $settings->set_model_choice(3, true);
+        $this->assertTrue((new target_settings($DB))->allows_model_choice(3));
+        $this->assertSame([3 => true], (new target_settings($DB))->get_all_model_choices());
+
+        $settings->set_model_choice(3, false);
+        $this->assertFalse((new target_settings($DB))->allows_model_choice(3));
+    }
+
+    public function test_allowing_the_choice_where_nobody_said_where_a_key_goes_records_nothing(): void {
+        global $DB;
+        $settings = new target_settings($DB);
+
+        $settings->set_model_choice(3, true);
+
+        // A row written here would also say that the provider takes no key, which nobody did.
+        $this->assertFalse($DB->record_exists(target_settings::TABLE, ['targetid' => 3]));
+        $this->assertNull($settings->get_key_field(3));
+    }
 }

@@ -45,6 +45,21 @@ class key_tester {
     /** @var int[] Status codes that mean the key itself was refused. */
     public const REJECTED = [401, 403];
 
+    /** @var string The model answered. */
+    public const MODEL_OK = 'ok';
+
+    /** @var string The provider refused the key. */
+    public const MODEL_REJECTED = 'rejected';
+
+    /** @var string Something else went wrong; the error says what. */
+    public const MODEL_FAILED = 'failed';
+
+    /** @var string The action is not one a test asks. */
+    public const MODEL_SKIPPED = 'skipped';
+
+    /** @var string[] The actions a model test asks: those that take a line of text. */
+    protected const TESTABLE = ['generate_text', 'summarise_text', 'explain_text'];
+
     /**
      * Constructor.
      *
@@ -128,6 +143,90 @@ class key_tester {
         return in_array((int) $response->get_errorcode(), self::REJECTED, true)
             ? key::VERIFY_REJECTED
             : key::VERIFY_FAILED;
+    }
+
+    /**
+     * Try the key with the model it would be used with, action by action.
+     *
+     * Asks each action the key could be used for, with the model the owner chose for it
+     * or the site's where they chose none, so that a model that does not work is found
+     * by its owner rather than by the next person who asks. Only the actions that take
+     * a line of text are asked: generating an image costs far more than a test should,
+     * and the media actions need a recording or a picture to ask anything at all.
+     *
+     * Nothing is recorded against the key: what a test costs is the owner's, at their
+     * own provider, and it is not counted towards their limit.
+     *
+     * @param ai_provider $target The instance the key is for.
+     * @param key $key The key.
+     * @param int $contextid The context the test is made in.
+     * @param int $userid The user making it.
+     * @return array[] Keyed by action class: status (one of the MODEL_ constants), the
+     *                 model asked for, the model that answered, the provider's status
+     *                 code when it gave one, and what failed.
+     */
+    public function test_models(ai_provider $target, key $key, int $contextid, int $userid): array {
+        $catalog = new model_catalog();
+        $results = [];
+        foreach ($catalog->get_actions($target) as $actionclass) {
+            $injection = $this->injector->inject($target, $key, $actionclass);
+            $asked = $injection->is_usable() ? $catalog->get_site_model($injection->target, $actionclass) : null;
+            $result = ['status' => self::MODEL_SKIPPED, 'model' => $asked, 'answered' => null, 'code' => 0, 'error' => ''];
+            if (!in_array(managed_policy::basename_for($actionclass), self::TESTABLE, true)) {
+                $results[$actionclass] = $result;
+                continue;
+            }
+            if (!$injection->is_usable()) {
+                $results[$actionclass] = ['status' => self::MODEL_FAILED, 'error' => $injection->status] + $result;
+                continue;
+            }
+            $results[$actionclass] = $this->ask_with_model($injection->target, $actionclass, $contextid, $userid) + $result;
+        }
+
+        return $results;
+    }
+
+    /**
+     * Ask one action once, and say what came back.
+     *
+     * @param ai_provider $target The instance, carrying the key and the model.
+     * @param string $actionclass The action class.
+     * @param int $contextid The context.
+     * @param int $userid The user.
+     * @return array The status, the model that answered and what failed.
+     */
+    protected function ask_with_model(ai_provider $target, string $actionclass, int $contextid, int $userid): array {
+        try {
+            $response = $this->get_delegator()->delegate(
+                $target,
+                new $actionclass(contextid: $contextid, userid: $userid, prompttext: self::PROMPT),
+            );
+        } catch (\Throwable $e) {
+            // The provider's message is the owner's to read, since it is about their own
+            // key and their own choice of model, but the key is in this target's config
+            // and must not be in what is shown.
+            return [
+                'status' => self::MODEL_FAILED,
+                'error' => abstract_processor::redact_for(get_class($e) . ': ' . $e->getMessage(), $target),
+            ];
+        }
+        if ($response->get_success()) {
+            $model = $response->get_response_data()['model'] ?? null;
+
+            return ['status' => self::MODEL_OK, 'answered' => is_string($model) && $model !== '' ? $model : null];
+        }
+
+        $message = trim((string) $response->get_errormessage());
+        if ($message === '' && method_exists($response, 'get_error')) {
+            $message = (string) $response->get_error();
+        }
+        $code = (int) $response->get_errorcode();
+
+        return [
+            'status' => in_array($code, self::REJECTED, true) ? self::MODEL_REJECTED : self::MODEL_FAILED,
+            'code' => $code,
+            'error' => abstract_processor::redact_for($message, $target),
+        ];
     }
 
     /**

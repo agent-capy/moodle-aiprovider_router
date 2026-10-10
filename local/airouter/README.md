@@ -884,7 +884,7 @@ What we have found so far, which the providers themselves may change:
 | AWS Bedrock (`aiprovider_awsbedrock`) | Moodle 5.2 onwards | `apikey` **and** `apisecret` | **No** — see below |
 | Sakura AI Engine (`aiprovider_sakuraaiengine`) | Separately | `account_token` | Yes |
 | Claude (`aiprovider_claude`) | Separately | `apikey` | Yes |
-| Anthropic (`aiprovider_anthropic`) | Moodle 5.3 onwards | `apikey` | Yes, judging by its source: it sends the key from that field. Not yet tried with a brought key |
+| Anthropic (`aiprovider_anthropic`) | Moodle 5.3 onwards | `apikey` | Yes. Tried with a brought key on Moodle 5.3 |
 
 ⚠ **A brought key cannot be used with AWS Bedrock in this version.** It authenticates
 with an access key *and* a secret, and only one field is substituted, so the request
@@ -1048,6 +1048,38 @@ Only three answers are possible: accepted, refused, or no conclusion. A provider
 cannot be reached, or that fails for its own reasons, reports the third — telling somebody
 their key is wrong when the provider is simply having a bad day sends them looking for a
 problem that is not there.
+
+### Which model a brought key is used with, and choosing another
+
+A brought key is used with the model the site configured for each action, and the owner
+pays for it, so the key screen says which model that is, action by action, and says it
+again before a key is registered. Only actions placed under the router are listed: an
+action left to core is answered by the instance with the site's own key.
+
+An administrator may let owners choose another model, provider by provider, on the
+same page as where a key goes (*Owners may choose the model*). It is **off** to begin
+with: a model chosen by its owner is one the site never chose. Where it is on, the owner
+picks a model the way the provider's own settings page offers them:
+
+- a provider that lists its models (Moodle's own since 5.0, and those built the same way)
+  offers its models of the kind the action needs, and a name can be typed in, which is
+  what its settings page calls a custom model;
+- a provider that does not, Azure OpenAI for one, whose deployments are named by the
+  site, offers no choice.
+
+When another model is asked for, the settings the site tuned for its own model (such as
+a temperature or a token limit) are left out, because another model may refuse them;
+settings an administrator saved for the model asked for are used instead. Whether a model
+works with a key is found by trying it: **Try the models now** sends one short request
+per text action with the owner's key and the model they chose, and shows what the
+provider answered. Core's providers replace the provider's own error message with a
+general one, so the status code is shown with a hint of what it usually means. Images
+and the actions that need a recording or a picture are not tried. A model the site has
+no rate for cannot be costed, and so is not counted towards a limit the owner set; the
+screen says so when the model is chosen.
+
+A choice made while choosing was allowed is kept, unused, if the administrator turns it
+off, and is used again if it is turned back on. The screen says so beside the model used.
 
 ## Routing an action Moodle does not define
 

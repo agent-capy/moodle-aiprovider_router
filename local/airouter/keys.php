@@ -33,11 +33,14 @@ require_once(__DIR__ . '/lib.php');
 use local_airouter\eligibility_policy;
 use local_airouter\form\key_cap_form;
 use local_airouter\form\key_form;
+use local_airouter\form\key_models_form;
 use local_airouter\form\key_wallet_form;
 use local_airouter\key;
 use local_airouter\key_formatter;
 use local_airouter\key_repository;
 use local_airouter\key_tester;
+use local_airouter\managed_policy;
+use local_airouter\model_catalog;
 use local_airouter\price_book;
 use local_airouter\provider;
 use local_airouter\record\ledger;
@@ -226,6 +229,77 @@ if ($allowed && $action === 'cap') {
     ]);
 }
 
+// Which models a key is used with, the owner's own choice of them where the site lets
+// them choose, and a test of them. On one screen, because choosing a model and finding
+// out whether it works with the key are one decision.
+$modelskey = null;
+$modelsform = null;
+$modeltest = null;
+if ($allowed && $action === 'models') {
+    $modelskey = $repository->get_for($keyid, $scope, $scopeid);
+    if ($modelskey === null || !isset($targets[(int) $modelskey->get('targetid')])) {
+        redirect($url);
+    }
+    $modelstarget = $targets[(int) $modelskey->get('targetid')];
+    $choosable = $settings->allows_model_choice((int) $modelstarget->id);
+    $catalog = new model_catalog();
+    $rows = [];
+    foreach ($catalog->get_actions($modelstarget) as $actionclass) {
+        $can = $choosable && $catalog->can_choose($modelstarget, $actionclass);
+        $rows[] = [
+            'action' => $actionclass,
+            'label' => managed_policy::label_for($actionclass),
+            'site' => $catalog->get_site_model($modelstarget, $actionclass),
+            'choosable' => $can,
+            'options' => $can ? $catalog->get_options($modelstarget, $actionclass) : [],
+        ];
+    }
+    $modelsurl = new moodle_url($url, ['action' => 'models', 'keyid' => (int) $modelskey->get('id')]);
+
+    if (optional_param('runtest', 0, PARAM_BOOL)) {
+        require_sesskey();
+        $modeltest = (new key_tester($DB))->test_models($modelstarget, $modelskey, (int) $context->id, (int) $USER->id);
+    }
+
+    if (array_filter(array_column($rows, 'choosable'))) {
+        $modelsform = new key_models_form($modelsurl, ['rows' => $rows]);
+        if ($modelsform->is_cancelled()) {
+            redirect($url);
+        }
+        if ($modelsdata = $modelsform->get_data()) {
+            // A choice for an action not offered just now, because the site has stopped
+            // letting owners choose there, is kept as it was: it is the owner's, and it
+            // is used again if choosing is allowed again.
+            $models = $modelskey->get_chosen_models();
+            foreach (key_models_form::read_models($modelsdata, $rows) as $actionclass => $model) {
+                $models[$actionclass] = $model;
+            }
+            $repository->set_models($modelskey, $models);
+
+            // A model the site has no rate for cannot be costed, so it cannot be counted
+            // against the owner's limit either. Said when it is chosen, not discovered.
+            $unpriced = [];
+            foreach (array_unique(array_filter($modelskey->get_chosen_models())) as $model) {
+                if ((new price_book($DB))->find($modelstarget->get_name(), $model, time()) === null) {
+                    $unpriced[] = $model;
+                }
+            }
+            redirect(
+                $modelsurl,
+                $unpriced
+                    ? get_string('keys:models:saved:unpriced', 'local_airouter', s(implode(', ', $unpriced)))
+                    : get_string('keys:models:saved', 'local_airouter'),
+                null,
+                $unpriced ? \core\output\notification::NOTIFY_WARNING : \core\output\notification::NOTIFY_SUCCESS,
+            );
+        }
+        $modelsform->set_data(
+            ['keyid' => (int) $modelskey->get('id'), 'courseid' => $courseid]
+            + key_models_form::to_form_data($rows, $modelskey->get_chosen_models()),
+        );
+    }
+}
+
 // Replacing a key that is held. The key does not say whether the new one is for the
 // same account, so its owner is asked, and asked whether the limit stays; the same
 // key entered again is recognised and not asked about.
@@ -382,6 +456,33 @@ if ($walletform !== null) {
     die;
 }
 
+if ($modelskey !== null) {
+    $modelstargetid = (int) $modelskey->get('targetid');
+    echo $OUTPUT->heading(get_string('keys:models:heading', 'local_airouter', $names[$modelstargetid]), 3);
+    echo html_writer::div(
+        get_string($modelsform !== null ? 'keys:models:intro' : 'keys:models:intro:fixed', 'local_airouter'),
+        'text-muted',
+    );
+    echo key_formatter::models($modelskey, $targets[$modelstargetid], $settings->allows_model_choice($modelstargetid));
+    if ($modelsform !== null) {
+        $modelsform->display();
+    }
+
+    echo $OUTPUT->heading(get_string('keys:models:test:heading', 'local_airouter'), 4);
+    echo html_writer::div(get_string('keys:models:test:intro', 'local_airouter'), 'text-muted');
+    if ($modeltest !== null) {
+        echo html_writer::table(key_formatter::model_test_table($modeltest));
+    }
+    echo $OUTPUT->single_button(
+        new moodle_url($url, ['action' => 'models', 'keyid' => (int) $modelskey->get('id'), 'runtest' => 1]),
+        get_string('keys:models:test:run', 'local_airouter'),
+        'post',
+    );
+    echo html_writer::div(html_writer::link($url, get_string('keys:models:back', 'local_airouter')), 'mt-3');
+    echo $OUTPUT->footer();
+    die;
+}
+
 if ($capform !== null) {
     echo $OUTPUT->heading(get_string('keys:cap:heading', 'local_airouter'), 3);
     // Said here as well as in the table, because this is where somebody decides the
@@ -393,7 +494,7 @@ if ($capform !== null) {
 }
 
 if ($keys) {
-    echo html_writer::table(key_formatter::table($keys, $names, $url, $ledger, $currencies, $allowed));
+    echo html_writer::table(key_formatter::table($keys, $names, $url, $ledger, $currencies, $allowed, $targets, $settings));
     if ($allowed) {
         echo html_writer::div(get_string('keys:testcost', 'local_airouter'), 'text-muted');
     }
@@ -417,6 +518,16 @@ if (!$targets) {
 
 echo $OUTPUT->heading(get_string('keys:add', 'local_airouter'), 3);
 if (array_diff_key($names, $keys)) {
+    // What a key registered here would be used with, said before it is registered: the
+    // person who registers it is the one who pays.
+    $preview = new html_table();
+    $preview->head = [get_string('keys:target', 'local_airouter'), get_string('keys:models', 'local_airouter')];
+    $preview->attributes['class'] = 'generaltable';
+    foreach (array_diff_key($targets, $keys) as $previewid => $instance) {
+        $preview->data[] = [$names[$previewid], key_formatter::models(null, $instance, false)];
+    }
+    echo html_writer::div(get_string('keys:models:before', 'local_airouter'), 'text-muted');
+    echo html_writer::table($preview);
     $form->display();
 } else {
     echo html_writer::div(get_string('keys:add:allheld', 'local_airouter'), 'text-muted');

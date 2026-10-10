@@ -454,5 +454,24 @@ function xmldb_local_airouter_upgrade(int $oldversion): bool {
         upgrade_plugin_savepoint(true, 2026092600, 'local', 'airouter');
     }
 
+    if ($oldversion < 2026101100) {
+        // The owner of a brought key may ask for another model than the site configured,
+        // where an administrator allows it at that provider. Off everywhere to begin
+        // with, which is how every site behaved before.
+        $table = new xmldb_table('local_airouter_target');
+        $field = new xmldb_field('modelchoice', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'byokmode');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $table = new xmldb_table('local_airouter_key');
+        $field = new xmldb_field('models', XMLDB_TYPE_TEXT, null, null, null, null, null, 'capdays');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026101100, 'local', 'airouter');
+    }
+
     return true;
 }

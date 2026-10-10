@@ -69,6 +69,7 @@
         <FIELD NAME="targetid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The ai_providers instance. Not a foreign key, so that deleting a provider instance in core cannot fail."/>
         <FIELD NAME="keyfield" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="Which of the instance config keys holds the key. Empty means the administrator has confirmed this provider takes no key at all, which is different from not having been asked yet. Declared without a default, because XMLDB refuses an empty string as one."/>
         <FIELD NAME="byokmode" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="allowed" SEQUENCE="false" COMMENT="Whether this site lets people bring a key to this provider: allowed, disallowed, or only, meaning the provider may be reached with a brought key and not with the site's own. Separate from keyfield, which says where a key goes and is a fact about the provider rather than a decision of the site's."/>
+        <FIELD NAME="modelchoice" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether the owner of a brought key may ask this provider for another model than the site configured, paying for it themselves. Off unless an administrator turns it on, because a model named by its owner is one the site never chose."/>
         <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
@@ -95,6 +96,7 @@
         <FIELD NAME="capamount" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="6" COMMENT="A limit the owner has set on their own spending at this key, in the site currency. Null means they have set none. Estimated from the site rate table, not from what the provider actually billed."/>
         <FIELD NAME="capperiod" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="month" SEQUENCE="false" COMMENT="How the limit is counted: a calendar month, or a rolling number of days."/>
         <FIELD NAME="capdays" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="30" SEQUENCE="false" COMMENT="How many days a rolling limit counts. Ignored for a calendar month."/>
+        <FIELD NAME="models" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="The models the owner asked for at this key, as JSON keyed by action class. An action left out uses the model the site configured. Only obeyed where the site lets owners choose the model at this provider."/>
         <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Who registered it. For a course key this is the only personal data in the row, and it is what a deletion request clears."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>

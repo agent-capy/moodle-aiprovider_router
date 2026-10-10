@@ -48,13 +48,19 @@ class byok_targets_form extends \moodleform {
 
             $field = 'keyfield_' . (int) $targetid;
             $mode = 'byokmode_' . (int) $targetid;
+            $choice = 'modelchoice_' . (int) $targetid;
             $group = [
                 $mform->createElement('select', $field, '', $options),
                 $mform->createElement('select', $mode, '', self::get_mode_options()),
+                // Whether a key's owner may ask this provider for another model. Beside
+                // the other two because it is the same kind of decision: what the site
+                // lets people who pay for themselves do here.
+                $mform->createElement('advcheckbox', $choice, '', get_string('byok:modelchoice', 'local_airouter')),
             ];
             $mform->addGroup($group, 'target_' . (int) $targetid, format_string($target->name), ' ', false);
             $mform->setType($field, PARAM_ALPHANUMEXT);
             $mform->setType($mode, PARAM_ALPHA);
+            $mform->setType($choice, PARAM_BOOL);
         }
 
         $this->add_action_buttons(false, get_string('savechanges'));

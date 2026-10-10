@@ -19,6 +19,9 @@ namespace local_airouter;
 defined('MOODLE_INTERNAL') || die();
 
 require_once(__DIR__ . '/fixtures/mock/provider.php');
+require_once(__DIR__ . '/fixtures/modelled/model.php');
+require_once(__DIR__ . '/fixtures/modelled/helper.php');
+require_once(__DIR__ . '/fixtures/modelled/provider.php');
 
 /**
  * Tests for putting somebody's key into the provider instance it is for.
@@ -191,5 +194,82 @@ final class key_injector_test extends \advanced_testcase {
         // The course and the user happen to share an id, which must not confuse them.
         $this->assertTrue($injection->is_usable());
         $this->assertSame('the-course-key', $injection->target->config['apikey']);
+    }
+
+    /**
+     * The fixture provider that lists its models, using alpha for both of its text actions.
+     *
+     * @return \aiprovider_modelled\provider The instance.
+     */
+    protected function modelled(): \aiprovider_modelled\provider {
+        return new \aiprovider_modelled\provider(
+            enabled: true,
+            name: 'Modelled',
+            config: json_encode(['apikey' => 'the-site-key']),
+            actionconfig: json_encode([
+                \core_ai\aiactions\generate_text::class => ['enabled' => true, 'settings' => ['model' => 'alpha']],
+                \core_ai\aiactions\summarise_text::class => ['enabled' => true, 'settings' => ['model' => 'alpha']],
+            ]),
+            id: 4,
+        );
+    }
+
+    /**
+     * A key at the fixture provider that asks for beta when generating text.
+     *
+     * @param string $model The model asked for.
+     * @return key The key.
+     */
+    protected function key_asking_for(string $model): key {
+        global $DB;
+        $this->settings->set_key_field(4, 'apikey');
+        $key = $this->keys->save(key::SCOPE_USER, 7, 4, 'the-users-own-key');
+        (new key_repository($DB))->set_models($key, [\core_ai\aiactions\generate_text::class => $model]);
+
+        return $key;
+    }
+
+    public function test_the_model_the_owner_chose_is_asked_for_where_the_site_allows_it(): void {
+        $key = $this->key_asking_for('beta');
+        $this->settings->set_model_choice(4, true);
+        $target = $this->modelled();
+
+        $generating = $this->injector->inject($target, $key, \core_ai\aiactions\generate_text::class);
+        $summarising = $this->injector->inject($target, $key, \core_ai\aiactions\summarise_text::class);
+        $untold = $this->injector->inject($target, $key);
+
+        $this->assertSame('beta', $generating->target->actionconfig[\core_ai\aiactions\generate_text::class]['settings']['model']);
+        // Chosen for one action only; the other keeps the site's.
+        $summarised = $summarising->target->actionconfig[\core_ai\aiactions\summarise_text::class]['settings'];
+        $this->assertSame('alpha', $summarised['model']);
+        // Asked without an action, as the key test does, the site's model is used.
+        $this->assertSame('alpha', $untold->target->actionconfig[\core_ai\aiactions\generate_text::class]['settings']['model']);
+        // And the key goes in either way.
+        $this->assertSame('the-users-own-key', $generating->target->config['apikey']);
+    }
+
+    public function test_a_chosen_model_is_not_used_where_the_site_does_not_allow_choosing(): void {
+        $key = $this->key_asking_for('beta');
+
+        $injection = $this->injector->inject($this->modelled(), $key, \core_ai\aiactions\generate_text::class);
+
+        // Off unless an administrator turns it on, and the key is used all the same.
+        $this->assertTrue($injection->is_usable());
+        $this->assertSame('alpha', $injection->target->actionconfig[\core_ai\aiactions\generate_text::class]['settings']['model']);
+    }
+
+    public function test_a_chosen_name_that_cannot_be_a_model_name_is_not_sent(): void {
+        global $DB;
+        $key = $this->key_asking_for('beta');
+        $this->settings->set_model_choice(4, true);
+        // Written past the form, as a row might be by anything else.
+        $DB->set_field(key::TABLE, 'models', json_encode([\core_ai\aiactions\generate_text::class => 'two words']), [
+            'id' => (int) $key->get('id'),
+        ]);
+        $key = $this->keys->get((int) $key->get('id'));
+
+        $injection = $this->injector->inject($this->modelled(), $key, \core_ai\aiactions\generate_text::class);
+
+        $this->assertSame('alpha', $injection->target->actionconfig[\core_ai\aiactions\generate_text::class]['settings']['model']);
     }
 }

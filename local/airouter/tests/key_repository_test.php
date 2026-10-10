@@ -788,4 +788,49 @@ final class key_repository_test extends \advanced_testcase {
             $other->dispose();
         }
     }
+
+    public function test_the_models_asked_for_are_kept_and_a_blank_one_means_the_sites(): void {
+        global $DB;
+        $repository = new key_repository($DB);
+        $key = $repository->save(key::SCOPE_USER, 7, 3, 'the-users-own-key');
+
+        $repository->set_models($key, [
+            '\\core_ai\\aiactions\\generate_text' => ' beta ',
+            'core_ai\\aiactions\\summarise_text' => '',
+        ]);
+
+        $stored = $repository->get((int) $key->get('id'));
+        $this->assertSame(['core_ai\\aiactions\\generate_text' => 'beta'], $stored->get_chosen_models());
+        $this->assertSame('beta', $stored->get_chosen_model('core_ai\\aiactions\\generate_text'));
+        $this->assertNull($stored->get_chosen_model('core_ai\\aiactions\\summarise_text'));
+
+        $repository->set_models($stored, []);
+        $this->assertNull($DB->get_field(key::TABLE, 'models', ['id' => (int) $key->get('id')]));
+    }
+
+    public function test_the_models_asked_for_stay_when_the_key_is_replaced(): void {
+        global $DB;
+        $repository = new key_repository($DB);
+        $key = $repository->save(key::SCOPE_USER, 7, 3, 'the-users-own-key');
+        $repository->set_models($key, ['core_ai\\aiactions\\generate_text' => 'beta']);
+
+        $repository->replace($repository->get((int) $key->get('id')), 'a-new-key-for-the-same-account', true);
+
+        // The choice belongs to the key's place, not to the account behind it.
+        $this->assertSame('beta', $repository->get((int) $key->get('id'))->get_chosen_model('core_ai\\aiactions\\generate_text'));
+    }
+
+    public function test_the_column_can_be_read_through_the_persistent(): void {
+        global $DB;
+        $repository = new key_repository($DB);
+        $key = $repository->save(key::SCOPE_USER, 7, 3, 'the-users-own-key');
+        $repository->set_models($key, ['core_ai\\aiactions\\generate_text' => 'beta']);
+
+        // A persistent's get() calls a getter named after the column where one exists.
+        // One did, and called get() back, until the memory ran out.
+        $this->assertSame(
+            '{"core_ai\\\\aiactions\\\\generate_text":"beta"}',
+            $repository->get((int) $key->get('id'))->get('models'),
+        );
+    }
 }

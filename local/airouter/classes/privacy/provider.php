@@ -119,6 +119,7 @@ class provider implements
                 'secret' => 'privacy:metadata:key:secret',
                 'hint' => 'privacy:metadata:key:hint',
                 'capamount' => 'privacy:metadata:key:capamount',
+                'models' => 'privacy:metadata:key:models',
                 'usermodified' => 'privacy:metadata:key:usermodified',
                 'timecreated' => 'privacy:metadata:key:timecreated',
             ],
@@ -529,6 +530,8 @@ class provider implements
             'timemodified' => transform::datetime($record->timemodified),
             'lasttested' => $record->timeverified ? transform::datetime($record->timeverified) : null,
             'lastresult' => $record->verifystatus,
+            // The models the owner asked for, which are theirs like the key.
+            'models' => json_decode((string) ($record->models ?? ''), true) ?: null,
         ];
     }
 

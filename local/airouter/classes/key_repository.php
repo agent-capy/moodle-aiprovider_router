@@ -375,6 +375,39 @@ class key_repository {
     }
 
     /**
+     * Record which models the owner wants at this key, action by action.
+     *
+     * Only the models column is written, so that a key replaced or limited in the
+     * meantime keeps its new secret and its new limit. The choice belongs to the key's
+     * place rather than to the account behind it, so it survives the key being replaced.
+     *
+     * @param key $record The key.
+     * @param string[] $models Model names keyed by action class; an empty name, or an
+     *                         action left out, means the site's model.
+     */
+    public function set_models(key $record, array $models): void {
+        global $USER;
+
+        $clean = [];
+        foreach ($models as $action => $model) {
+            $model = trim((string) $model);
+            if ($model !== '') {
+                $clean[ltrim((string) $action, '\\')] = $model;
+            }
+        }
+        ksort($clean);
+        $stored = $clean === [] ? null : json_encode($clean);
+
+        $this->db->update_record(key::TABLE, (object) [
+            'id' => (int) $record->get('id'),
+            'models' => $stored,
+            'usermodified' => (int) $USER->id,
+            'timemodified' => time(),
+        ]);
+        $record->set('models', $stored);
+    }
+
+    /**
      * Whether a key somebody has typed is the one held.
      *
      * Compared in the clear rather than by hash, so that it holds for a key stored

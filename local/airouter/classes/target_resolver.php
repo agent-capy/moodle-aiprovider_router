@@ -388,7 +388,7 @@ class target_resolver {
             return null;
         }
 
-        $injection = $this->get_injector()->for_subject($target, $scope, $scopeid);
+        $injection = $this->get_injector()->for_subject($target, $scope, $scopeid, $action::class);
         if ($injection->status === key_status::UNREADABLE) {
             $this->unreadable = $injection->key;
             $this->matchedrule = $rule;
@@ -470,7 +470,7 @@ class target_resolver {
             if ((int) $targetid === $named || $instance === null || !$this->is_usable($instance, $action, true)) {
                 continue;
             }
-            $injection = $this->get_injector()->inject($instance, $key);
+            $injection = $this->get_injector()->inject($instance, $key, $action::class);
             if ($injection->is_usable() && !$this->is_spent($injection->key)) {
                 $candidates[] = new candidate($injection->target, $scope, $key);
             }

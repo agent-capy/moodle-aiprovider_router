@@ -100,7 +100,11 @@ final class upgrade_test extends \advanced_testcase {
         $this->assertFalse($DB->record_exists('ai_providers', ['id' => $router]));
         $this->assertTrue($DB->record_exists('ai_providers', ['id' => $other]));
         $this->assertSame(",{$other}", get_config('core_ai', 'provider_order'));
-        $this->assertSame('2026092600', get_config('local_airouter', 'version'));
+        // Every later step ran too, so the version is the one on disk.
+        $this->assertSame(
+            (string) \core_plugin_manager::instance()->get_plugin_info('local_airouter')->versiondisk,
+            get_config('local_airouter', 'version'),
+        );
     }
 
     public function test_a_router_without_a_default_target_leaves_none_behind(): void {

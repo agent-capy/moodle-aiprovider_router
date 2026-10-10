@@ -198,7 +198,9 @@ final class key_formatter_test extends \advanced_testcase {
             false,
         );
 
-        $this->assertStringNotContainsString('action=test', $table->data[0][4]);
-        $this->assertStringContainsString('action=delete', $table->data[0][4]);
+        // The actions are the last column, whatever comes before them.
+        $actions = end($table->data[0]);
+        $this->assertStringNotContainsString('action=test', $actions);
+        $this->assertStringContainsString('action=delete', $actions);
     }
 }

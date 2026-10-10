@@ -230,6 +230,52 @@ class target_settings {
     }
 
     /**
+     * Whether the owner of a brought key may ask this target for another model.
+     *
+     * Off unless an administrator has turned it on. A model chosen by its owner is one
+     * the site never chose, and possibly one the site would not have chosen, so the
+     * default is the behaviour every site had before owners could choose.
+     *
+     * @param int $targetid The provider instance.
+     * @return bool True when owners may choose the model here.
+     */
+    public function allows_model_choice(int $targetid): bool {
+        $record = $this->row($targetid);
+
+        return $record !== null && !empty($record->modelchoice);
+    }
+
+    /**
+     * Allow or refuse owners choosing the model at a target.
+     *
+     * Only recorded for a target somebody has already answered for. Writing a row for
+     * one that has none would also record that it takes no key, which nobody said.
+     *
+     * @param int $targetid The provider instance.
+     * @param bool $allowed Whether owners may choose.
+     */
+    public function set_model_choice(int $targetid, bool $allowed): void {
+        if (!$this->db->record_exists(self::TABLE, ['targetid' => $targetid])) {
+            return;
+        }
+        $this->write($targetid, ['modelchoice' => $allowed ? 1 : 0]);
+    }
+
+    /**
+     * Which targets let owners choose the model.
+     *
+     * @return bool[] Keyed by target id; a target that is not here does not.
+     */
+    public function get_all_model_choices(): array {
+        $choices = [];
+        foreach ($this->db->get_records(self::TABLE) as $record) {
+            $choices[(int) $record->targetid] = !empty($record->modelchoice);
+        }
+
+        return $choices;
+    }
+
+    /**
      * The targets a brought key would actually be used at.
      *
      * @return int[] The target ids.

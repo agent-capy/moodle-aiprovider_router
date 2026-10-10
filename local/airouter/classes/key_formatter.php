@@ -41,6 +41,10 @@ class key_formatter {
      *                          target id; null where the provider has no rates yet.
      * @param bool $mayuse Whether the owner may still use these keys, as opposed to
      *                     only remove them.
+     * @param \core_ai\provider[] $instances The provider instances, keyed by id, so that
+     *                                     the models each key is used with can be said.
+     * @param target_settings|null $settings The target settings, for whether owners may
+     *                                       choose the model.
      * @return \html_table The table.
      */
     public static function table(
@@ -50,10 +54,13 @@ class key_formatter {
         ?ledger $ledger = null,
         array $currencies = [],
         bool $mayuse = true,
+        array $instances = [],
+        ?target_settings $settings = null,
     ): \html_table {
         $table = new \html_table();
         $table->head = [
             get_string('keys:target', 'local_airouter'),
+            get_string('keys:models', 'local_airouter'),
             get_string('keys:hint', 'local_airouter'),
             get_string('keys:tested', 'local_airouter'),
             get_string('keys:cap', 'local_airouter'),
@@ -62,8 +69,12 @@ class key_formatter {
         $table->attributes['class'] = 'admintable generaltable';
 
         foreach ($keys as $targetid => $key) {
+            $instance = $instances[$targetid] ?? null;
             $table->data[] = [
                 $targets[$targetid] ?? get_string('keys:target:gone', 'local_airouter', $targetid),
+                $instance === null
+                    ? ''
+                    : self::models($key, $instance, (bool) $settings?->allows_model_choice((int) $targetid)),
                 self::hint($key),
                 self::tested($key),
                 self::cap($key, $ledger, $currencies[$targetid] ?? null),
@@ -214,6 +225,106 @@ class key_formatter {
     }
 
     /**
+     * The model a key is used with in each action it can be used for.
+     *
+     * Said for every action, because the model can differ from one action to another
+     * and the owner pays for each of them. A model the owner chose is marked as theirs;
+     * one they chose that is not being used, because the site no longer lets owners
+     * choose here, is said too, rather than silently replaced by the site's.
+     *
+     * @param key|null $key The key, or null for a provider no key is held for yet.
+     * @param \core_ai\provider $instance The instance the key is for.
+     * @param bool $choosable Whether the site lets owners choose the model here.
+     * @return string HTML.
+     */
+    public static function models(?key $key, \core_ai\provider $instance, bool $choosable): string {
+        $catalog = new model_catalog();
+        $lines = [];
+        foreach ($catalog->get_actions($instance) as $actionclass) {
+            $site = $catalog->get_site_model($instance, $actionclass);
+            $chosen = $key?->get_chosen_model($actionclass);
+            $label = managed_policy::label_for($actionclass);
+            if ($chosen !== null && $choosable && $catalog->can_choose($instance, $actionclass)) {
+                $text = get_string('keys:models:chosen', 'local_airouter', ['action' => $label, 'model' => s($chosen)]);
+            } else if ($site === null) {
+                $text = get_string('keys:models:unknown', 'local_airouter', $label);
+            } else {
+                $text = get_string('keys:models:site', 'local_airouter', ['action' => $label, 'model' => s($site)]);
+                if ($chosen !== null) {
+                    $text .= ' ' . get_string('keys:models:notused', 'local_airouter', s($chosen));
+                }
+            }
+            $lines[] = \html_writer::tag('li', $text);
+        }
+        if (!$lines) {
+            return \html_writer::span(get_string('keys:models:none', 'local_airouter'), 'text-muted');
+        }
+
+        return \html_writer::tag('ul', implode('', $lines), ['class' => 'list-unstyled mb-0']);
+    }
+
+    /**
+     * What a test of a key's models found, action by action.
+     *
+     * The provider's own words are shown when something failed: they are about the
+     * owner's key and the owner's choice of model, and they are what the owner needs to
+     * put it right. The key itself has been taken out of them before they get here.
+     *
+     * @param array[] $results What key_tester::test_models() returned.
+     * @return \html_table The table.
+     */
+    public static function model_test_table(array $results): \html_table {
+        $table = new \html_table();
+        $table->head = [
+            get_string('keys:models:test:action', 'local_airouter'),
+            get_string('keys:models:test:asked', 'local_airouter'),
+            get_string('keys:models:test:result', 'local_airouter'),
+            get_string('keys:models:test:answered', 'local_airouter'),
+        ];
+        $table->attributes['class'] = 'generaltable';
+        foreach ($results as $actionclass => $result) {
+            $status = get_string('keys:models:test:' . $result['status'], 'local_airouter');
+            $code = (int) ($result['code'] ?? 0);
+            if ($code > 0) {
+                // Core's providers replace what the provider said with a general message,
+                // so the status code is often the only clue. What it usually means is
+                // said beside it, as a hint rather than a diagnosis.
+                $status .= ' (' . $code . ')';
+                $hint = self::hint_for_code($code);
+                if ($hint !== null) {
+                    $status .= \html_writer::div($hint, 'small');
+                }
+            }
+            if ((string) $result['error'] !== '') {
+                $status .= \html_writer::div(s((string) $result['error']), 'small text-muted');
+            }
+            $table->data[] = [
+                managed_policy::label_for($actionclass),
+                s((string) ($result['model'] ?? '-')),
+                $status,
+                s((string) ($result['answered'] ?? '-')),
+            ];
+        }
+
+        return $table;
+    }
+
+    /**
+     * What a provider's status code usually means when a model is tried.
+     *
+     * @param int $code The status code.
+     * @return string|null The hint, or null when there is nothing useful to say.
+     */
+    protected static function hint_for_code(int $code): ?string {
+        $known = [400, 404, 429];
+        if (in_array($code, $known, true)) {
+            return get_string('keys:models:test:hint:' . $code, 'local_airouter');
+        }
+
+        return $code >= 500 ? get_string('keys:models:test:hint:5xx', 'local_airouter') : null;
+    }
+
+    /**
      * What can be done with a key once it is stored.
      *
      * Replacing it, testing it, setting a limit on it, and removing it.
@@ -243,6 +354,12 @@ class key_formatter {
             $links[] = \html_writer::link(
                 new \moodle_url($url, ['action' => 'cap', 'keyid' => $id]),
                 get_string('keys:cap:set', 'local_airouter'),
+            );
+            // Seeing which models the key is used with, choosing others where the site
+            // allows it, and trying them.
+            $links[] = \html_writer::link(
+                new \moodle_url($url, ['action' => 'models', 'keyid' => $id]),
+                get_string('keys:models:manage', 'local_airouter'),
             );
         }
         // Always offered. A key is a secret its owner handed over, and taking it back

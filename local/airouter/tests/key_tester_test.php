@@ -142,4 +142,56 @@ final class key_tester_test extends \advanced_testcase {
         // Asking would have used the site's own key and reported that as a success.
         $this->assertSame(key::VERIFY_FAILED, $result);
     }
+
+    public function test_the_models_are_tried_action_by_action(): void {
+        managed_policy::set_managed_actions([
+            \core_ai\aiactions\generate_text::class,
+            \core_ai\aiactions\summarise_text::class,
+            \core_ai\aiactions\generate_image::class,
+        ]);
+        $target = new \aiprovider_mock\provider(
+            enabled: true,
+            name: 'Mock',
+            config: json_encode(['scenario' => \aiprovider_mock\provider::SUCCESS, 'apikey' => 'site']),
+            actionconfig: json_encode([
+                \core_ai\aiactions\generate_text::class => ['enabled' => true, 'settings' => ['model' => 'm1']],
+                \core_ai\aiactions\summarise_text::class => ['enabled' => true, 'settings' => ['model' => 'm1']],
+                \core_ai\aiactions\generate_image::class => ['enabled' => true, 'settings' => ['model' => 'img']],
+            ]),
+            id: 3,
+        );
+        $key = $this->keys->save(key::SCOPE_USER, 7, 3, 'the-users-own-key');
+
+        $results = $this->tester->test_models($target, $key, (int) \context_system::instance()->id, 7);
+
+        $this->assertSame(key_tester::MODEL_OK, $results[\core_ai\aiactions\generate_text::class]['status']);
+        $this->assertSame('m1', $results[\core_ai\aiactions\generate_text::class]['model']);
+        $this->assertSame(key_tester::MODEL_OK, $results[\core_ai\aiactions\summarise_text::class]['status']);
+        // Images cost far more than a test should.
+        $this->assertSame(key_tester::MODEL_SKIPPED, $results[\core_ai\aiactions\generate_image::class]['status']);
+        // Nothing recorded against the key: a test is not a use.
+        $this->assertSame(0, (int) $this->keys->get((int) $key->get('id'))->get('timeverified'));
+    }
+
+    public function test_a_model_that_fails_says_what_the_provider_said(): void {
+        managed_policy::set_managed_actions([\core_ai\aiactions\generate_text::class]);
+        $target = new \aiprovider_mock\provider(
+            enabled: true,
+            name: 'Mock',
+            config: json_encode(['scenario' => \aiprovider_mock\provider::FAILURE, 'errorcode' => 404, 'apikey' => 'site']),
+            actionconfig: json_encode([
+                \core_ai\aiactions\generate_text::class => ['enabled' => true, 'settings' => ['model' => 'm1']],
+            ]),
+            id: 3,
+        );
+        $key = $this->keys->save(key::SCOPE_USER, 7, 3, 'the-users-own-key');
+
+        $results = $this->tester->test_models($target, $key, (int) \context_system::instance()->id, 7);
+        $result = $results[\core_ai\aiactions\generate_text::class];
+
+        $this->assertSame(key_tester::MODEL_FAILED, $result['status']);
+        $this->assertSame(404, $result['code']);
+        // The owner's key never appears in what they are shown.
+        $this->assertStringNotContainsString('the-users-own-key', $result['error']);
+    }
 }

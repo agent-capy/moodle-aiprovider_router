@@ -111,6 +111,13 @@ class key extends \core\persistent {
                 'type' => PARAM_INT,
                 'default' => 30,
             ],
+            // The models the owner asked for, as JSON keyed by action class. Theirs to
+            // choose, like the limit, and obeyed only where the site allows choosing.
+            'models' => [
+                'type' => PARAM_RAW,
+                'null' => NULL_ALLOWED,
+                'default' => null,
+            ],
         ];
     }
 
@@ -162,6 +169,43 @@ class key extends \core\persistent {
      */
     public function get_cap_days(): int {
         return max(1, (int) $this->get('capdays'));
+    }
+
+    /**
+     * The models the owner asked for, keyed by action class.
+     *
+     * An action that is not here uses the model the site configured. What is stored is
+     * returned as it is, whether or not the site still lets the owner choose: whether a
+     * choice is obeyed is decided where the key is used.
+     *
+     * @return string[] Model names keyed by action class, without a leading separator.
+     */
+    public function get_chosen_models(): array {
+        // Read raw. A persistent's get() calls get_<property>() where one exists, so a
+        // getter named after the column would end up calling itself.
+        $decoded = json_decode((string) $this->raw_get('models'), true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $models = [];
+        foreach ($decoded as $action => $model) {
+            if (is_string($action) && is_string($model) && $model !== '') {
+                $models[ltrim($action, '\\')] = $model;
+            }
+        }
+
+        return $models;
+    }
+
+    /**
+     * The model the owner asked for in one action, if they asked for one.
+     *
+     * @param string $actionclass The action class.
+     * @return string|null The model, or null to use the site's.
+     */
+    public function get_chosen_model(string $actionclass): ?string {
+        return $this->get_chosen_models()[ltrim($actionclass, '\\')] ?? null;
     }
 
     /**
