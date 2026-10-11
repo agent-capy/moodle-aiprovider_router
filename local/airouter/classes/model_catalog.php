@@ -55,8 +55,14 @@ class model_catalog {
     /** @var string What a model's name may be made of when somebody types it. */
     protected const NAME_PATTERN = '~^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,99}$~';
 
+    /** @var string[] Settings that describe the action, never a model's, whatever a form calls its fields. */
+    protected const ACTION_SETTINGS = ['model', 'systeminstruction', 'endpoint', 'providerid', 'deployment', 'apiversion'];
+
     /** @var array[] The models each provider lists, keyed by component, once read. */
     protected array $lists = [];
+
+    /** @var string[][] The setting names of each provider's models, keyed by component and model. */
+    protected static array $settingnames = [];
 
     /**
      * The model the site configured for an action at this instance.
@@ -139,9 +145,10 @@ class model_catalog {
      * The settings the site tuned for its own model go: a temperature or a token limit
      * chosen for one model can be refused by another, and the provider's own defaults
      * for the model asked for are the safer guess. Where the administrator saved
-     * settings for the model asked for, which the providers' settings pages keep while
-     * switching between models, those are used instead. Everything else the site
-     * configured, the system instruction among it, stays.
+     * settings for the model asked for, those are used instead. Core keeps them beside
+     * the action's settings rather than inside them, in actionconfig[action]
+     * ['modelsettings'][model], from Moodle 5.1 on; 5.0 keeps none. Everything else the
+     * site configured, the system instruction among it, stays.
      *
      * @param ai_provider $target The provider instance, already carrying the key.
      * @param string $actionclass The action class.
@@ -160,7 +167,7 @@ class model_catalog {
             unset($settings[$name]);
         }
         unset($settings['modelextraparams']);
-        $saved = $settings['modelsettings'][$model] ?? null;
+        $saved = $target->actionconfig[$actionclass]['modelsettings'][$model] ?? null;
         if (is_array($saved)) {
             foreach ($saved as $name => $value) {
                 $settings[$name] = $value;
@@ -285,24 +292,69 @@ class model_catalog {
     /**
      * The names of the settings a provider keeps for one of its models.
      *
+     * Asked the two ways providers say it. Newer model classes list their settings in
+     * get_model_settings(). Older ones, Moodle 5.0's own among them and the providers
+     * built like it, only add the fields to the settings form in add_model_settings(),
+     * and get_model_settings() is missing or answers with nothing. Those fields are the
+     * settings, so the form is built once, off screen, and its field names read. The
+     * names that describe the action rather than the model are never counted, so that
+     * the system instruction or an endpoint cannot be taken for a model's setting.
+     *
      * @param ai_provider $target The provider instance.
      * @param string $model The model.
      * @return string[] Setting names; empty for a model the provider does not list.
      */
     protected function get_setting_names(ai_provider $target, string $model): array {
         $component = \core\component::get_component_from_classname($target::class) ?? strtok($target::class, '\\');
+        $cachekey = $component . '/' . $model;
+        if (array_key_exists($cachekey, self::$settingnames)) {
+            return self::$settingnames[$cachekey];
+        }
+
+        $names = [];
         $helper = $component . '\\helper';
         try {
             $class = class_exists($helper) && method_exists($helper, 'get_model_class')
                 ? $helper::get_model_class($model)
                 : null;
-            if (is_object($class) && method_exists($class, 'get_model_settings')) {
-                return array_map('strval', array_keys((array) $class->get_model_settings()));
+            if (is_object($class)) {
+                if (method_exists($class, 'get_model_settings')) {
+                    $names = array_map('strval', array_keys((array) $class->get_model_settings()));
+                }
+                if (method_exists($class, 'add_model_settings')) {
+                    $names = array_merge($names, self::get_form_names($class));
+                }
             }
         } catch (\Throwable $e) {
             debugging('local_airouter: the settings of ' . $model . ' could not be read: ' . get_class($e), DEBUG_DEVELOPER);
         }
+        $names = array_values(array_diff(array_unique($names), self::ACTION_SETTINGS, ['']));
 
-        return [];
+        return self::$settingnames[$cachekey] = $names;
+    }
+
+    /**
+     * The names of the fields a model adds to its provider's settings form.
+     *
+     * @param object $model The model.
+     * @return string[] Field names, those inside groups included.
+     */
+    protected static function get_form_names(object $model): array {
+        global $CFG;
+        require_once($CFG->libdir . '/formslib.php');
+
+        $mform = new \MoodleQuickForm('local_airouter_model_settings', 'post', '');
+        $model->add_model_settings($mform);
+        $names = [];
+        foreach ($mform->_elements as $element) {
+            $names[] = (string) $element->getName();
+            if ($element instanceof \HTML_QuickForm_group) {
+                foreach ($element->getElements() as $child) {
+                    $names[] = (string) $child->getName();
+                }
+            }
+        }
+
+        return $names;
     }
 }

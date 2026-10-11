@@ -666,6 +666,7 @@ $string['setup:placements:noaction'] = '有効ですが、ルータが扱える�
 $string['setup:placements:none'] = 'AI プレースメントが1つも有効でないため、誰にも AI のボタンは出ません。';
 $string['setup:placements:permissions'] = '誰にボタンが出るかは、各コースでの各人の権限にもよるため、サイトの設定からは分かりません。1人・1か所についてはルールのテストが確かめます。';
 $string['setup:providers:carries'] = '{$a} を扱えます。';
+$string['setup:providers:carries:brought'] = '持ち込みキーでのみ: {$a}。ここではサイトのキーは使われません。';
 $string['setup:providers:noaction'] = '有効で設定済みですが、ルータが扱えるアクションが1つも有効になっていません。';
 $string['setup:purpose:budget'] = '予算の中で使う';
 $string['setup:purpose:byokcourse'] = 'コースが自分のキーで払う';

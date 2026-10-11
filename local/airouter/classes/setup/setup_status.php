@@ -172,24 +172,38 @@ class setup_status {
         $history = (new target_history($this->db))->get_last($this->now);
         $lines = [];
         $usable = 0;
+        $labels = static fn(array $actions): string => implode(', ', array_map(
+            static fn(string $action): string => managed_policy::label_for($action),
+            $actions,
+        ));
         foreach ($names as $id => $name) {
-            $problems = [];
+            // Asked twice, because who pays changes the answer: a provider kept for
+            // brought keys refuses the site's own key and carries the same actions
+            // for somebody paying with theirs. Counting only the first would call a
+            // working setup unfinished.
+            $carries = [];
+            $broughtonly = [];
             foreach (managed_policy::declared_actions() as $action) {
-                $problems[$action] = $resolver->get_target_problem($id, $action);
+                if ($resolver->get_target_problem($id, $action) === null) {
+                    $carries[] = $action;
+                } else if ($resolver->get_target_problem($id, $action, true) === null) {
+                    $broughtonly[] = $action;
+                }
             }
-            $carries = array_keys(array_filter($problems, static fn(?string $problem): bool => $problem === null));
             $instanceproblem = $resolver->get_instance_problem($id);
-            if ($carries !== []) {
+            if ($carries !== [] || $broughtonly !== []) {
                 $usable++;
+            }
+            $parts = [];
+            if ($carries !== []) {
+                $parts[] = get_string('setup:providers:carries', 'local_airouter', $labels($carries));
+            }
+            if ($broughtonly !== []) {
+                $parts[] = get_string('setup:providers:carries:brought', 'local_airouter', $labels($broughtonly));
             }
             $state = $instanceproblem !== null
                 ? s(target_resolver::describe_problem($instanceproblem, self::ANY_ACTION))
-                : ($carries === []
-                    ? get_string('setup:providers:noaction', 'local_airouter')
-                    : get_string('setup:providers:carries', 'local_airouter', implode(', ', array_map(
-                        static fn(string $action): string => managed_policy::label_for($action),
-                        $carries,
-                    ))));
+                : ($parts === [] ? get_string('setup:providers:noaction', 'local_airouter') : implode(' ', $parts));
             $lines[] = \html_writer::tag('strong', s($name)) . ': ' . $state . ' '
                 . target_history::describe($history[$id] ?? null);
         }

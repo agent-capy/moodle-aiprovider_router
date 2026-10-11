@@ -666,6 +666,7 @@ $string['setup:placements:noaction'] = 'switched on, but offering none of the ac
 $string['setup:placements:none'] = 'No AI placement is switched on, so nobody is offered an AI button.';
 $string['setup:placements:permissions'] = 'Who is offered a button also depends on each person\'s capabilities in each course, which a site setting cannot tell. The rule tester checks it for one person and one place.';
 $string['setup:providers:carries'] = 'can carry {$a}.';
+$string['setup:providers:carries:brought'] = 'Only with a brought key: {$a}. The site\'s own key is not used here.';
 $string['setup:providers:noaction'] = 'switched on and set up, but no action the router can carry is switched on for it.';
 $string['setup:purpose:budget'] = 'Keep spending within budgets';
 $string['setup:purpose:byokcourse'] = 'A course pays with its own key';

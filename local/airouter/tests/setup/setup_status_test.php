@@ -305,4 +305,32 @@ final class setup_status_test extends \advanced_testcase {
             }
         }
     }
+
+    public function test_a_provider_kept_for_brought_keys_is_ready_when_it_carries_them(): void {
+        global $DB;
+        $target = \core\di::get(manager::class)->create_provider_instance(
+            classname: \aiprovider_mock\provider::class,
+            name: 'Paid by its users',
+            enabled: true,
+            config: ['scenario' => \aiprovider_mock\provider::SUCCESS, 'apikey' => 'not-the-sites'],
+            actionconfig: [generate_text::class => ['enabled' => true]],
+        );
+        $settings = new target_settings($DB);
+        $settings->set_key_field((int) $target->id, 'apikey');
+        $settings->set_mode((int) $target->id, target_settings::MODE_ONLY);
+        managed_policy::set_managed_actions([generate_text::class]);
+
+        $steps = $this->steps(setup_status::PURPOSE_ROUTE);
+
+        // Review R13-03: it refuses the site's key and carries the same action for
+        // somebody paying with their own, which is what a site without an AI budget
+        // sets up. That is a finished step, and it says who pays.
+        $this->assertSame(setup_step::DONE, $steps['providers']->status);
+        $text = implode(' ', $steps['providers']->lines);
+        $this->assertStringContainsString(
+            get_string('setup:providers:carries:brought', 'local_airouter', managed_policy::label_for(generate_text::class)),
+            $text,
+        );
+        $this->assertStringNotContainsString(get_string('setup:providers:noaction', 'local_airouter'), $text);
+    }
 }
