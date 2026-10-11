@@ -2,7 +2,7 @@ name: Moodle plugin CI
 
 on:
   push:
-    branches: [poc1, poc2]
+    branches: [poc1, poc2, development]
   pull_request:
 
 jobs:
